@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}工具中心 · Django Tools{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-6xl">
+  <div class="mb-10"><p class="text-sm font-medium text-indigo-400">WORKSPACE</p><h1 class="mt-2 text-3xl font-semibold">工具中心</h1><p class="mt-2 text-slate-400">选择一个工具开始处理工作，后续工具会持续加入。</p></div>
+  <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+    {% for tool in tools %}
+    <a href="{% if tool.url == '#' %}#{% else %}{% url tool.url %}{% endif %}" class="group rounded-2xl border border-slate-800 bg-slate-900 p-6 transition hover:-translate-y-1 hover:border-indigo-500/50">
+      <div class="flex items-start justify-between"><span class="grid h-12 w-12 place-items-center rounded-xl bg-slate-800 text-xl">⌘</span><span class="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">{{ tool.status }}</span></div>
+      <h2 class="mt-6 text-lg font-semibold group-hover:text-indigo-300">{{ tool.name }}</h2><p class="mt-2 text-sm leading-6 text-slate-400">{{ tool.description }}</p>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
