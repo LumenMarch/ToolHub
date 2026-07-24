@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}登录 · Django Tools{% endblock %}
+{% block content %}
+<div class="mx-auto flex min-h-[80vh] max-w-md items-center">
+  <div class="w-full rounded-3xl border border-slate-800 bg-slate-900 p-8 shadow-2xl">
+    <div class="mb-8"><span class="grid h-12 w-12 place-items-center rounded-2xl bg-indigo-500 font-bold">DT</span><h1 class="mt-5 text-3xl font-semibold">欢迎回来</h1><p class="mt-2 text-slate-400">登录后使用公司内部工具</p></div>
+    {% if form.errors %}<p class="mb-4 rounded-lg bg-rose-500/10 p-3 text-sm text-rose-300">用户名或密码不正确</p>{% endif %}
+    <form method="post" class="space-y-5">{% csrf_token %}
+      <div><label class="mb-2 block text-sm">用户名</label><input name="username" autofocus required class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-indigo-500"></div>
+      <div><label class="mb-2 block text-sm">密码</label><input type="password" name="password" required class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-indigo-500"></div>
+      <button class="w-full rounded-xl bg-indigo-500 px-4 py-3 font-medium hover:bg-indigo-400">登录</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
