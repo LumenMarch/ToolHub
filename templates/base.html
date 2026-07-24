@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Django Tools{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <div class="min-h-screen lg:grid lg:grid-cols-[260px_1fr]">
+    {% if user.is_authenticated %}
+    <aside class="border-r border-slate-800 bg-slate-900/80 p-6">
+      <a href="{% url 'dashboard' %}" class="flex items-center gap-3 text-lg font-semibold">
+        <span class="grid h-10 w-10 place-items-center rounded-xl bg-indigo-500">DT</span>
+        Django Tools
+      </a>
+      <nav class="mt-10 space-y-2 text-sm">
+        <a class="block rounded-lg bg-slate-800 px-4 py-3" href="{% url 'dashboard' %}">工具中心</a>
+        <a class="block rounded-lg px-4 py-3 text-slate-400 hover:bg-slate-800" href="{% url 'csv_compare' %}">CSV 数据对比</a>
+        {% if user.is_staff %}<a class="block rounded-lg px-4 py-3 text-slate-400 hover:bg-slate-800" href="/admin/">管理后台</a>{% endif %}
+      </nav>
+    </aside>
+    {% endif %}
+    <main class="min-w-0">
+      {% if user.is_authenticated %}
+      <header class="flex items-center justify-between border-b border-slate-800 px-6 py-4 lg:px-10">
+        <div><p class="text-sm text-slate-400">公司内部工具平台</p></div>
+        <div class="flex items-center gap-4 text-sm"><span>{{ user.username }}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="rounded-lg border border-slate-700 px-3 py-2 hover:bg-slate-800">退出</button></form></div>
+      </header>
+      {% endif %}
+      <section class="p-6 lg:p-10">
+        {% for message in messages %}<div class="mb-6 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200">{{ message }}</div>{% endfor %}
+        {% block content %}{% endblock %}
+      </section>
+    </main>
+  </div>
+</body>
+</html>
