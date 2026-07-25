@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.endpoints import auth, users, string_tools
+from app.api.api_router import api_router
 from app.db.base_class import Base
 from app.db.session import engine
 
@@ -23,9 +23,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
-app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
-app.include_router(string_tools.router, prefix="/api/v1/tools/string", tags=["string_tools"])
+# Mount all API routes from the single API aggregator
+app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/")
 def read_root():
