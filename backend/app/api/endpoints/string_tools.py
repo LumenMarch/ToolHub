@@ -8,15 +8,19 @@ from app.models.user import User
 
 router = APIRouter()
 
+
 class StringProcessRequest(BaseModel):
     text: str
     action: str  # 'encode_base64', 'decode_base64', 'analyze'
 
+
 @router.post("/process")
-def process_string(request: StringProcessRequest, current_user: User = Depends(get_current_user)):
+def process_string(
+    request: StringProcessRequest, current_user: User = Depends(get_current_user)
+):
     """Process a string based on the requested action. Requires authentication."""
     if not request.text:
-         raise HTTPException(status_code=400, detail="Text cannot be empty")
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
 
     if request.action == "encode_base64":
         encoded_bytes = base64.b64encode(request.text.encode("utf-8"))

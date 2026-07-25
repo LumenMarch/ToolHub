@@ -13,6 +13,7 @@ from app.schemas.user import Token, UserCreate, UserResponse
 
 router = APIRouter()
 
+
 @router.post("/register", response_model=UserResponse)
 def register_user(user_in: UserCreate, db: Session = Depends(deps.get_db)):
     """Register a new user."""
@@ -24,6 +25,7 @@ def register_user(user_in: UserCreate, db: Session = Depends(deps.get_db)):
         )
     user = create_user(db, user_in)
     return user
+
 
 @router.post("/token", response_model=Token)
 def login_for_access_token(
