@@ -4,7 +4,7 @@ import { ArrowRight, LoaderCircle, LockKeyhole, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { api, type User } from "@/lib/api";
+import { authApi, type User } from "@/features/auth/api";
 
 interface LoginPageProps {
   onLogin: (user: User) => void;
@@ -21,7 +21,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     setError("");
     setIsSubmitting(true);
     try {
-      onLogin(await api.login(username, password));
+      onLogin(await authApi.login(username, password));
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "登录失败");
     } finally {

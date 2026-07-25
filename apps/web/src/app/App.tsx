@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 
-import { AppShell } from "@/components/app-shell";
-import { CsvCompare } from "@/components/csv-compare";
-import { Dashboard } from "@/components/dashboard";
-import { LoginPage } from "@/components/login-page";
-import { api, type User } from "@/lib/api";
+import { AppShell } from "@/app/app-shell";
+import { authApi, type User } from "@/features/auth/api";
+import { LoginPage } from "@/features/auth/components/login-page";
+import { CsvCompare } from "@/features/csv-compare/components/csv-compare";
+import { Dashboard } from "@/features/tool-catalog/components/dashboard";
 
 type View = "dashboard" | "csv-compare";
 
@@ -14,7 +14,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    api
+    authApi
       .getCurrentUser()
       .then(setUser)
       .catch(() => setUser(null))
@@ -22,7 +22,7 @@ export default function App() {
   }, []);
 
   async function handleLogout() {
-    await api.logout();
+    await authApi.logout();
     setUser(null);
     setView("dashboard");
   }

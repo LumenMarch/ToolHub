@@ -7,14 +7,15 @@ ToolHub 是一个面向公司内部使用的工具平台。当前版本包含基
 - 前端：React、TypeScript、Vite、Tailwind CSS、shadcn/ui 风格组件
 - 后端：FastAPI
 - Python 依赖管理：uv
-- JavaScript 依赖管理：pnpm
+- JavaScript 依赖管理：Bun
 
 ## 3. 项目结构
 
 ```text
 ToolHub/
-├── backend/        # FastAPI 接口、认证与工具服务
-├── frontend/       # React 工具中心
+├── apps/
+│   ├── api/        # FastAPI 接口、认证与工具模块
+│   └── web/        # React 工具中心
 └── README.md
 ```
 
@@ -23,7 +24,7 @@ ToolHub/
 ### 4.1. 启动后端
 
 ```bash
-cd backend
+cd apps/api
 cp .env.example .env
 uv sync
 uv run uvicorn app.main:app --reload --port 8000
@@ -32,12 +33,12 @@ uv run uvicorn app.main:app --reload --port 8000
 ### 4.2. 启动前端
 
 ```bash
-cd frontend
-pnpm install
-pnpm dev
+cd apps/web
+bun install
+bun run dev
 ```
 
-访问 `http://localhost:5173`，使用 `backend/.env` 中配置的账号登录。
+访问 `http://localhost:5173`，使用 `apps/api/.env` 中配置的账号登录。
 
 ## 5. 环境变量
 
@@ -52,12 +53,12 @@ pnpm dev
 
 ## 6. 生产构建
 
-前端构建完成后，FastAPI 会自动托管 `frontend/dist`：
+前端构建完成后，FastAPI 会自动托管 `apps/web/dist`：
 
 ```bash
-cd frontend
-pnpm build
+cd apps/web
+bun run build
 
-cd ../backend
+cd ../api
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```

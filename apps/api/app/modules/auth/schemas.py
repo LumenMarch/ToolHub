@@ -8,11 +8,3 @@ class LoginRequest(BaseModel):
 
 class UserResponse(BaseModel):
     username: str
-
-
-class ToolResponse(BaseModel):
-    id: str
-    name: str
-    description: str
-    category: str
-    status: str

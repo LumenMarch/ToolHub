@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import Cookie, Depends, HTTPException, Response, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
-from app.config import Settings, get_settings
+from app.core.config import Settings, get_settings
 
 SESSION_COOKIE = "toolhub_session"
 SESSION_SALT = "toolhub-auth"

@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { api, type CsvComparisonResult } from "@/lib/api";
+import { csvCompareApi, type CsvComparisonResult } from "@/features/csv-compare/api";
 
 interface CsvCompareProps {
   onBack: () => void;
@@ -156,7 +156,7 @@ export function CsvCompare({ onBack }: CsvCompareProps) {
     payload.append("ignore_case", String(ignoreCase));
 
     try {
-      setResult(await api.compareCsv(payload));
+      setResult(await csvCompareApi.compare(payload));
     } catch (compareError) {
       setError(compareError instanceof Error ? compareError.message : "对比失败");
     } finally {
