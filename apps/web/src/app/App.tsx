@@ -29,8 +29,14 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-muted/40">
-        <div className="size-8 animate-pulse rounded-xl bg-primary/20" aria-label="正在加载" />
+      <div className="flex min-h-[100dvh] items-center justify-center bg-background">
+        <div
+          className="flex items-center gap-3 text-sm text-muted-foreground"
+          role="status"
+        >
+          <span className="size-2 animate-pulse rounded-full bg-primary" />
+          正在加载工作台
+        </div>
       </div>
     );
   }

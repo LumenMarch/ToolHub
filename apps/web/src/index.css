@@ -1,33 +1,69 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
-  color: hsl(222.2 84% 4.9%);
-  background: hsl(210 40% 98%);
+    "Avenir Next", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    ui-sans-serif, system-ui, sans-serif;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
+  --background: 220 23% 98%;
+  --foreground: 222 40% 12%;
   --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
-  --primary: 222.2 47.4% 11.2%;
+  --card-foreground: 222 40% 12%;
+  --primary: 217 78% 48%;
   --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
-  --destructive: 0 72.2% 50.6%;
+  --secondary: 218 25% 94%;
+  --secondary-foreground: 222 40% 16%;
+  --muted: 218 25% 95%;
+  --muted-foreground: 217 12% 43%;
+  --accent: 216 38% 94%;
+  --accent-foreground: 222 40% 16%;
+  --destructive: 0 70% 51%;
   --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 222.2 84% 4.9%;
-  --sidebar: 0 0% 100%;
-  --sidebar-accent: 210 40% 96.1%;
-  --sidebar-accent-foreground: 222.2 47.4% 11.2%;
+  --border: 217 24% 88%;
+  --input: 217 24% 84%;
+  --ring: 217 78% 48%;
+  --sidebar: 220 30% 97%;
+  --sidebar-foreground: 222 35% 16%;
+  --sidebar-primary: 217 78% 48%;
+  --sidebar-primary-foreground: 210 40% 98%;
+  --sidebar-accent: 216 38% 91%;
+  --sidebar-accent-foreground: 217 68% 34%;
+  --sidebar-border: 217 24% 87%;
+  --sidebar-ring: 217 78% 48%;
+  --shadow: 222 45% 15%;
+}
+
+.dark {
+  --background: 222 36% 9%;
+  --foreground: 214 28% 92%;
+  --card: 222 31% 12%;
+  --card-foreground: 214 28% 92%;
+  --primary: 216 86% 64%;
+  --primary-foreground: 222 45% 11%;
+  --secondary: 220 24% 17%;
+  --secondary-foreground: 214 28% 92%;
+  --muted: 220 24% 16%;
+  --muted-foreground: 216 13% 64%;
+  --accent: 219 28% 18%;
+  --accent-foreground: 214 28% 94%;
+  --destructive: 0 73% 59%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 220 22% 21%;
+  --input: 220 20% 27%;
+  --ring: 216 86% 64%;
+  --sidebar: 222 34% 10%;
+  --sidebar-foreground: 214 26% 90%;
+  --sidebar-primary: 216 86% 64%;
+  --sidebar-primary-foreground: 222 45% 11%;
+  --sidebar-accent: 219 28% 18%;
+  --sidebar-accent-foreground: 216 86% 72%;
+  --sidebar-border: 220 22% 20%;
+  --sidebar-ring: 216 86% 64%;
+  --shadow: 222 70% 3%;
 }
 
 @theme inline {
@@ -49,8 +85,13 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
   --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
   --color-sidebar-accent: hsl(var(--sidebar-accent));
   --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
 }
 
 * {
@@ -60,11 +101,34 @@
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100dvh;
   background: hsl(var(--background));
 }
 
 button,
 input {
   font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: hsl(var(--primary) / 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

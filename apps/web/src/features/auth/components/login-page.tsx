@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { ArrowRight, LoaderCircle, LockKeyhole, Sparkles } from "lucide-react";
+import { ArrowRight, Blocks, LoaderCircle, LockKeyhole } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,26 +30,31 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-6">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.16),transparent_36%),radial-gradient(circle_at_bottom_right,rgba(99,102,241,0.18),transparent_40%)]" />
-      <div className="relative grid w-full max-w-5xl gap-12 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
-        <section className="hidden text-white lg:block">
-          <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-sky-200">
-            <Sparkles className="size-4" />
-            公司内部效率中心
+    <main className="grid min-h-[100dvh] bg-background lg:grid-cols-[minmax(0,1.05fr)_minmax(440px,0.95fr)]">
+      <section className="hidden bg-primary p-12 text-primary-foreground lg:flex lg:flex-col lg:justify-between xl:p-16">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-primary-foreground/12">
+            <Blocks className="size-5" strokeWidth={1.8} />
           </div>
-          <h1 className="max-w-xl text-5xl font-semibold leading-tight tracking-tight">
-            把重复工作交给工具，
-            <span className="text-sky-300">把时间留给判断。</span>
+          <div>
+            <div className="font-semibold tracking-tight">ToolHub</div>
+            <div className="text-xs text-primary-foreground/65">内部工具平台</div>
+          </div>
+        </div>
+        <div className="max-w-xl pb-12">
+          <h1 className="text-4xl font-semibold leading-[1.15] tracking-[-0.035em] xl:text-5xl">
+            把重复工作交给工具，把时间留给判断。
           </h1>
-          <p className="mt-6 max-w-lg text-lg leading-8 text-slate-300">
-            ToolHub 将数据处理、文件检查和常用内部流程集中在一个清晰、安全的工作台。
+          <p className="mt-5 max-w-lg text-base leading-7 text-primary-foreground/72">
+            数据处理、文件检查与常用内部流程，集中在一个清晰的工作台。
           </p>
-        </section>
+        </div>
+      </section>
 
-        <Card className="border-white/10 bg-white shadow-2xl shadow-black/30">
+      <div className="flex items-center justify-center p-5 sm:p-8 lg:p-12">
+        <Card className="w-full max-w-md shadow-[0_18px_50px_hsl(var(--shadow)/0.12)]">
           <CardHeader className="space-y-4 pb-4">
-            <div className="flex size-11 items-center justify-center rounded-xl bg-slate-950 text-white">
+            <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <LockKeyhole className="size-5" />
             </div>
             <div>
