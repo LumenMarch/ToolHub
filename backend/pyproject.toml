@@ -1,0 +1,27 @@
+[project]
+name = "toolhub-backend"
+version = "0.1.0"
+description = "ToolHub FastAPI backend"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.116,<1",
+    "itsdangerous>=2.2,<3",
+    "pydantic-settings>=2.10,<3",
+    "python-multipart>=0.0.20,<1",
+    "uvicorn[standard]>=0.35,<1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12,<1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.uv]
+package = false
