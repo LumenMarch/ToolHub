@@ -1,0 +1,16 @@
+#!/bin/bash
+echo "Starting backend..."
+cd backend
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
+BACKEND_PID=$!
+
+echo "Starting frontend..."
+cd ../frontend
+npm run dev &
+FRONTEND_PID=$!
+
+echo "Both services started."
+echo "Backend: http://localhost:8000"
+echo "Frontend: http://localhost:5173"
+
+wait
