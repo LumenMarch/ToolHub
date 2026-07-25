@@ -1,10 +1,11 @@
 import bcrypt
 
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         password_bytes = plain_password.encode("utf-8")[:72]
         return bcrypt.checkpw(
-            password_bytes, 
+            password_bytes,
             hashed_password.encode("utf-8")
         )
     except ValueError:
