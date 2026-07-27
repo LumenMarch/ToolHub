@@ -7,16 +7,14 @@ export interface User {
 
 export interface AuthContextValue {
   user: User | null;
-  token: string | null;
-  login: (token: string) => void;
-  logout: () => void;
+  login: (user: User) => void;
+  logout: () => Promise<void>;
   isLoading: boolean;
 }
 
 export const AuthContext = createContext<AuthContextValue>({
   user: null,
-  token: null,
   login: () => {},
-  logout: () => {},
+  logout: async () => {},
   isLoading: true,
 });

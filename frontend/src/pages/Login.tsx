@@ -11,17 +11,17 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login, token } = useContext(AuthContext);
+  const { login, user } = useContext(AuthContext);
   const navigate = useNavigate();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
-    if (token) {
+    if (user) {
       navigate('/');
     }
-  }, [token, navigate]);
+  }, [user, navigate]);
 
   // 仅在用户允许动态效果时执行大标题入场。
   useEffect(() => {
@@ -57,10 +57,10 @@ const Login: React.FC = () => {
         const formData = new URLSearchParams();
         formData.append('username', username);
         formData.append('password', password);
-        const response = await api.post('/auth/token', formData);
+        const response = await api.post('/auth/session', formData);
+        login(response.data);
         
         if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          login(response.data.access_token);
           navigate('/');
         } else {
           gsap.to(containerRef.current, {
@@ -69,7 +69,6 @@ const Login: React.FC = () => {
             duration: 0.8,
             ease: 'power3.inOut',
             onComplete: () => {
-              login(response.data.access_token);
               navigate('/');
             }
           });
