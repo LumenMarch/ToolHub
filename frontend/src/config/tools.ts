@@ -1,5 +1,5 @@
 import React from 'react';
-import { Key, TextT } from '@phosphor-icons/react';
+import { Key, TextT, FileMagnifyingGlass } from '@phosphor-icons/react';
 import type { IconProps } from '@phosphor-icons/react';
 
 // Tool Definition Interface
@@ -15,6 +15,7 @@ export interface ToolDefinition {
 // Lazy loaded components for automatic code splitting
 const PwdGenerator = React.lazy(() => import('../pages/tools/PwdGenerator'));
 const StringAnalyzer = React.lazy(() => import('../pages/tools/StringAnalyzer'));
+const AssetComparison = React.lazy(() => import('../pages/tools/AssetComparison'));
 
 export const toolsConfig: ToolDefinition[] = [
   {
@@ -32,5 +33,13 @@ export const toolsConfig: ToolDefinition[] = [
     path: '/tools/string-analyzer',
     description: '检查字符串属性并执行 Base64 编码解码周期。',
     component: StringAnalyzer
+  },
+  {
+    id: 'asset-comparison',
+    name: '资产核对',
+    icon: FileMagnifyingGlass,
+    path: '/tools/asset-comparison',
+    description: '对比并核实财务数据与部门及保管人账目明细。',
+    component: AssetComparison
   }
 ];
