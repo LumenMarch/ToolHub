@@ -8,7 +8,7 @@ const UnboxedFileInput: React.FC<{ label: string, value: string, onChange: (val:
   
   return (
     <div className="relative group w-full mb-8">
-      <div className={`absolute left-0 transition-all duration-300 ease-out font-mono uppercase tracking-[0.1em] pointer-events-none text-muted-foreground ${isFocused || value ? '-top-5 text-[10px] text-primary' : 'top-2 text-sm'}`}>
+      <div className={`pointer-events-none absolute left-0 top-2 font-mono uppercase tracking-[0.1em] text-muted-foreground transition-[color,transform] duration-300 ease-out ${isFocused || value ? '-translate-y-7 text-[0.625rem] text-primary' : 'translate-y-0 text-sm'}`}>
         {label}
       </div>
       <div className="flex items-center border-b border-border group-focus-within:border-primary transition-colors">
@@ -25,7 +25,7 @@ const UnboxedFileInput: React.FC<{ label: string, value: string, onChange: (val:
           className="p-1.5 text-muted-foreground hover:text-primary transition-colors active:scale-95 flex-shrink-0"
           title="选择文件"
         >
-          <FileArrowUp weight="bold" className="w-5 h-5" />
+          <FileArrowUp weight="bold" className="size-5" />
         </button>
       </div>
     </div>
@@ -77,20 +77,18 @@ const AssetComparison: React.FC = () => {
   };
 
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
     const ctx = gsap.context(() => {
-      gsap.to('.clip-text > span', {
-        y: 0,
-        duration: 1.2,
-        stagger: 0.1,
-        ease: 'power4.out',
-      });
       gsap.from('.gsap-reveal', {
-        y: 20,
+        y: 16,
         opacity: 0,
-        duration: 0.8,
-        stagger: 0.1,
+        duration: 0.65,
+        stagger: 0.08,
         ease: 'expo.out',
-        delay: 0.4
+        delay: 0.12
       });
     }, containerRef);
     return () => ctx.revert();
@@ -199,24 +197,19 @@ const AssetComparison: React.FC = () => {
   };
 
   return (
-    <div ref={containerRef} className="w-full flex flex-col justify-center min-h-[70vh] py-10">
-      <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <h1 className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.85] uppercase">
-            <div className="clip-text"><span>资产核对</span></div>
-          </h1>
-          <p className="mt-6 text-muted-foreground font-mono uppercase tracking-[0.2em] text-sm gsap-reveal">
-            [ ASSET COMPARISON V1.2.7 INTERFACE ]
-          </p>
-        </div>
+    <div ref={containerRef} className="flex w-full flex-col pb-20">
+      <div className="mb-8 flex flex-col gap-4 border-b border-border pb-6 md:flex-row md:items-center md:justify-between">
+        <p className="gsap-reveal font-mono text-sm uppercase tracking-[0.2em] text-muted-foreground">
+          [ ASSET COMPARISON V1.2.7 INTERFACE ]
+        </p>
         
         <div className="gsap-reveal">
           <button 
             onClick={handleAutoFill}
             disabled={isProcessing}
-            className="py-3 px-6 bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-all active:scale-[0.98] font-bold uppercase tracking-tight flex items-center justify-center gap-2 border border-border"
+            className="flex items-center justify-center gap-2 border border-border bg-secondary px-6 py-3 font-bold uppercase tracking-tight text-secondary-foreground transition-[background-color,transform] hover:bg-secondary/80 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <MagicWand weight="bold" className="w-5 h-5 text-primary" />
+            <MagicWand weight="bold" className="size-5 text-primary" />
             一键注入路径
           </button>
         </div>
@@ -268,9 +261,9 @@ const AssetComparison: React.FC = () => {
         <button 
           onClick={handleCheck}
           disabled={isProcessing}
-          className="py-4 px-10 border-2 border-border text-foreground hover:bg-foreground hover:text-background transition-all active:scale-[0.98] disabled:opacity-50 font-bold text-lg uppercase tracking-tighter flex items-center justify-center gap-3"
+          className="flex items-center justify-center gap-3 border-2 border-border px-10 py-4 text-lg font-bold uppercase tracking-tighter text-foreground transition-[background-color,color,transform] hover:bg-foreground hover:text-background active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <CheckSquareOffset weight="bold" className="w-6 h-6" />
+          <CheckSquareOffset weight="bold" className="size-6" />
           开始核对
         </button>
         {statusMsg && (
@@ -283,7 +276,7 @@ const AssetComparison: React.FC = () => {
       {checkResults.length > 0 && (
         <div className="max-w-6xl space-y-6 gsap-reveal mb-12">
           <h2 className="text-3xl font-bold tracking-tighter uppercase mb-6 flex items-center gap-4">
-            <div className="w-4 h-4 bg-primary rounded-full"></div>
+            <div className="size-4 rounded-full bg-primary"></div>
             核对结果明细
           </h2>
           
@@ -297,7 +290,7 @@ const AssetComparison: React.FC = () => {
                       <select 
                         value={reviews[res.key] || REVIEW_OPTIONS[0]}
                         onChange={(e) => handleReviewChange(res.key, e.target.value)}
-                        className="bg-background border border-border px-3 py-1 font-mono text-sm outline-none cursor-pointer focus:border-primary"
+                        className="cursor-pointer border border-border bg-background px-3 py-1 font-mono text-base outline-none focus:border-primary focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 md:text-sm"
                       >
                         {REVIEW_OPTIONS.map(opt => (
                           <option key={opt} value={opt}>{opt}</option>
@@ -312,7 +305,7 @@ const AssetComparison: React.FC = () => {
                     className="p-2 border border-border hover:bg-foreground hover:text-background transition-colors flex-shrink-0 ml-4"
                     title={`单独导出${res.label.replace(/【|】/g, '')}结果`}
                   >
-                    <DownloadSimple className="w-5 h-5" />
+                    <DownloadSimple className="size-5" />
                   </button>
                 </div>
                 
@@ -322,7 +315,7 @@ const AssetComparison: React.FC = () => {
                     <textarea 
                       value={remarks[res.key] || ''}
                       onChange={(e) => handleRemarkChange(res.key, e.target.value)}
-                      className="w-full bg-background border border-border p-3 outline-none focus:border-primary transition-colors resize-none font-mono text-sm"
+                      className="w-full resize-none border border-border bg-background p-3 font-mono text-base outline-none transition-colors focus:border-primary focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 md:text-sm"
                       rows={2}
                       placeholder="发现差异，请备注原因..."
                     />
@@ -336,9 +329,9 @@ const AssetComparison: React.FC = () => {
             <button 
               onClick={handleSaveAll}
               disabled={isProcessing}
-              className="py-4 px-12 bg-primary text-primary-foreground hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 font-bold text-xl uppercase tracking-tighter flex items-center justify-center gap-3"
+              className="flex items-center justify-center gap-3 bg-primary px-12 py-4 text-xl font-bold uppercase tracking-tighter text-primary-foreground transition-[background-color,transform] hover:bg-primary/90 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <FloppyDisk weight="bold" className="w-6 h-6" />
+              <FloppyDisk weight="bold" className="size-6" />
               一键汇出 (Excel + PDF)
             </button>
           </div>

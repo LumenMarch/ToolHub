@@ -71,12 +71,12 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
         }`}
       >
         <div className="flex w-full items-start justify-between gap-4">
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          <span className="font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">
             {label}
           </span>
           <FileArrowUp
             weight="bold"
-            className="h-7 w-7 shrink-0 text-primary transition-transform group-hover:-translate-y-1"
+            className="size-7 shrink-0 text-primary transition-transform group-hover:-translate-y-1"
           />
         </div>
 
@@ -148,19 +148,13 @@ const AttendanceOrganizer: React.FC = () => {
     }
 
     const context = gsap.context(() => {
-      gsap.to('.clip-text > span', {
-        y: 0,
-        duration: 1.2,
-        stagger: 0.1,
-        ease: 'power4.out',
-      });
       gsap.from('.attendance-reveal', {
-        y: 24,
+        y: 16,
         opacity: 0,
-        duration: 0.8,
-        stagger: 0.1,
+        duration: 0.65,
+        stagger: 0.08,
         ease: 'expo.out',
-        delay: 0.35,
+        delay: 0.12,
       });
     }, containerRef);
 
@@ -235,22 +229,11 @@ const AttendanceOrganizer: React.FC = () => {
   return (
     <div
       ref={containerRef}
-      className="flex min-h-[70vh] w-full flex-col justify-center py-10"
+      className="flex w-full flex-col pb-20"
     >
-      <div className="mb-12">
-        <h1 className="text-5xl font-bold uppercase leading-[0.85] tracking-tighter md:text-7xl">
-          <div className="clip-text">
-            <span>出勤资料</span>
-          </div>
-          <br />
-          <div className="clip-text">
-            <span className="text-primary">整理.</span>
-          </div>
-        </h1>
-        <p className="attendance-reveal mt-6 max-w-2xl font-mono text-xs uppercase leading-relaxed tracking-[0.18em] text-muted-foreground md:text-sm">
-          上传通行记录与班别明细，自动识别离岗、用餐、超时及数据异常。
-        </p>
-      </div>
+      <p className="attendance-reveal mb-8 max-w-2xl font-mono text-xs uppercase leading-relaxed tracking-[0.18em] text-muted-foreground md:text-sm">
+        上传通行记录与班别明细，自动识别离岗、用餐、超时及数据异常。
+      </p>
 
       <div className="attendance-reveal grid grid-cols-1 gap-6 lg:grid-cols-2">
         <FileDropZone
@@ -281,10 +264,10 @@ const AttendanceOrganizer: React.FC = () => {
           {isProcessing ? (
             <CheckSquareOffset
               weight="bold"
-              className="h-6 w-6 animate-pulse"
+              className="size-6 animate-pulse"
             />
           ) : (
-            <DownloadSimple weight="bold" className="h-6 w-6" />
+            <DownloadSimple weight="bold" className="size-6" />
           )}
           {isProcessing ? '正在整理' : '生成并下载'}
         </button>

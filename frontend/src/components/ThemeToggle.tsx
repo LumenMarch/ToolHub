@@ -1,6 +1,6 @@
 import { Moon, Sun } from '@phosphor-icons/react';
 import { useTheme } from './ThemeProvider';
-import { cn } from './Layout';
+import { cn } from '../lib/cn';
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
@@ -20,15 +20,15 @@ export function ThemeToggle() {
       type="button"
       onClick={toggleTheme}
       className={cn(
-        "p-2 transition-all duration-300 rounded-md bg-transparent border border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+        "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border bg-transparent text-muted-foreground transition-[background-color,color,transform] duration-300 hover:bg-muted hover:text-foreground active:translate-y-px"
       )}
       title={`切换主题 (当前: ${isDark ? '暗黑模式' : '明亮模式'})`}
       aria-label={`切换主题，当前为${isDark ? '暗黑模式' : '明亮模式'}`}
     >
       {isDark ? (
-        <Moon weight="fill" className="w-4 h-4" />
+        <Moon weight="fill" className="size-4" />
       ) : (
-        <Sun weight="fill" className="w-4 h-4" />
+        <Sun weight="fill" className="size-4" />
       )}
     </button>
   );
