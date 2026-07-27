@@ -5,18 +5,18 @@ import { toolsConfig } from '../config/tools';
 import { ThemeToggle } from './ThemeToggle';
 import { gsap } from 'gsap';
 import { ArrowRight } from '@phosphor-icons/react';
-import { clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-export function cn(...inputs: (string | undefined | null | false)[]) {
-  return twMerge(clsx(inputs));
-}
+import { cn } from '../lib/cn';
 
 const Layout: React.FC = () => {
   const { user, logout } = useContext(AuthContext);
   const navigate = useNavigate();
   const location = useLocation();
-  const navRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLElement>(null);
+  const activeTool = toolsConfig.find(
+    (tool) =>
+      location.pathname === tool.path ||
+      location.pathname.startsWith(`${tool.path}/`),
+  );
 
   const handleLogout = () => {
     logout();
@@ -36,23 +36,53 @@ const Layout: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background relative flex flex-col">
+    <div className="relative flex min-h-dvh flex-col bg-background">
       <div className="grain-overlay" />
       
-      {/* 浮动页头 */}
-      <header ref={navRef} className="fixed top-0 left-0 w-full z-50  p-6 md:p-10 flex items-center justify-between pointer-events-none">
-        <Link to="/" className="text-xl md:text-2xl font-bold tracking-tighter uppercase pointer-events-auto">
-          工具<span className="text-primary">枢纽</span>.
-        </Link>
+      {/* 工具页使用上下文页头，主控台保留浮动页头。 */}
+      <header
+        ref={navRef}
+        className={cn(
+          'left-0 top-0 z-50 grid w-full grid-cols-[minmax(0,1fr)_auto] gap-4 pointer-events-none',
+          activeTool
+            ? 'sticky items-start border-b border-border bg-background px-6 py-4 md:items-center md:px-10 md:py-5'
+            : 'fixed items-center p-6 md:p-10',
+        )}
+      >
+        <div
+          className={cn(
+            'min-w-0 pointer-events-auto',
+            activeTool && 'flex flex-col gap-1 md:flex-row md:items-center md:gap-5',
+          )}
+        >
+          <Link
+            to="/"
+            className="inline-block whitespace-nowrap text-xl font-bold uppercase tracking-tighter md:text-2xl"
+          >
+            工具<span className="text-primary">枢纽</span>.
+          </Link>
+          {activeTool && (
+            <>
+              <span
+                aria-hidden="true"
+                className="hidden h-6 w-px shrink-0 bg-border md:block"
+              />
+              <h1 className="min-w-0 text-base font-bold leading-tight tracking-tight md:text-2xl">
+                {activeTool.name}
+              </h1>
+            </>
+          )}
+        </div>
         
-        <div className="flex items-center gap-8 pointer-events-auto">
+        <div className="flex items-center gap-3 pointer-events-auto md:gap-8">
           <ThemeToggle />
-          <span className="hidden md:block text-[13px] font-mono tracking-widest uppercase opacity-50">
+          <span className="hidden text-[0.8125rem] font-mono tracking-widest uppercase opacity-50 lg:block">
             [ 标识: {user?.username} ]
           </span>
           <button
+            type="button"
             onClick={handleLogout}
-            className="text-[13px] font-mono tracking-widest uppercase hover:text-primary transition-colors relative group overflow-hidden"
+            className="group relative inline-flex min-h-11 items-center overflow-hidden whitespace-nowrap px-1 text-[0.8125rem] font-mono uppercase tracking-widest transition-colors hover:text-primary active:translate-y-px"
           >
             <span className="relative z-10">断开连接</span>
             <div className="absolute bottom-0 left-0 w-full h-[1px] bg-primary -translate-x-[101%] group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
@@ -60,27 +90,39 @@ const Layout: React.FC = () => {
         </div>
       </header>
 
-      {/* 主画布限制宽度并居中，避免与侧边索引冲突。 */}
-      <main className="flex-1 w-full max-w-[1400px] mx-auto pt-32 md:pt-48 pb-20 px-6 md:px-24 lg:px-48 flex flex-col relative z-10">
+      {/* 工具页紧随粘性页头，主控台沿用原有顶部留白。 */}
+      <main
+        className={cn(
+          'relative z-10 mx-auto flex w-full max-w-[1400px] flex-1 flex-col px-6 pb-20 md:px-24 lg:px-48',
+          activeTool ? 'pt-8 md:pt-12' : 'pt-32 md:pt-48',
+        )}
+      >
         <Outlet />
       </main>
 
       {/* 左下角浮动工具索引 */}
       <div className="hidden lg:flex fixed bottom-12 left-12 flex-col gap-2 z-40  w-48">
-        <p className="text-[10px] font-mono uppercase tracking-[0.2em] opacity-40 mb-2">索引</p>
-        {toolsConfig.map(tool => (
-          <Link 
-            key={tool.id} 
-            to={tool.path}
-            className={cn(
-              "text-[12px] uppercase font-medium tracking-wider transition-all duration-500 ease-out flex items-center gap-2",
-              location.pathname.includes(tool.path) ? "text-primary translate-x-2" : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {location.pathname.includes(tool.path) && <ArrowRight className="w-3 h-3" />}
-            {tool.name}
-          </Link>
-        ))}
+        <p className="mb-2 text-[0.625rem] font-mono uppercase tracking-[0.2em] opacity-40">索引</p>
+        {toolsConfig.map((tool) => {
+          const isActive = activeTool?.id === tool.id;
+
+          return (
+            <Link
+              key={tool.id}
+              to={tool.path}
+              aria-current={isActive ? 'page' : undefined}
+              className={cn(
+                'flex items-center gap-2 text-xs font-medium uppercase tracking-wider transition-[color,transform] duration-500 ease-out',
+                isActive
+                  ? 'translate-x-2 text-primary'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {isActive && <ArrowRight className="size-3" />}
+              {tool.name}
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

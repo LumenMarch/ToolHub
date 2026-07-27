@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.endpoints import asset_comparison, auth, string_tools, users
+from app.api.endpoints import asset_comparison, attendance, auth, string_tools, users
 
 # Unified API Router
 api_router = APIRouter()
@@ -16,4 +16,7 @@ api_router.include_router(
 )
 api_router.include_router(
     asset_comparison.router, prefix="/tools/asset", tags=["asset_comparison"]
+)
+api_router.include_router(
+    attendance.router, prefix="/tools/attendance", tags=["attendance"]
 )

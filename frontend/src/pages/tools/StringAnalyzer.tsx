@@ -16,19 +16,13 @@ const StringAnalyzer: React.FC = () => {
     }
 
     const ctx = gsap.context(() => {
-      gsap.to('.clip-text > span', {
-        y: 0,
-        duration: 1.2,
-        stagger: 0.1,
-        ease: 'power4.out',
-      });
       gsap.from('.gsap-reveal', {
-        y: 20,
+        y: 16,
         opacity: 0,
-        duration: 0.8,
-        stagger: 0.1,
+        duration: 0.65,
+        stagger: 0.08,
         ease: 'expo.out',
-        delay: 0.4
+        delay: 0.12
       });
     }, containerRef);
     return () => ctx.revert();
@@ -65,14 +59,7 @@ const StringAnalyzer: React.FC = () => {
   };
 
   return (
-    <div ref={containerRef} className="w-full flex flex-col justify-center min-h-[70vh]">
-      <div className="mb-16 ">
-        <h1 className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.85] uppercase">
-          <div className="clip-text"><span>字符</span></div><br/>
-          <div className="clip-text"><span className="text-primary">处理器.</span></div>
-        </h1>
-      </div>
-
+    <div ref={containerRef} className="flex w-full flex-col pb-20">
       <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-16 xl:gap-24 relative z-10">
         
         {/* 左侧输入与操作 */}
@@ -88,18 +75,18 @@ const StringAnalyzer: React.FC = () => {
               aria-invalid={Boolean(error)}
               aria-describedby={error ? 'payload-error' : undefined}
             />
-            <label htmlFor="payload" className="absolute left-0 top-4 text-muted-foreground font-mono text-[11px] tracking-[0.2em] uppercase transition-all duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8">
+            <label htmlFor="payload" className="pointer-events-none absolute left-0 top-4 font-mono text-[0.6875rem] uppercase tracking-[0.2em] text-muted-foreground transition-[color,transform] duration-300 group-focus-within:-translate-y-8 group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8">
               原始数据 (Payload)
             </label>
             {error && (
-              <div id="payload-error" role="alert" className="absolute -bottom-8 left-0 text-[11px] font-mono tracking-widest text-primary uppercase">
+              <div id="payload-error" role="alert" className="absolute -bottom-8 left-0 font-mono text-[0.6875rem] uppercase tracking-widest text-primary">
                 [ 异常: {error} ]
               </div>
             )}
           </div>
 
           <div className="flex flex-col gap-4">
-            <p className="text-[10px] font-mono tracking-[0.2em] text-muted-foreground mb-2 uppercase">执行指令</p>
+            <p className="mb-2 font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">执行指令</p>
             {[
               { id: 'analyze', label: '分析数据' },
               { id: 'encode_base64', label: 'BASE64 编码' },
@@ -111,7 +98,7 @@ const StringAnalyzer: React.FC = () => {
                 disabled={loading}
                 className="text-2xl md:text-4xl font-bold uppercase tracking-tighter hover:text-primary transition-colors text-left group flex items-center gap-4 disabled:opacity-50"
               >
-                <span className="w-0 overflow-hidden group-hover:w-8 transition-all duration-500 ease-[cubic-bezier(0.85,0,0.15,1)] opacity-0 group-hover:opacity-100 text-primary">→</span>
+                <span className="w-5 shrink-0 text-primary opacity-40 transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.85,0,0.15,1)] group-hover:translate-x-1 group-hover:opacity-100 group-focus-visible:translate-x-1 group-focus-visible:opacity-100">→</span>
                 {act.label}
               </button>
             ))}
@@ -120,7 +107,7 @@ const StringAnalyzer: React.FC = () => {
 
         {/* 右侧输出 */}
         <div className="gsap-reveal flex flex-col pt-4 lg:pt-0">
-          <p className="text-[10px] font-mono tracking-[0.2em] text-muted-foreground mb-6 uppercase">输出流 (Output Stream)</p>
+          <p className="mb-6 font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">输出流 (Output Stream)</p>
           
           <div className="flex-1 min-h-[300px] border-l-2 border-border pl-8 md:pl-12">
             {loading ? (
@@ -132,16 +119,16 @@ const StringAnalyzer: React.FC = () => {
                 {result.action === 'analyze' ? (
                   <div className="flex flex-col gap-8">
                     <div>
-                      <span className="block text-[10px] tracking-[0.2em] text-muted-foreground mb-2">字符数</span>
+                      <span className="mb-2 block text-[0.625rem] tracking-[0.2em] text-muted-foreground">字符数</span>
                       <span className="text-5xl md:text-7xl font-bold tracking-tighter text-primary">{result.data.length}</span>
                     </div>
                     <div className="flex gap-16">
                       <div>
-                        <span className="block text-[10px] tracking-[0.2em] text-muted-foreground mb-2">词数</span>
+                        <span className="mb-2 block text-[0.625rem] tracking-[0.2em] text-muted-foreground">词数</span>
                         <span className="text-3xl md:text-4xl font-bold tracking-tighter">{result.data.words}</span>
                       </div>
                       <div>
-                        <span className="block text-[10px] tracking-[0.2em] text-muted-foreground mb-2">行数</span>
+                        <span className="mb-2 block text-[0.625rem] tracking-[0.2em] text-muted-foreground">行数</span>
                         <span className="text-3xl md:text-4xl font-bold tracking-tighter">{result.data.lines}</span>
                       </div>
                     </div>

@@ -1,5 +1,10 @@
 import React from 'react';
-import { Key, TextT, FileMagnifyingGlass } from '@phosphor-icons/react';
+import {
+  FileArrowUp,
+  FileMagnifyingGlass,
+  Key,
+  TextT,
+} from '@phosphor-icons/react';
 import type { IconProps } from '@phosphor-icons/react';
 
 // Tool Definition Interface
@@ -16,6 +21,9 @@ export interface ToolDefinition {
 const PwdGenerator = React.lazy(() => import('../pages/tools/PwdGenerator'));
 const StringAnalyzer = React.lazy(() => import('../pages/tools/StringAnalyzer'));
 const AssetComparison = React.lazy(() => import('../pages/tools/AssetComparison'));
+const AttendanceOrganizer = React.lazy(
+  () => import('../pages/tools/AttendanceOrganizer')
+);
 
 export const toolsConfig: ToolDefinition[] = [
   {
@@ -41,5 +49,13 @@ export const toolsConfig: ToolDefinition[] = [
     path: '/tools/asset-comparison',
     description: '对比并核实财务数据与部门及保管人账目明细。',
     component: AssetComparison
+  },
+  {
+    id: 'attendance-organizer',
+    name: '出勤资料整理',
+    icon: FileArrowUp,
+    path: '/tools/attendance-organizer',
+    description: '整理通行记录并标记离岗、用餐、超时及数据异常。',
+    component: AttendanceOrganizer
   }
 ];
