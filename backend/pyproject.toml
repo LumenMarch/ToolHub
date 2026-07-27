@@ -3,14 +3,26 @@ name = "backend"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "bcrypt>=5.0.0",
     "fastapi>=0.140.0",
+    "fastexcel>=0.20.2",
+    "fpdf>=1.7.2",
+    "loguru>=0.7.3",
+    "openpyxl>=3.1.5",
+    "pandas>=3.0.5",
     "passlib>=1.7.4",
+    "polars>=1.43.0",
+    "pyarrow==20.0.0",
+    "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
     "pyjwt>=2.13.0",
+    "pypdf2>=3.0.1",
+    "pyqt-fluent-widgets>=1.11.2",
+    "pyqt5>=5.15.11",
     "python-multipart>=0.0.32",
+    "reportlab>=5.0.0",
     "sqlalchemy>=2.0.51",
     "uvicorn>=0.51.0",
 ]
