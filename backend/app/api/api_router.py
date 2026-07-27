@@ -1,5 +1,6 @@
 from fastapi import APIRouter
-from app.api.endpoints import auth, users, string_tools, asset_comparison
+
+from app.api.endpoints import auth, string_tools, users, asset_comparison
 
 # Unified API Router
 api_router = APIRouter()
@@ -10,5 +11,9 @@ api_router.include_router(users.router, prefix="/users", tags=["users"])
 
 # Register Tool endpoints dynamically
 # To add a new tool, import its router and include it here
-api_router.include_router(string_tools.router, prefix="/tools/string", tags=["string_tools"])
-api_router.include_router(asset_comparison.router, prefix="/tools/asset", tags=["asset_comparison"])
+api_router.include_router(
+    string_tools.router, prefix="/tools/string", tags=["string_tools"]
+)
+api_router.include_router(
+    asset_comparison.router, prefix="/tools/asset", tags=["asset_comparison"]
+)

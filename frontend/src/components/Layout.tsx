@@ -23,8 +23,12 @@ const Layout: React.FC = () => {
     navigate('/login');
   };
 
-  // Entrance animation for nav
+  // 导航只在用户允许动态效果时执行入场动画。
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
     gsap.fromTo(navRef.current, 
       { y: -20, opacity: 0 }, 
       { y: 0, opacity: 1, duration: 1, ease: 'expo.out', delay: 0.2 }
@@ -35,7 +39,7 @@ const Layout: React.FC = () => {
     <div className="min-h-screen bg-background relative flex flex-col">
       <div className="grain-overlay" />
       
-      {/* Floating Header */}
+      {/* 浮动页头 */}
       <header ref={navRef} className="fixed top-0 left-0 w-full z-50  p-6 md:p-10 flex items-center justify-between pointer-events-none">
         <Link to="/" className="text-xl md:text-2xl font-bold tracking-tighter uppercase pointer-events-auto">
           工具<span className="text-primary">枢纽</span>.
@@ -56,12 +60,12 @@ const Layout: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Canvas - Constrained width and centered to avoid sidebar collisions */}
+      {/* 主画布限制宽度并居中，避免与侧边索引冲突。 */}
       <main className="flex-1 w-full max-w-[1400px] mx-auto pt-32 md:pt-48 pb-20 px-6 md:px-24 lg:px-48 flex flex-col relative z-10">
         <Outlet />
       </main>
 
-      {/* Floating tools index at bottom left */}
+      {/* 左下角浮动工具索引 */}
       <div className="hidden lg:flex fixed bottom-12 left-12 flex-col gap-2 z-40  w-48">
         <p className="text-[10px] font-mono uppercase tracking-[0.2em] opacity-40 mb-2">索引</p>
         {toolsConfig.map(tool => (

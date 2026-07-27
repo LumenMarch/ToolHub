@@ -8,8 +8,12 @@ const Dashboard: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
     const ctx = gsap.context(() => {
-      // Split text reveal
+      // 标题切片依次显现。
       gsap.to('.clip-text > span', {
         y: 0,
         duration: 1.2,
@@ -46,9 +50,9 @@ const Dashboard: React.FC = () => {
             <Link
               key={tool.id}
               to={tool.path}
-              className="tool-item group relative block py-8 border-b border-zinc-800 hover:border-primary transition-colors duration-500 overflow-hidden"
+              className="tool-item group relative block py-8 border-b border-border hover:border-primary transition-colors duration-500 overflow-hidden"
             >
-              {/* Background hover reveal */}
+              {/* 悬停时显示满版强调色。 */}
               <div className="absolute inset-0 bg-primary translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[cubic-bezier(0.85,0,0.15,1)] z-0"></div>
               
               <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 group-hover:text-primary-foreground transition-colors duration-300">

@@ -23,10 +23,14 @@ const Login: React.FC = () => {
     }
   }, [token, navigate]);
 
-  // Massive kinetic intro
+  // 仅在用户允许动态效果时执行大标题入场。
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
     const ctx = gsap.context(() => {
-      // Split text reveal
+      // 标题切片依次显现。
       gsap.to('.clip-text > span', {
         y: 0,
         duration: 1.2,
@@ -55,31 +59,39 @@ const Login: React.FC = () => {
         formData.append('password', password);
         const response = await api.post('/auth/token', formData);
         
-        // Exit animation
-        gsap.to(containerRef.current, {
-          opacity: 0,
-          scale: 0.95,
-          duration: 0.8,
-          ease: 'power3.inOut',
-          onComplete: () => {
-            login(response.data.access_token);
-            navigate('/');
-          }
-        });
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          login(response.data.access_token);
+          navigate('/');
+        } else {
+          gsap.to(containerRef.current, {
+            opacity: 0,
+            scale: 0.95,
+            duration: 0.8,
+            ease: 'power3.inOut',
+            onComplete: () => {
+              login(response.data.access_token);
+              navigate('/');
+            }
+          });
+        }
       } else {
         await api.post('/auth/register', { username, password });
         setIsLogin(true);
-        gsap.fromTo('.form-wrapper', 
-          { x: -20 }, 
-          { x: 0, duration: 0.6, ease: 'expo.out' }
-        );
+        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          gsap.fromTo('.form-wrapper',
+            { x: -20 },
+            { x: 0, duration: 0.6, ease: 'expo.out' }
+          );
+        }
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || '系统发生错误。');
-      gsap.fromTo('.form-wrapper', 
-        { x: -10 }, 
-        { x: 0, duration: 0.5, ease: 'elastic.out(1, 0.3)' }
-      );
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        gsap.fromTo('.form-wrapper',
+          { x: -10 },
+          { x: 0, duration: 0.5, ease: 'elastic.out(1, 0.3)' }
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -89,12 +101,12 @@ const Login: React.FC = () => {
     <div ref={containerRef} className="min-h-[100dvh] bg-background flex flex-col lg:flex-row relative">
       <div className="grain-overlay" />
       
-      {/* Theme Toggle in Login */}
+      {/* 登录页主题切换 */}
       <div className="absolute top-8 right-8 z-50  pointer-events-auto">
         <ThemeToggle />
       </div>
       
-      {/* Left side: Massive Typography */}
+      {/* 左侧超大标题 */}
       <div className="flex-1 flex flex-col justify-center p-8 md:p-16 lg:p-24 relative z-10 ">
         <h1 ref={titleRef} className="text-6xl md:text-8xl lg:text-[10vw] font-bold tracking-tighter leading-[0.85] uppercase">
           <div className="clip-text"><span>{isLogin ? '进入' : '加入'}</span></div><br/>
@@ -103,11 +115,11 @@ const Login: React.FC = () => {
         </h1>
       </div>
 
-      {/* Right side: Minimal Brutalist Form */}
+      {/* 右侧极简粗野主义表单 */}
       <div className="flex-1 flex flex-col justify-center p-8 md:p-16 lg:p-24 relative z-10 form-wrapper max-w-2xl">
         <form onSubmit={handleSubmit} className="space-y-12 w-full">
           {error && (
-            <div className="text-sm font-mono text-primary bg-primary/10 p-4 border-l-2 border-primary gsap-fade uppercase tracking-widest">
+            <div id="auth-error" role="alert" className="text-sm font-mono text-primary bg-primary/10 p-4 border-l-2 border-primary gsap-fade uppercase tracking-widest">
               [ 异常: {error} ]
             </div>
           )}
@@ -122,8 +134,10 @@ const Login: React.FC = () => {
               autoComplete="off"
               required
               id="username"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'auth-error' : undefined}
             />
-            <label htmlFor="username" className="absolute left-0 top-4 text-zinc-500 font-mono text-sm tracking-widest uppercase transition-all duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-[11px] group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px]">
+            <label htmlFor="username" className="absolute left-0 top-4 text-muted-foreground font-mono text-sm tracking-widest uppercase transition-all duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-[11px] group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px]">
               身份标识
             </label>
           </div>
@@ -137,8 +151,10 @@ const Login: React.FC = () => {
               placeholder=" "
               required
               id="password"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'auth-error' : undefined}
             />
-            <label htmlFor="password" className="absolute left-0 top-4 text-zinc-500 font-mono text-sm tracking-widest uppercase transition-all duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-[11px] group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px]">
+            <label htmlFor="password" className="absolute left-0 top-4 text-muted-foreground font-mono text-sm tracking-widest uppercase transition-all duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-[11px] group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px]">
               安全密钥
             </label>
           </div>
@@ -158,7 +174,7 @@ const Login: React.FC = () => {
                 setIsLogin(!isLogin);
                 setError('');
               }}
-              className="text-[11px] font-mono text-muted-foreground hover:text-foreground uppercase tracking-[0.2em] transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-full after:h-[1px] after:bg-zinc-500 hover:after:bg-foreground"
+              className="text-[11px] font-mono text-muted-foreground hover:text-foreground uppercase tracking-[0.2em] transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-full after:h-[1px] after:bg-muted-foreground hover:after:bg-foreground"
             >
               {isLogin ? "需要获取权限？" : "已持有身份？"}
             </button>

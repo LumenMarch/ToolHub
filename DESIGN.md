@@ -43,7 +43,7 @@
 平台全面落实了 "Kinetic Brutalism"（动态粗野主义）风格，拒绝千篇一律的仪表盘（Anti-Dashboard）设计，具有极高视觉方差和干练的交互反馈。
 
 ### 3.1. 排版优先 (Massive Typography)
-- **核心字体**: 引入 `Geist Sans` 和 `Geist Mono`。
+- **核心字体**: 自托管 `Noto Serif SC 700` 用于标题，`Geist Sans` 用于正文，`Geist Mono` 用于数据与系统标签。
 - **视觉层级**: 采用夸张的超大标题（如 `text-[10vw]`、`text-7xl`），配合紧凑的字距 (`tracking-tighter`) 和缩减的行高 (`leading-[0.85]`)，使文字本身成为界面的核心视觉元素。
 - **标签与微文案**: 大量使用全大写字母、宽字距的等宽字体（Mono）作为类别、状态的标识（如 `[ ID: USERNAME ]`、`OUTPUT STREAM`），营造系统层级的黑客/极客感。
 
