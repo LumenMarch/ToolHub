@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.endpoints import auth, string_tools, users, asset_comparison
+from app.api.endpoints import asset_comparison, auth, string_tools, users
 
 # Unified API Router
 api_router = APIRouter()
