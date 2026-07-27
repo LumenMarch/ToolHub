@@ -2,6 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Copy, ArrowsClockwise } from '@phosphor-icons/react';
 import { gsap } from 'gsap';
 
+const UINT32_RANGE = 0x1_0000_0000;
+
+const secureRandomIndex = (upperBound: number) => {
+  const rejectionLimit = UINT32_RANGE - (UINT32_RANGE % upperBound);
+  const randomValue = new Uint32Array(1);
+
+  do {
+    crypto.getRandomValues(randomValue);
+  } while (randomValue[0] >= rejectionLimit);
+
+  return randomValue[0] % upperBound;
+};
+
 const PwdGenerator: React.FC = () => {
   const [password, setPassword] = useState('');
   const [length, setLength] = useState(16);
@@ -39,7 +52,7 @@ const PwdGenerator: React.FC = () => {
 
     let newPassword = "";
     for (let i = 0, n = charset.length; i < length; ++i) {
-      newPassword += charset.charAt(Math.floor(Math.random() * n));
+      newPassword += charset.charAt(secureRandomIndex(n));
     }
     setPassword(newPassword);
     setCopied(false);
