@@ -1,22 +1,32 @@
-
 class pyqtSignal:
-    def __init__(self, *args, **kwargs): pass
-    def connect(self, *args, **kwargs): pass
-    def emit(self, *args, **kwargs): pass
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def connect(self, *args, **kwargs):
+        pass
+
+    def emit(self, *args, **kwargs):
+        pass
+
 
 class QThread:
     pass
 
+
 class QObject:
     pass
+
 
 class QWidget:
     pass
 
+
 def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
+
     return wrapper
+
 
 import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
@@ -119,7 +129,12 @@ class Notes_Notes(QThread):
                         for j, col in enumerate(row_values)
                     ]
                     df_polars = df_polars.slice(i + 1).rename(
-                        {old: new for old, new in zip(df_polars.columns, new_columns,strict=False)}
+                        {
+                            old: new
+                            for old, new in zip(
+                                df_polars.columns, new_columns, strict=False
+                            )
+                        }
                     )
                     # 自动去除资产编号列末尾的点号
                     if "資產編號" in df_polars.columns:

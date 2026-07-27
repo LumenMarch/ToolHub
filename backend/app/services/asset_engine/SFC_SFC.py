@@ -1,22 +1,32 @@
-
 class pyqtSignal:
-    def __init__(self, *args, **kwargs): pass
-    def connect(self, *args, **kwargs): pass
-    def emit(self, *args, **kwargs): pass
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def connect(self, *args, **kwargs):
+        pass
+
+    def emit(self, *args, **kwargs):
+        pass
+
 
 class QThread:
     pass
 
+
 class QObject:
     pass
+
 
 class QWidget:
     pass
 
+
 def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
+
     return wrapper
+
 
 import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
@@ -25,7 +35,9 @@ import openpyxl  # noqa: E402, I001, UP015, F401
 import pandas as pd  # noqa: E402, I001, UP015, F401
 from app.services.asset_engine.const import SFC_SFC_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from loguru import logger  # noqa: E402, I001, UP015, F401
-from app.services.asset_engine.TableParser import TableParser  # 使用自定義的 HTML 表格解析器  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.TableParser import (  # noqa: E402
+    TableParser,
+)  # 使用自定義的 HTML 表格解析器  # noqa: E402, I001, UP015, F401
 
 
 class SFC_SFC(QThread):
@@ -306,7 +318,9 @@ class SFC_SFC(QThread):
             return set(), None, None
 
         asset_col = next((c for c in ["资产编号", "資產編號"] if c in df.columns), None)
-        device_col = next((c for c in ["设备编号", "設備編號"] if c in df.columns), None)
+        device_col = next(
+            (c for c in ["设备编号", "設備編號"] if c in df.columns), None
+        )
 
         invalid_values = {"nan", "none", "null", "na", ""}
         keys = set()
@@ -330,7 +344,9 @@ class SFC_SFC(QThread):
         else:
             try:
                 # 获取对比标识键（资产编号降级设备编号）
-                this_keys, self._asset_col, self._device_col = self._get_comparison_keys(self.this_SFC_data)
+                this_keys, self._asset_col, self._device_col = (
+                    self._get_comparison_keys(self.this_SFC_data)
+                )
                 last_keys, _, _ = self._get_comparison_keys(self.last_SFC_data)
 
                 logger.info(f"本月有效资产数量: {len(this_keys)}")
@@ -354,9 +370,7 @@ class SFC_SFC(QThread):
                         len(this_keys), len(last_keys), new_count, removed_count
                     )
                 else:
-                    self._SFC_SFC_Comparison.emit(
-                        len(this_keys), len(last_keys), 0, 0
-                    )
+                    self._SFC_SFC_Comparison.emit(len(this_keys), len(last_keys), 0, 0)
             except Exception as e:
                 self._unlock_signal.emit()
                 logger.exception(e)
@@ -369,8 +383,8 @@ class SFC_SFC(QThread):
                 return
             else:
                 # 检测列名
-                asset_col = getattr(self, '_asset_col', None)
-                device_col = getattr(self, '_device_col', None)
+                asset_col = getattr(self, "_asset_col", None)
+                device_col = getattr(self, "_device_col", None)
                 if not asset_col:
                     for c in ["资产编号", "資產編號"]:
                         if c in self.this_SFC_data.columns:
@@ -398,7 +412,9 @@ class SFC_SFC(QThread):
                     mask = pd.Series([False] * len(df))
                     if asset_col and asset_keys:
                         am = df[asset_col].astype(str).str.strip().isin(asset_keys)
-                        valid = ~df[asset_col].astype(str).str.strip().str.lower().isin(invalid_values)
+                        valid = ~df[asset_col].astype(str).str.strip().str.lower().isin(
+                            invalid_values
+                        )
                         mask = mask | (am & valid)
                     if device_col and device_keys:
                         dm = df[device_col].astype(str).str.strip().isin(device_keys)
@@ -427,16 +443,28 @@ class SFC_SFC(QThread):
                 if device_col and device_col not in select_cols:
                     select_cols.append(device_col)
 
-                new_mask = filter_by_keys(self.this_SFC_data, new_by_asset, new_by_device)
+                new_mask = filter_by_keys(
+                    self.this_SFC_data, new_by_asset, new_by_device
+                )
                 new_df = self.this_SFC_data[new_mask][select_cols].drop_duplicates()
 
-                removed_mask = filter_by_keys(self.last_SFC_data, removed_by_asset, removed_by_device)
-                removed_df = self.last_SFC_data[removed_mask][select_cols].drop_duplicates()
+                removed_mask = filter_by_keys(
+                    self.last_SFC_data, removed_by_asset, removed_by_device
+                )
+                removed_df = self.last_SFC_data[removed_mask][
+                    select_cols
+                ].drop_duplicates()
 
                 # 资产编号为 NA 时用设备编号替代显示
                 def fill_na_asset(df):
                     if device_col and asset_col:
-                        na_mask = df[asset_col].astype(str).str.strip().str.lower().isin(invalid_values)
+                        na_mask = (
+                            df[asset_col]
+                            .astype(str)
+                            .str.strip()
+                            .str.lower()
+                            .isin(invalid_values)
+                        )
                         df = df.copy()
                         df.loc[na_mask, asset_col] = df.loc[na_mask, device_col]
                     return df
@@ -445,7 +473,11 @@ class SFC_SFC(QThread):
                 removed_df = fill_na_asset(removed_df)
 
                 # 统一输出列名
-                out_cols_map = {name_col: "设备名称", asset_col: "资产编号", keeper_col: "保管人"}
+                out_cols_map = {
+                    name_col: "设备名称",
+                    asset_col: "资产编号",
+                    keeper_col: "保管人",
+                }
                 new_df = new_df.rename(columns=out_cols_map)
                 removed_df = removed_df.rename(columns=out_cols_map)
                 # 只保留输出用的三列

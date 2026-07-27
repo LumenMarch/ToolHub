@@ -1,22 +1,32 @@
-
 class pyqtSignal:
-    def __init__(self, *args, **kwargs): pass
-    def connect(self, *args, **kwargs): pass
-    def emit(self, *args, **kwargs): pass
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def connect(self, *args, **kwargs):
+        pass
+
+    def emit(self, *args, **kwargs):
+        pass
+
 
 class QThread:
     pass
 
+
 class QObject:
     pass
+
 
 class QWidget:
     pass
 
+
 def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
+
     return wrapper
+
 
 import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
@@ -129,7 +139,10 @@ class Finance_Finance(QThread):
                     for i, col in enumerate(df_eager.row(0))
                 ]
                 df_eager = df_eager.slice(1).rename(
-                    {old: new for old, new in zip(df_eager.columns, new_columns,strict=False)}
+                    {
+                        old: new
+                        for old, new in zip(df_eager.columns, new_columns, strict=False)
+                    }
                 )
                 print(f"文件 {os.path.basename(path)} 的表頭包含空值，已重新設置")
 

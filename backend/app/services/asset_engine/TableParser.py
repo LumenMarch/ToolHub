@@ -13,24 +13,24 @@ class TableParser(HTMLParser):
         self.current_cell = ""
 
     def handle_starttag(self, tag, attrs):
-        if tag == 'table':
+        if tag == "table":
             self.is_in_table = True
-        elif tag == 'tr' and self.is_in_table:
+        elif tag == "tr" and self.is_in_table:
             self.is_in_row = True
-        elif tag in ('td', 'th') and self.is_in_row:
+        elif tag in ("td", "th") and self.is_in_row:
             self.is_in_data = True
             self.current_cell = ""
 
     def handle_endtag(self, tag):
-        if tag == 'table':
+        if tag == "table":
             self.tables.append(self.current_table)
             self.current_table = []
             self.is_in_table = False
-        elif tag == 'tr' and self.is_in_row:
+        elif tag == "tr" and self.is_in_row:
             self.current_table.append(self.current_row)
             self.current_row = []
             self.is_in_row = False
-        elif tag in ('td', 'th') and self.is_in_data:
+        elif tag in ("td", "th") and self.is_in_data:
             self.current_row.append(self.current_cell)
             self.is_in_data = False
 

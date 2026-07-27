@@ -1,22 +1,32 @@
-
 class pyqtSignal:
-    def __init__(self, *args, **kwargs): pass
-    def connect(self, *args, **kwargs): pass
-    def emit(self, *args, **kwargs): pass
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def connect(self, *args, **kwargs):
+        pass
+
+    def emit(self, *args, **kwargs):
+        pass
+
 
 class QThread:
     pass
 
+
 class QObject:
     pass
+
 
 class QWidget:
     pass
 
+
 def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
+
     return wrapper
+
 
 import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
@@ -26,7 +36,9 @@ import pandas as pd  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
 from app.services.asset_engine.const import NOTES_SFC_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from loguru import logger  # noqa: E402, I001, UP015, F401
-from app.services.asset_engine.TableParser import TableParser  # 使用自定義的 HTML 表格解析器  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.TableParser import (  # noqa: E402
+    TableParser,
+)  # 使用自定義的 HTML 表格解析器  # noqa: E402, I001, UP015, F401
 
 
 class Notes_SFC(QThread):
@@ -122,7 +134,12 @@ class Notes_SFC(QThread):
                         for j, col in enumerate(row_values)
                     ]
                     df_polars = df_polars.slice(i + 1).rename(
-                        {old: new for old, new in zip(df_polars.columns, new_columns,strict=False)}
+                        {
+                            old: new
+                            for old, new in zip(
+                                df_polars.columns, new_columns, strict=False
+                            )
+                        }
                     )
                     # 自动去除资产编号列末尾的点号
                     if "资产编号" in df_polars.columns:
@@ -317,7 +334,11 @@ class Notes_SFC(QThread):
                 sfc_keys = set()
                 for _, row in self.this_SFC_data.iterrows():
                     asset_val = str(row.get(sfc_asset_col, "")).strip()
-                    device_val = str(row.get(sfc_device_col, "")).strip() if sfc_device_col else ""
+                    device_val = (
+                        str(row.get(sfc_device_col, "")).strip()
+                        if sfc_device_col
+                        else ""
+                    )
                     if asset_val and asset_val.lower() not in invalid_values:
                         sfc_keys.add(f"A:{asset_val}")
                     elif device_val and device_val.lower() not in invalid_values:
@@ -347,10 +368,17 @@ class Notes_SFC(QThread):
                 notes_keys = set()
                 for _, row in self.this_Notes_data.iterrows():
                     asset_val = str(row.get(notes_asset_col, "")).strip()
-                    device_val = str(row.get(notes_device_col, "")).strip() if notes_device_col else ""
+                    device_val = (
+                        str(row.get(notes_device_col, "")).strip()
+                        if notes_device_col
+                        else ""
+                    )
                     # 只保留以18-或13-开头的有效资产编号
-                    if asset_val and asset_val.lower() not in invalid_values and \
-                       (asset_val.startswith("18-") or asset_val.startswith("13-")):
+                    if (
+                        asset_val
+                        and asset_val.lower() not in invalid_values
+                        and (asset_val.startswith("18-") or asset_val.startswith("13-"))
+                    ):
                         notes_keys.add(f"A:{asset_val}")
                     elif device_val and device_val.lower() not in invalid_values:
                         notes_keys.add(f"D:{device_val}")
@@ -434,53 +462,99 @@ class Notes_SFC(QThread):
                         by_device = {k[2:] for k in keys if k.startswith("D:")}
                         return by_asset, by_device
 
-                    def filter_by_keys(df, asset_col, device_col, asset_keys, device_keys):
+                    def filter_by_keys(
+                        df, asset_col, device_col, asset_keys, device_keys
+                    ):
                         mask = pd.Series([False] * len(df))
                         if asset_col and asset_keys:
                             am = df[asset_col].astype(str).str.strip().isin(asset_keys)
-                            valid = ~df[asset_col].astype(str).str.strip().str.lower().isin(invalid_values)
+                            valid = ~df[asset_col].astype(
+                                str
+                            ).str.strip().str.lower().isin(invalid_values)
                             mask = mask | (am & valid)
                         if device_col and device_keys:
-                            dm = df[device_col].astype(str).str.strip().isin(device_keys)
+                            dm = (
+                                df[device_col].astype(str).str.strip().isin(device_keys)
+                            )
                             mask = mask | dm
                         return mask
 
                     def fill_na_asset(df, asset_col, device_col):
                         if device_col and asset_col:
-                            na_mask = df[asset_col].astype(str).str.strip().str.lower().isin(invalid_values)
+                            na_mask = (
+                                df[asset_col]
+                                .astype(str)
+                                .str.strip()
+                                .str.lower()
+                                .isin(invalid_values)
+                            )
                             df = df.copy()
                             df.loc[na_mask, asset_col] = df.loc[na_mask, device_col]
                         return df
 
                     # --- 新增资产（来自Notes） ---
                     new_by_asset, new_by_device = split_keys(self.Notes_new_assets)
-                    new_select = [notes_name_col, self.notes_asset_col, notes_keeper_col]
-                    if self.notes_device_col and self.notes_device_col not in new_select:
+                    new_select = [
+                        notes_name_col,
+                        self.notes_asset_col,
+                        notes_keeper_col,
+                    ]
+                    if (
+                        self.notes_device_col
+                        and self.notes_device_col not in new_select
+                    ):
                         new_select.append(self.notes_device_col)
-                    new_mask = filter_by_keys(self.this_Notes_data, self.notes_asset_col,
-                                              self.notes_device_col, new_by_asset, new_by_device)
-                    new_df = self.this_Notes_data[new_mask][new_select].drop_duplicates()
-                    new_df = fill_na_asset(new_df, self.notes_asset_col, self.notes_device_col)
-                    new_df = new_df.rename(columns={
-                        notes_name_col: "资产名称",
-                        self.notes_asset_col: "资产编号",
-                        notes_keeper_col: "保管人"
-                    })[["资产名称", "资产编号", "保管人"]]
+                    new_mask = filter_by_keys(
+                        self.this_Notes_data,
+                        self.notes_asset_col,
+                        self.notes_device_col,
+                        new_by_asset,
+                        new_by_device,
+                    )
+                    new_df = self.this_Notes_data[new_mask][
+                        new_select
+                    ].drop_duplicates()
+                    new_df = fill_na_asset(
+                        new_df, self.notes_asset_col, self.notes_device_col
+                    )
+                    new_df = new_df.rename(
+                        columns={
+                            notes_name_col: "资产名称",
+                            self.notes_asset_col: "资产编号",
+                            notes_keeper_col: "保管人",
+                        }
+                    )[["资产名称", "资产编号", "保管人"]]
 
                     # --- 减少资产（来自SFC） ---
-                    removed_by_asset, removed_by_device = split_keys(self.Notes_removed_assets)
+                    removed_by_asset, removed_by_device = split_keys(
+                        self.Notes_removed_assets
+                    )
                     removed_select = [sfc_name_col, self.sfc_asset_col, sfc_keeper_col]
-                    if self.sfc_device_col and self.sfc_device_col not in removed_select:
+                    if (
+                        self.sfc_device_col
+                        and self.sfc_device_col not in removed_select
+                    ):
                         removed_select.append(self.sfc_device_col)
-                    removed_mask = filter_by_keys(self.this_SFC_data, self.sfc_asset_col,
-                                                  self.sfc_device_col, removed_by_asset, removed_by_device)
-                    removed_df = self.this_SFC_data[removed_mask][removed_select].drop_duplicates()
-                    removed_df = fill_na_asset(removed_df, self.sfc_asset_col, self.sfc_device_col)
-                    removed_df = removed_df.rename(columns={
-                        sfc_name_col: "设备名称",
-                        self.sfc_asset_col: "资产编号",
-                        sfc_keeper_col: "保管人"
-                    })[["设备名称", "资产编号", "保管人"]]
+                    removed_mask = filter_by_keys(
+                        self.this_SFC_data,
+                        self.sfc_asset_col,
+                        self.sfc_device_col,
+                        removed_by_asset,
+                        removed_by_device,
+                    )
+                    removed_df = self.this_SFC_data[removed_mask][
+                        removed_select
+                    ].drop_duplicates()
+                    removed_df = fill_na_asset(
+                        removed_df, self.sfc_asset_col, self.sfc_device_col
+                    )
+                    removed_df = removed_df.rename(
+                        columns={
+                            sfc_name_col: "设备名称",
+                            self.sfc_asset_col: "资产编号",
+                            sfc_keeper_col: "保管人",
+                        }
+                    )[["设备名称", "资产编号", "保管人"]]
 
                     # 初始化工作表
                     pd.DataFrame().to_excel(writer, sheet_name="對比結果", index=False)
