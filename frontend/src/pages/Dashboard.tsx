@@ -46,7 +46,7 @@ const Dashboard: React.FC = () => {
             <Link
               key={tool.id}
               to={tool.path}
-              className="tool-item group relative block py-8 border-b border-zinc-800 hover:border-primary transition-colors duration-500 overflow-hidden"
+              className="tool-item group relative block py-8 border-b border-border hover:border-primary transition-colors duration-500 overflow-hidden"
             >
               {/* Background hover reveal */}
               <div className="absolute inset-0 bg-primary translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[cubic-bezier(0.85,0,0.15,1)] z-0"></div>
