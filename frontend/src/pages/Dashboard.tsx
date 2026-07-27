@@ -63,7 +63,7 @@ const Dashboard: React.FC = () => {
                   </h3>
                 </div>
                 
-                <div className="flex items-center gap-6 md:opacity-0 group-hover:opacity-100 transition-all duration-500 -translate-x-4 group-hover:translate-x-0">
+                <div className="flex items-center gap-6 md:opacity-0 group-hover:opacity-100 transition-[opacity,transform] duration-500 -translate-x-4 group-hover:translate-x-0">
                   <p className="hidden lg:block text-sm font-mono tracking-wide max-w-sm text-right opacity-80">
                     {tool.description}
                   </p>

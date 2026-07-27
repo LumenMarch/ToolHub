@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useRef } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
+import { AuthContext } from '../context/auth-context';
 import { toolsConfig } from '../config/tools';
 import { ThemeToggle } from './ThemeToggle';
 import { gsap } from 'gsap';

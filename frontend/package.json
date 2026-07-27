@@ -13,7 +13,6 @@
     "@fontsource/geist-mono": "^5.3.0",
     "@fontsource/geist-sans": "^5.3.0",
     "@fontsource/noto-serif-sc": "^5.3.0",
-    "@gsap/react": "^2.1.2",
     "@phosphor-icons/react": "^2.1.10",
     "axios": "^1.18.1",
     "clsx": "^2.1.1",
