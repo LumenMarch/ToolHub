@@ -84,6 +84,43 @@ class LeaveResult:
     status_text: str
 
 
+@dataclass(frozen=True)
+class AttendanceOutputRow:
+    key: str
+    values: tuple[Any, ...]
+    display_values: tuple[str, ...]
+    status_text: str
+    anomaly_text: str
+    flags: tuple[str, ...]
+    tone: str
+    attention: bool
+
+
+@dataclass(frozen=True)
+class AttendanceOutputSheet:
+    name: str
+    rows: tuple[AttendanceOutputRow, ...]
+
+
+@dataclass(frozen=True)
+class AttendanceSummary:
+    total_records: int
+    employee_count: int
+    sheet_count: int
+    leave_event_count: int
+    attention_record_count: int
+    overtime_leave_count: int
+    meal_overtime_count: int
+    capture_time_anomaly_count: int
+    missing_entry_count: int
+
+
+@dataclass(frozen=True)
+class AttendanceAnalysis:
+    summary: AttendanceSummary
+    sheets: tuple[AttendanceOutputSheet, ...]
+
+
 class AttendanceService:
     max_leave_minutes = 30
     debounce_seconds = 60
@@ -96,6 +133,19 @@ class AttendanceService:
         attendance_suffix: str,
         shift_content: bytes,
     ) -> bytes:
+        analysis = self.analyze(
+            attendance_content,
+            attendance_suffix,
+            shift_content,
+        )
+        return self.export(analysis)
+
+    def analyze(
+        self,
+        attendance_content: bytes,
+        attendance_suffix: str,
+        shift_content: bytes,
+    ) -> AttendanceAnalysis:
         shifts = self._load_shifts(shift_content)
         sheet_order, records = self._load_attendance(
             attendance_content, attendance_suffix
@@ -122,12 +172,38 @@ class AttendanceService:
             leave_results.update(self._analyze_employee(deduplicated, shifts[emp_id]))
             missing_records.update(self._detect_missing_entries(deduplicated))
 
-        return self._export(
+        sheets = self._build_output_sheets(
             sheet_order,
             records,
             leave_results,
             missing_records,
         )
+        output_rows = [row for sheet in sheets for row in sheet.rows]
+        return AttendanceAnalysis(
+            summary=AttendanceSummary(
+                total_records=len(output_rows),
+                employee_count=len(grouped_records),
+                sheet_count=len(sheets),
+                leave_event_count=sum(bool(row.status_text) for row in output_rows),
+                attention_record_count=sum(row.attention for row in output_rows),
+                overtime_leave_count=sum(
+                    row.status_text == "超时离岗" for row in output_rows
+                ),
+                meal_overtime_count=sum(
+                    row.status_text in {"午餐超时", "晚餐超时"} for row in output_rows
+                ),
+                capture_time_anomaly_count=sum(
+                    "time_anomaly" in row.flags for row in output_rows
+                ),
+                missing_entry_count=sum(
+                    "missing_entry" in row.flags for row in output_rows
+                ),
+            ),
+            sheets=tuple(sheets),
+        )
+
+    def export(self, analysis: AttendanceAnalysis) -> bytes:
+        return self._export(analysis.sheets)
 
     def _load_shifts(self, content: bytes) -> dict[str, ShiftSchedule]:
         try:
@@ -497,21 +573,102 @@ class AttendanceService:
             end += timedelta(days=1)
         return start, end
 
-    def _export(
+    def _build_output_sheets(
         self,
         sheet_order: list[str],
         records: list[AttendanceRecord],
         leave_results: dict[tuple[str, int], LeaveResult],
         missing_records: set[tuple[str, int]],
-    ) -> bytes:
-        workbook = Workbook()
+    ) -> list[AttendanceOutputSheet]:
         records_by_sheet: dict[str, list[AttendanceRecord]] = defaultdict(list)
         for record in records:
             records_by_sheet[record.sheet_name].append(record)
 
-        for sheet_index, sheet_name in enumerate(sheet_order):
+        output_sheets: list[AttendanceOutputSheet] = []
+        for sheet_name in sheet_order:
+            sheet_records = records_by_sheet[sheet_name]
+            sheet_records.sort(
+                key=lambda record: (
+                    record.dept_code,
+                    record.emp_id,
+                    record.effective_time,
+                )
+            )
+
+            output_rows: list[AttendanceOutputRow] = []
+            for record in sheet_records:
+                row_data = list(record.original_data[:14])
+                while len(row_data) < 14:
+                    row_data.append("")
+
+                leave_result = leave_results.get(record.key)
+                if record.direction == "出" and leave_result:
+                    row_data[11] = self._format_duration(leave_result.duration)
+                    row_data[12] = leave_result.status_text
+
+                anomaly_messages: list[str] = []
+                flags: list[str] = []
+                if record.capture_time:
+                    time_difference = abs(
+                        (record.record_time - record.capture_time).total_seconds()
+                    )
+                    if time_difference > 60:
+                        flags.append("time_anomaly")
+                        anomaly_messages.append(
+                            "数据异常（抓拍与记录相差"
+                            f"{self._format_time_difference(time_difference)}）"
+                        )
+                if record.key in missing_records:
+                    flags.append("missing_entry")
+                    anomaly_messages.append("缺少进入时间数据")
+                row_data[13] = "；".join(anomaly_messages)
+
+                status_text = self._string_value(row_data[12])
+                if status_text == "超时离岗":
+                    flags.append("overtime")
+                elif status_text in {"午餐超时", "晚餐超时"}:
+                    flags.extend(("overtime", "meal_overtime"))
+
+                if row_data[13]:
+                    tone = "warning"
+                elif "overtime" in flags:
+                    tone = "danger"
+                elif status_text in {"正常离岗", "午餐时间", "晚餐时间"}:
+                    tone = "success"
+                else:
+                    tone = "default"
+
+                output_rows.append(
+                    AttendanceOutputRow(
+                        key=f"{sheet_name}:{record.source_row}",
+                        values=tuple(row_data),
+                        display_values=tuple(
+                            self._display_value(value) for value in row_data
+                        ),
+                        status_text=status_text,
+                        anomaly_text=self._string_value(row_data[13]),
+                        flags=tuple(flags),
+                        tone=tone,
+                        attention=bool(flags),
+                    )
+                )
+
+            output_sheets.append(
+                AttendanceOutputSheet(
+                    name=sheet_name,
+                    rows=tuple(output_rows),
+                )
+            )
+        return output_sheets
+
+    def _export(
+        self,
+        sheets: tuple[AttendanceOutputSheet, ...],
+    ) -> bytes:
+        workbook = Workbook()
+        for sheet_index, output_sheet in enumerate(sheets):
             worksheet = workbook.active if sheet_index == 0 else workbook.create_sheet()
-            worksheet.title = sheet_name
+            worksheet.title = output_sheet.name
             worksheet.merge_cells("A1:N1")
             worksheet["A1"] = "通行记录"
             worksheet["A1"].font = Font(bold=True, size=12)
@@ -525,70 +682,37 @@ class AttendanceService:
                 )
                 cell.font = Font(color="FFFFFF", bold=True)
 
-            sheet_records = records_by_sheet[sheet_name]
-            sheet_records.sort(
-                key=lambda record: (
-                    record.dept_code,
-                    record.emp_id,
-                    record.effective_time,
-                )
-            )
-
-            for output_row, record in enumerate(sheet_records, start=3):
-                row_data = list(record.original_data[:14])
-                while len(row_data) < 14:
-                    row_data.append("")
-
-                leave_result = leave_results.get(record.key)
-                if record.direction == "出" and leave_result:
-                    row_data[11] = self._format_duration(leave_result.duration)
-                    row_data[12] = leave_result.status_text
-
-                anomaly_messages: list[str] = []
-                if record.capture_time:
-                    time_difference = abs(
-                        (record.record_time - record.capture_time).total_seconds()
-                    )
-                    if time_difference > 60:
-                        anomaly_messages.append(
-                            "数据异常（抓拍与记录相差"
-                            f"{self._format_time_difference(time_difference)}）"
-                        )
-                if record.key in missing_records:
-                    anomaly_messages.append("缺少进入时间数据")
-                row_data[13] = "；".join(anomaly_messages)
-
-                for column, value in enumerate(row_data, start=1):
+            for output_row_number, output_row in enumerate(
+                output_sheet.rows,
+                start=3,
+            ):
+                for column, value in enumerate(output_row.values, start=1):
                     cell = worksheet.cell(
-                        row=output_row,
+                        row=output_row_number,
                         column=column,
                         value=value,
                     )
-                    if record.direction == "出" and row_data[12]:
-                        if row_data[12] in {"正常离岗", "午餐时间", "晚餐时间"}:
-                            cell.fill = PatternFill(
-                                start_color="C6EFCE",
-                                end_color="C6EFCE",
-                                fill_type="solid",
-                            )
-                        elif row_data[12] in {
-                            "超时离岗",
-                            "午餐超时",
-                            "晚餐超时",
-                        }:
-                            cell.fill = PatternFill(
-                                start_color="FFC7CE",
-                                end_color="FFC7CE",
-                                fill_type="solid",
-                            )
-                    if row_data[13]:
+                    if output_row.tone == "success":
+                        cell.fill = PatternFill(
+                            start_color="C6EFCE",
+                            end_color="C6EFCE",
+                            fill_type="solid",
+                        )
+                    elif output_row.tone == "danger":
+                        cell.fill = PatternFill(
+                            start_color="FFC7CE",
+                            end_color="FFC7CE",
+                            fill_type="solid",
+                        )
+                    elif output_row.tone == "warning":
                         cell.fill = PatternFill(
                             start_color="FFEB9C",
                             end_color="FFEB9C",
                             fill_type="solid",
                         )
 
-        if "Sheet" in workbook.sheetnames and "Sheet" not in sheet_order:
+        sheet_names = {sheet.name for sheet in sheets}
+        if "Sheet" in workbook.sheetnames and "Sheet" not in sheet_names:
             del workbook["Sheet"]
 
         for worksheet in workbook.worksheets:
@@ -709,6 +833,15 @@ class AttendanceService:
 
     def _normalize_header(self, value: Any) -> str:
         return self._string_value(value).replace("_x000c_", "").strip()
+
+    def _display_value(self, value: Any) -> str:
+        if value in (None, ""):
+            return ""
+        if isinstance(value, datetime):
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
 
     def _string_value(self, value: Any) -> str:
         return "" if value is None else str(value).strip()

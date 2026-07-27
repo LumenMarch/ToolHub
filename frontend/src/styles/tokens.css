@@ -15,6 +15,12 @@
   --color-rule: #e4e4e7;
   --color-muted-surface: #f4f4f5;
   --color-muted-ink: #71717a;
+  --status-success-surface: #e8f5e9;
+  --status-success-ink: #166534;
+  --status-danger-surface: #fee2e2;
+  --status-danger-ink: #991b1b;
+  --status-warning-surface: #fef3c7;
+  --status-warning-ink: #854d0e;
 
   --font-display: "Noto Serif SC", "Songti SC", ui-serif, serif;
   --font-body: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
@@ -29,6 +35,12 @@ html.dark {
   --color-rule: #27272a;
   --color-muted-surface: #18181b;
   --color-muted-ink: #767680;
+  --status-success-surface: #122819;
+  --status-success-ink: #bbf7d0;
+  --status-danger-surface: #351517;
+  --status-danger-ink: #fecaca;
+  --status-warning-surface: #33290d;
+  --status-warning-ink: #fde68a;
 }
 
 @theme inline {
@@ -41,6 +53,12 @@ html.dark {
   --color-border: var(--color-rule);
   --color-muted: var(--color-muted-surface);
   --color-muted-foreground: var(--color-muted-ink);
+  --color-status-success-surface: var(--status-success-surface);
+  --color-status-success-foreground: var(--status-success-ink);
+  --color-status-danger-surface: var(--status-danger-surface);
+  --color-status-danger-foreground: var(--status-danger-ink);
+  --color-status-warning-surface: var(--status-warning-surface);
+  --color-status-warning-foreground: var(--status-warning-ink);
   --font-sans: var(--font-body);
   --font-mono: var(--font-outlier);
 }
@@ -96,6 +114,21 @@ html.dark .grain-overlay {
 
 .clip-text > span {
   display: inline-block;
+}
+
+/* 分析状态只表达持续处理，不模拟无法获知的百分比进度。 */
+@keyframes attendance-progress {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(310%);
+  }
+}
+
+.attendance-progress > span {
+  animation: attendance-progress 1.4s linear infinite;
 }
 
 @media (prefers-reduced-motion: no-preference) {
