@@ -1,64 +1,30 @@
 import os
-import sys
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
 
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter
+from openpyxl import load_workbook
+from openpyxl.styles import Alignment, PatternFill
+from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
 
-
-# 强行注入 Mock 来绕过对 PyQt5 等桌面 UI 库的依赖
-class MockQThread:
-    def __init__(self, *args, **kwargs):
-        pass
-
-
-class MockQMainWindow:
-    def __init__(self, *args, **kwargs):
-        pass
-
-
-class MockQWidget:
-    def __init__(self, *args, **kwargs):
-        pass
-
-
-pyqt5_mock = MagicMock()
-pyqt5_mock.QtCore.QThread = MockQThread
-pyqt5_mock.QtWidgets.QMainWindow = MockQMainWindow
-pyqt5_mock.QtWidgets.QWidget = MockQWidget
-sys.modules["PyQt5"] = pyqt5_mock
-sys.modules["PyQt5.QtCore"] = pyqt5_mock.QtCore
-sys.modules["PyQt5.QtWidgets"] = pyqt5_mock.QtWidgets
-sys.modules["PyQt5.QtGui"] = MagicMock()
-sys.modules["qfluentwidgets"] = MagicMock()
-
-OLD_PROJECT_PATH = (
-    "/Users/foxlink/Desktop/ATE/ATE/Asset_comparison/Asset_comparison_V1.2.7"
-)
-if OLD_PROJECT_PATH not in sys.path:
-    sys.path.insert(0, OLD_PROJECT_PATH)
-
-from Customer_Customer import Customer_Customer  # noqa: E402
-from Customer_Notes import Customer_Notes  # noqa: E402
-from Finance_Finance import Finance_Finance  # noqa: E402
-from Finance_Notes import Finance_Notes  # noqa: E402
-from Notes_Notes import Notes_Notes  # noqa: E402
-from Notes_SFC import Notes_SFC  # noqa: E402
-from openpyxl import load_workbook  # noqa: E402
-from openpyxl.styles import Alignment, PatternFill  # noqa: E402
-from openpyxl.utils import get_column_letter  # noqa: E402
-from SFC_SFC import SFC_SFC  # noqa: E402
+from app.services.asset_engine.Customer_Customer import Customer_Customer
+from app.services.asset_engine.Customer_Notes import Customer_Notes
+from app.services.asset_engine.Finance_Finance import Finance_Finance
+from app.services.asset_engine.Finance_Notes import Finance_Notes
+from app.services.asset_engine.Notes_Notes import Notes_Notes
+from app.services.asset_engine.Notes_SFC import Notes_SFC
+from app.services.asset_engine.SFC_SFC import SFC_SFC
 
 try:
-    from mod import create_excel_template
+    from app.services.asset_engine.mod import create_excel_template
 except ImportError:
     pass
 try:
-    from pdf_generator import excel_sheet_to_pdf
+    from app.services.asset_engine.pdf_generator import excel_sheet_to_pdf
 except ImportError:
     pass
 
@@ -122,19 +88,13 @@ def _safe_len(d):
         return 0
 
 
-def run_comparisons(req: ComparisonRequest):
-
-    ui = MagicMock()
-    results_info = []
-    summary = {}
-
-    # 1. 财务-财务
-    ff = Finance_Finance(ui)
+def task_ff(req: ComparisonRequest):
+    ff = Finance_Finance(None)
     ff.this_Finance_path = req.thisFinance
     ff.last_Finance_path = req.lastFinance
     ff.Custodian_path = req.custodianData
     ff.Department_path = req.departmentData
-
+    info = None
     if req.thisFinance and req.lastFinance:
         try:
             ff.read_Custodian_data()
@@ -150,60 +110,54 @@ def run_comparisons(req: ComparisonRequest):
                 + _safe_len(ff.new_Department_assets)
                 + _safe_len(ff.removed_Department_assets)
             )
-            results_info.append(
-                {
-                    "key": "ff",
-                    "label": "【财务-财务】",
-                    "has_diff": diff_count > 0,
-                    "msg": f"保管人异常 {_safe_len(ff.check_Custodian)} | 部门异常 {_safe_len(ff.check_Department)}",
-                }
-            )
+            info = {
+                "key": "ff",
+                "label": "【财务-财务】",
+                "has_diff": diff_count > 0,
+                "msg": f"保管人异常 {_safe_len(ff.check_Custodian)} | 部门异常 {_safe_len(ff.check_Department)}",
+            }
         except Exception as e:
-            results_info.append(
-                {
-                    "key": "ff",
-                    "label": "【财务-财务】",
-                    "has_diff": False,
-                    "msg": f"异常: {e}",
-                }
-            )
-    summary["ff"] = ff
+            info = {
+                "key": "ff",
+                "label": "【财务-财务】",
+                "has_diff": False,
+                "msg": f"异常: {e}",
+            }
+    return "ff", ff, info
 
-    # 2. SFC-SFC
-    sfc = SFC_SFC(ui)
+
+def task_sfc(req: ComparisonRequest):
+    sfc = SFC_SFC(None)
     sfc.This_data_Path = req.thisSFC
     sfc.Last_data_path = req.lastSFC
-
+    info = None
     if req.thisSFC and req.lastSFC:
         try:
             sfc.This_SFC_date()
             sfc.Last_SFC_date()
             sfc.SFC_SFC_Comparison()
             diff_count = _safe_len(sfc.new_assets) + _safe_len(sfc.removed_assets)
-            results_info.append(
-                {
-                    "key": "sfc",
-                    "label": "【SFC-SFC】",
-                    "has_diff": diff_count > 0,
-                    "msg": f"新增: {_safe_len(sfc.new_assets)}, 减少: {_safe_len(sfc.removed_assets)}",
-                }
-            )
+            info = {
+                "key": "sfc",
+                "label": "【SFC-SFC】",
+                "has_diff": diff_count > 0,
+                "msg": f"新增: {_safe_len(sfc.new_assets)}, 减少: {_safe_len(sfc.removed_assets)}",
+            }
         except Exception as e:
-            results_info.append(
-                {
-                    "key": "sfc",
-                    "label": "【SFC-SFC】",
-                    "has_diff": False,
-                    "msg": f"异常: {e}",
-                }
-            )
-    summary["sfc"] = sfc
+            info = {
+                "key": "sfc",
+                "label": "【SFC-SFC】",
+                "has_diff": False,
+                "msg": f"异常: {e}",
+            }
+    return "sfc", sfc, info
 
-    # 3. Notes-Notes
-    nn = Notes_Notes(ui)
+
+def task_nn(req: ComparisonRequest):
+    nn = Notes_Notes(None)
     nn.This_Notes_path = req.thisNotes
     nn.Last_Notes_path = req.lastNotes
-
+    info = None
     if req.thisNotes and req.lastNotes:
         try:
             nn.This_Notes_date()
@@ -214,31 +168,28 @@ def run_comparisons(req: ComparisonRequest):
                 + _safe_len(nn.removed_assets)
                 + abs(_safe_len(nn.new_No_assets) - _safe_len(nn.removed_No_assets))
             )
-            results_info.append(
-                {
-                    "key": "nn",
-                    "label": "【Notes-Notes】",
-                    "has_diff": diff_count > 0,
-                    "msg": f"有资产新增: {_safe_len(nn.new_assets)}, 有资产减少: {_safe_len(nn.removed_assets)} | 无资产总差异: {abs(_safe_len(nn.new_No_assets) - _safe_len(nn.removed_No_assets))}",
-                }
-            )
+            info = {
+                "key": "nn",
+                "label": "【Notes-Notes】",
+                "has_diff": diff_count > 0,
+                "msg": f"有资产新增: {_safe_len(nn.new_assets)}, 有资产减少: {_safe_len(nn.removed_assets)} | 无资产总差异: {abs(_safe_len(nn.new_No_assets) - _safe_len(nn.removed_No_assets))}",
+            }
         except Exception as e:
-            results_info.append(
-                {
-                    "key": "nn",
-                    "label": "【Notes-Notes】",
-                    "has_diff": False,
-                    "msg": f"异常: {e}",
-                }
-            )
-    summary["nn"] = nn
+            info = {
+                "key": "nn",
+                "label": "【Notes-Notes】",
+                "has_diff": False,
+                "msg": f"异常: {e}",
+            }
+    return "nn", nn, info
 
-    # 4. 客户-客户
-    cc = Customer_Customer(ui)
+
+def task_cc(req: ComparisonRequest):
+    cc = Customer_Customer(None)
     cc.this_Customer_path = req.thisCustomer
     cc.last_Customer_path = req.lastCustomer
     cc.Custodian_DRI_path = req.driData
-
+    info = None
     if req.thisCustomer and req.lastCustomer and req.driData:
         try:
             cc.get_Customer_DRI()
@@ -248,31 +199,28 @@ def run_comparisons(req: ComparisonRequest):
             diff_count = _safe_len(cc.new_Customer_assets) + _safe_len(
                 cc.removed_Customer_assets
             )
-            results_info.append(
-                {
-                    "key": "cc",
-                    "label": "【客户-客户】",
-                    "has_diff": diff_count > 0,
-                    "msg": f"新增: {_safe_len(cc.new_Customer_assets)}, 减少: {_safe_len(cc.removed_Customer_assets)}",
-                }
-            )
+            info = {
+                "key": "cc",
+                "label": "【客户-客户】",
+                "has_diff": diff_count > 0,
+                "msg": f"新增: {_safe_len(cc.new_Customer_assets)}, 减少: {_safe_len(cc.removed_Customer_assets)}",
+            }
         except Exception as e:
-            results_info.append(
-                {
-                    "key": "cc",
-                    "label": "【客户-客户】",
-                    "has_diff": False,
-                    "msg": f"异常: {e}",
-                }
-            )
-    summary["cc"] = cc
+            info = {
+                "key": "cc",
+                "label": "【客户-客户】",
+                "has_diff": False,
+                "msg": f"异常: {e}",
+            }
+    return "cc", cc, info
 
-    # 5. 财务-Notes
-    fn = Finance_Notes(ui)
+
+def task_fn(req: ComparisonRequest):
+    fn = Finance_Notes(None)
     fn.Finance_path = req.thisFinance
     fn.Notes_path = req.thisNotes
     fn.Custodian_path = req.custodianData
-
+    info = None
     if req.thisFinance and req.thisNotes and req.custodianData:
         try:
             fn.read_Custodian_data()
@@ -280,30 +228,27 @@ def run_comparisons(req: ComparisonRequest):
             fn.read_Notes_data()
             fn.Finance_Notes_Comparison()
             diff_count = _safe_len(fn.removed_assets) + _safe_len(fn.new_assets)
-            results_info.append(
-                {
-                    "key": "fn",
-                    "label": "【财务比Notes】",
-                    "has_diff": diff_count > 0,
-                    "msg": f"财务比Notes新增: {_safe_len(fn.removed_assets)}, 财务比Notes减少: {_safe_len(fn.new_assets)}",
-                }
-            )
+            info = {
+                "key": "fn",
+                "label": "【财务比Notes】",
+                "has_diff": diff_count > 0,
+                "msg": f"财务比Notes新增: {_safe_len(fn.removed_assets)}, 财务比Notes减少: {_safe_len(fn.new_assets)}",
+            }
         except Exception as e:
-            results_info.append(
-                {
-                    "key": "fn",
-                    "label": "【财务比Notes】",
-                    "has_diff": False,
-                    "msg": f"异常: {e}",
-                }
-            )
-    summary["fn"] = fn
+            info = {
+                "key": "fn",
+                "label": "【财务比Notes】",
+                "has_diff": False,
+                "msg": f"异常: {e}",
+            }
+    return "fn", fn, info
 
-    # 6. Notes-SFC
-    ns = Notes_SFC(ui)
+
+def task_ns(req: ComparisonRequest):
+    ns = Notes_SFC(None)
     ns.this_Notes_path = req.thisNotes
     ns.this_SFC_path = req.thisSFC
-
+    info = None
     if req.thisNotes and req.thisSFC:
         try:
             ns.This_Notes_date()
@@ -312,31 +257,28 @@ def run_comparisons(req: ComparisonRequest):
             diff_count = _safe_len(ns.Notes_new_assets) + _safe_len(
                 ns.Notes_removed_assets
             )
-            results_info.append(
-                {
-                    "key": "ns",
-                    "label": "【Notes比SFC】",
-                    "has_diff": diff_count > 0,
-                    "msg": f"Notes比SFC新增: {_safe_len(ns.Notes_new_assets)}, Notes比SFC减少: {_safe_len(ns.Notes_removed_assets)}",
-                }
-            )
+            info = {
+                "key": "ns",
+                "label": "【Notes比SFC】",
+                "has_diff": diff_count > 0,
+                "msg": f"Notes比SFC新增: {_safe_len(ns.Notes_new_assets)}, Notes比SFC减少: {_safe_len(ns.Notes_removed_assets)}",
+            }
         except Exception as e:
-            results_info.append(
-                {
-                    "key": "ns",
-                    "label": "【Notes比SFC】",
-                    "has_diff": False,
-                    "msg": f"异常: {e}",
-                }
-            )
-    summary["ns"] = ns
+            info = {
+                "key": "ns",
+                "label": "【Notes比SFC】",
+                "has_diff": False,
+                "msg": f"异常: {e}",
+            }
+    return "ns", ns, info
 
-    # 7. 客户-Notes
-    cn = Customer_Notes(ui)
+
+def task_cn(req: ComparisonRequest):
+    cn = Customer_Notes(None)
     cn.this_Customer_path = req.thisCustomer
     cn.this_Notes_path = req.thisNotes
     cn.this_Customer_DRI_path = req.driData
-
+    info = None
     if req.thisCustomer and req.thisNotes and req.driData:
         try:
             cn.read_Customer_DRI()
@@ -344,24 +286,46 @@ def run_comparisons(req: ComparisonRequest):
             cn.read_this_Notes_data()
             cn.Customer_Notes_Comparison()
             diff_count = _safe_len(cn.remove_assets) + _safe_len(cn.new_assets)
-            results_info.append(
-                {
-                    "key": "cn",
-                    "label": "【客户比Notes】",
-                    "has_diff": diff_count > 0,
-                    "msg": f"客户比Notes新增: {_safe_len(cn.remove_assets)}, 客户比Notes减少: {_safe_len(cn.new_assets)}",
-                }
-            )
+            info = {
+                "key": "cn",
+                "label": "【客户比Notes】",
+                "has_diff": diff_count > 0,
+                "msg": f"客户比Notes新增: {_safe_len(cn.remove_assets)}, 客户比Notes减少: {_safe_len(cn.new_assets)}",
+            }
         except Exception as e:
-            results_info.append(
-                {
-                    "key": "cn",
-                    "label": "【客户比Notes】",
-                    "has_diff": False,
-                    "msg": f"异常: {e}",
-                }
-            )
-    summary["cn"] = cn
+            info = {
+                "key": "cn",
+                "label": "【客户比Notes】",
+                "has_diff": False,
+                "msg": f"异常: {e}",
+            }
+    return "cn", cn, info
+
+
+def run_comparisons(req: ComparisonRequest):
+    summary = {}
+    results_info = []
+
+    # 使用普通线程池并发执行 7 个比对任务
+    with ThreadPoolExecutor(max_workers=7) as executor:
+        futures = [
+            executor.submit(task_ff, req),
+            executor.submit(task_sfc, req),
+            executor.submit(task_nn, req),
+            executor.submit(task_cc, req),
+            executor.submit(task_fn, req),
+            executor.submit(task_ns, req),
+            executor.submit(task_cn, req),
+        ]
+        for future in futures:
+            key, instance, info = future.result()
+            summary[key] = instance
+            if info:
+                results_info.append(info)
+
+    # 排序以保持输出顺序稳定
+    order = ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
+    results_info.sort(key=lambda x: order.index(x["key"]) if x["key"] in order else 99)
 
     summary["results_info"] = results_info
     return summary
@@ -375,7 +339,6 @@ def apply_review_colors(ws, req_reviews):
         "異常": "EC4337",
     }
 
-    # 绿色填充（用于数据为0的情况）
     green_fill = PatternFill(
         start_color="D0F1AD", end_color="D0F1AD", fill_type="solid"
     )
@@ -399,7 +362,6 @@ def apply_review_colors(ws, req_reviews):
             )
             for coord in coords:
                 cell = ws[coord]
-                # 若为0填充绿色，反之填选项色
                 cv = (
                     str(cell.value).strip().replace("/", "")
                     if cell.value is not None
@@ -441,27 +403,183 @@ def _safe_to_pandas(df):
     return df
 
 
+def estimate_width_by_font(value, font_size=12):
+    value_str = str(value)
+    width = 0
+    for ch in value_str:
+        if "\u4e00" <= ch <= "\u9fff":
+            width += 2.1
+        elif ch.isupper():
+            width += 1.5
+        else:
+            width += 1
+    return width * (font_size / 11)
+
+
+def auto_adjust_row_height(ws, row, col, content, font_size=11, max_chars_per_line=50):
+    lines_by_newline = content.split("\n")
+    total_lines = 0
+    for line in lines_by_newline:
+        if len(line) == 0:
+            total_lines += 1
+        else:
+            total_lines += (len(line) // max_chars_per_line) + 1
+    ws.row_dimensions[row].height = max(20, total_lines * 15)
+
+
+def write_comparison_to_sheet(diff_dict, comment: str, ws):
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    start_col = 3
+    row = 1
+    font = Font(name="Arial", size=12)
+    align_center = Alignment(horizontal="center", vertical="center", wrap_text=False)
+    border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side("thin"),
+    )
+    fill_title_bg = PatternFill(fill_type="solid", fgColor="D9E1F2")
+
+    max_col_widths = dict()
+    categories = list(diff_dict.keys())
+
+    for idx, category in enumerate(categories):
+        df = diff_dict[category]
+        if df is None or df.empty:
+            continue
+
+        title_text = f"【{category}】（{len(df)}笔）"
+        end_col = start_col + len(df.columns)
+        ws.merge_cells(
+            start_row=row, start_column=start_col, end_row=row, end_column=end_col
+        )
+        cell = ws.cell(row=row, column=start_col, value=title_text)
+        cell.font = font
+        cell.alignment = align_center
+        cell.border = border
+        cell.fill = fill_title_bg
+        for col in range(start_col + 1, end_col + 1):
+            ws.cell(row=row, column=col).border = border
+            ws.cell(row=row, column=col).fill = fill_title_bg
+        max_col_widths[start_col] = max(
+            max_col_widths.get(start_col, 0),
+            estimate_width_by_font(title_text, font.size),
+        )
+        ws.row_dimensions[row].height = 25
+        row += 1
+
+        if comment.strip():
+            remark_bg_fill = PatternFill(
+                start_color="DEDEDE", end_color="DEDEDE", fill_type="solid"
+            )
+            remark_cell = ws.cell(row=row, column=start_col, value="備註：")
+            remark_cell.border = border
+            remark_cell.font = font
+            remark_cell.alignment = align_center
+            remark_cell.fill = remark_bg_fill
+            max_col_widths[start_col] = max(
+                max_col_widths.get(start_col, 0),
+                estimate_width_by_font("備註：", font.size),
+            )
+
+            ws.merge_cells(
+                start_row=row,
+                start_column=start_col + 1,
+                end_row=row,
+                end_column=start_col + 3,
+            )
+            cell = ws.cell(row=row, column=start_col + 1, value=comment.strip())
+            cell.font = font
+            cell.alignment = Alignment(
+                horizontal="center", vertical="center", wrap_text=True
+            )
+            cell.border = border
+            cell.fill = remark_bg_fill
+
+            for col in range(start_col + 1, start_col + 4):
+                cell = ws.cell(row=row, column=col)
+                cell.border = border
+                cell.fill = remark_bg_fill
+                max_col_widths[col] = max(
+                    max_col_widths.get(col, 0),
+                    estimate_width_by_font(comment.strip(), font.size),
+                )
+
+            auto_adjust_row_height(ws, row, start_col + 1, comment.strip())
+            row += 1
+
+        ws.cell(row=row, column=start_col, value="No.").font = font
+        ws.cell(row=row, column=start_col).alignment = align_center
+        ws.cell(row=row, column=start_col).border = border
+        max_col_widths[start_col] = max(
+            max_col_widths.get(start_col, 0), estimate_width_by_font("No.", font.size)
+        )
+
+        for col_idx, col_name in enumerate(df.columns, start=start_col + 1):
+            cell = ws.cell(row=row, column=col_idx, value=col_name)
+            cell.font = font
+            cell.alignment = align_center
+            cell.border = border
+            max_col_widths[col_idx] = max(
+                max_col_widths.get(col_idx, 0),
+                estimate_width_by_font(col_name, font.size),
+            )
+        row += 1
+
+        for i, (_, row_series) in enumerate(df.iterrows(), start=1):
+            cell = ws.cell(row=row, column=start_col, value=i)
+            cell.font = font
+            cell.alignment = align_center
+            cell.border = border
+            max_col_widths[start_col] = max(
+                max_col_widths.get(start_col, 0),
+                estimate_width_by_font(str(i), font.size),
+            )
+
+            for col_idx, value in enumerate(row_series, start=start_col + 1):
+                value_str = str(value)
+                cell = ws.cell(row=row, column=col_idx, value=value_str)
+                cell.font = font
+                cell.alignment = align_center
+                cell.border = border
+                max_col_widths[col_idx] = max(
+                    max_col_widths.get(col_idx, 0),
+                    estimate_width_by_font(value_str, font.size),
+                )
+            row += 1
+
+        if (
+            category == "本月新增"
+            and idx + 1 < len(categories)
+            and categories[idx + 1] == "本月减少"
+        ):
+            row += 3
+        else:
+            row += 1
+
+    for col_idx, width in max_col_widths.items():
+        col_letter = get_column_letter(col_idx)
+        adjusted_width = min(width * 1.2, 50)
+        ws.column_dimensions[col_letter].width = adjusted_width
+
+
 @router.post("/save")
 async def save_results(req: ComparisonRequest):
     try:
         summary = run_comparisons(req)
-        ff = summary["ff"]
-        nn = summary["nn"]
-        sfc = summary["sfc"]
-        cc = summary["cc"]
-        fn = summary["fn"]
-        ns = summary["ns"]
-        cn = summary["cn"]
+        ff = summary.get("ff")
+        nn = summary.get("nn")
+        sfc = summary.get("sfc")
+        cc = summary.get("cc")
+        fn = summary.get("fn")
+        ns = summary.get("ns")
+        cn = summary.get("cn")
 
-        fs_res = summary.get("fs_res")
-        ns_res = summary.get("ns_res")
-        sfc_res = summary.get("sfc_res")
-        cs_res = summary.get("cs_res")
-        fns_res = summary.get("fns_res")
-        nss_res = summary.get("nss_res")
-        cns_res = summary.get("cns_res")
+        from app.services.asset_engine.const import SAVE_CHECK_PATH
 
-        SAVE_CHECK_PATH = Path.home() / "Desktop" / "对比数据" / "对比结果"
         if not os.path.exists(SAVE_CHECK_PATH):
             os.makedirs(SAVE_CHECK_PATH, exist_ok=True)
 
@@ -485,26 +603,20 @@ async def save_results(req: ComparisonRequest):
         wb = load_workbook(save_all_path)
         ws = wb["差异总结"]
 
-        # Numbers Mapping
         this_Finance_Custodian_assets = _safe_len(
             getattr(ff, "this_Custodian_assets", [])
         )
         last_Finance_Custodian_assets = _safe_len(
             getattr(ff, "last_Custodian_assets", [])
         )
-
         this_Notes_assets = _safe_len(getattr(nn, "this_assets_filtered", []))
         last_Notes_assets = _safe_len(getattr(nn, "last_assets_filtered", []))
-
         this_Notes_NO_assets = getattr(nn, "this_invalid_all_rows", 0)
         last_Notes_NO_assets = getattr(nn, "last_invalid_all_rows", 0)
-
         this_SFC_assets = _safe_len(getattr(sfc, "this_SFC_assets", []))
         last_SFC_assets = _safe_len(getattr(sfc, "last_SFC_assets", []))
-
         this_Customer_assets = _safe_len(getattr(cc, "this_Customer_assets", []))
         last_Customer_assets = _safe_len(getattr(cc, "last_Customer_assets", []))
-
         this_Notes_Customer_assets = _safe_len(getattr(cn, "this_Notes_assets", []))
 
         data_rows = [
@@ -565,7 +677,6 @@ async def save_results(req: ComparisonRequest):
         ws.merge_cells("G8:G9")
         ws.merge_cells("A12:G12")
 
-        # Apply Status Colors
         apply_review_colors(ws, req.reviews)
 
         remark_mapping = [
@@ -587,24 +698,10 @@ async def save_results(req: ComparisonRequest):
 
         wb.save(save_all_path)
 
-        # 写出 Excel 各项清单（原版通过 RemitUI write_comparison_to_sheet 写出）
-        from PyQt5.QtWidgets import QApplication
-
-        QApplication.instance() or QApplication(sys.argv)
-        from MyUI import RemitUI
-
-        remit_ui = RemitUI()
-
-        # Structure expects:
-        # comparisons = [("sheet_name", diff_dict, comment), ...]
-        # diff_dict = {"Category": pd.DataFrame}
-
-        # Gather data
-
         comparisons = []
 
         # 1-财务 VS 财务
-        if fs_res or ff:
+        if ff:
             ff_dict = {}
             if getattr(ff, "new_Custodian_assets", []):
                 df = _safe_to_pandas(ff.this_Finance_data)
@@ -640,7 +737,7 @@ async def save_results(req: ComparisonRequest):
                 )
 
         # 2-Notes VS Notes
-        if ns_res or nn:
+        if nn:
             nn_dict = {}
             if getattr(nn, "new_assets", []):
                 df = _safe_to_pandas(nn.this_Notes_data)
@@ -674,7 +771,7 @@ async def save_results(req: ComparisonRequest):
                 )
 
         # 3-SFC VS SFC
-        if sfc_res or sfc:
+        if sfc:
             ss_dict = {}
             if getattr(sfc, "new_assets", []):
                 df = _safe_to_pandas(sfc.this_SFC_data)
@@ -692,7 +789,7 @@ async def save_results(req: ComparisonRequest):
                 )
 
         # 4-客户资产 VS 客户资产
-        if cs_res or cc:
+        if cc:
             cc_dict = {}
             if getattr(cc, "new_Customer_assets", []):
                 df = _safe_to_pandas(cc.this_Customer_data)
@@ -710,7 +807,7 @@ async def save_results(req: ComparisonRequest):
                 )
 
         # 5-财务 VS Notes
-        if fns_res or fn:
+        if fn:
             fn_dict = {}
             if getattr(fn, "new_assets", []):
                 df = _safe_to_pandas(fn.Notes_data)
@@ -728,7 +825,7 @@ async def save_results(req: ComparisonRequest):
                 )
 
         # 6-Notes VS SFC
-        if nss_res or ns:
+        if ns:
             ns_dict = {}
             if getattr(ns, "Notes_new_assets", []):
                 df = _safe_to_pandas(ns.this_Notes_data)
@@ -746,7 +843,7 @@ async def save_results(req: ComparisonRequest):
                 )
 
         # 7-Notes客户资产 VS 客户系统资产
-        if cns_res or cn:
+        if cn:
             cn_dict = {}
             if getattr(cn, "remove_assets", []):
                 df = _safe_to_pandas(cn.this_Customer_data)
@@ -767,7 +864,6 @@ async def save_results(req: ComparisonRequest):
                     )
                 )
 
-        # Append using openpyxl directly like the original UI does
         wb = load_workbook(save_all_path)
         for sheet_name, diff_dict, comment in comparisons:
             if sheet_name not in wb.sheetnames:
@@ -780,13 +876,12 @@ async def save_results(req: ComparisonRequest):
                     for key, value in diff_dict.items()
                     if key.startswith("依保管人")
                 }
-                remit_ui.write_comparison_to_sheet(excel_diff_dict, comment, ws_comp)
+                write_comparison_to_sheet(excel_diff_dict, comment, ws_comp)
             else:
-                remit_ui.write_comparison_to_sheet(diff_dict, comment, ws_comp)
+                write_comparison_to_sheet(diff_dict, comment, ws_comp)
 
         wb.save(save_all_path)
 
-        # Generate PDF as in the original logic
         try:
             excel_sheet_to_pdf(save_all_path, "差异总结", save_pdf_path)
             msg_appendix = f"\n📄 PDF已生成: {save_pdf_path}"
@@ -810,11 +905,18 @@ async def save_results(req: ComparisonRequest):
 async def export_single_module(module: str, req: ComparisonRequest):
     try:
         summary = run_comparisons(req)
+        from app.services.asset_engine.const import (
+            CUSTOMER_CUSTOMER_SAVE_PATH,
+            CUSTOMER_NOTES_SAVE_PATH,
+            FINANCE_FINANCE_SAVE_PATH,
+            FINANCE_NOTES_SAVE_PATH,
+            NOTES_NOTES_SAVE_PATH,
+            NOTES_SFC_SAVE_PATH,
+            SFC_SFC_SAVE_PATH,
+        )
 
         if module == "ff":
             summary["ff"].Save_Check()
-            from const import FINANCE_FINANCE_SAVE_PATH
-
             return {
                 "status": "success",
                 "message": f"财务对比单独导出成功:\n{FINANCE_FINANCE_SAVE_PATH}",
@@ -822,8 +924,6 @@ async def export_single_module(module: str, req: ComparisonRequest):
 
         elif module == "nn":
             summary["nn"].Save_Notes_Notes_Comparison()
-            from const import NOTES_NOTES_SAVE_PATH
-
             return {
                 "status": "success",
                 "message": f"Notes对比单独导出成功:\n{NOTES_NOTES_SAVE_PATH}",
@@ -831,8 +931,6 @@ async def export_single_module(module: str, req: ComparisonRequest):
 
         elif module == "sfc":
             summary["sfc"].Save_SFC_SFC_Comparison()
-            from const import SFC_SFC_SAVE_PATH
-
             return {
                 "status": "success",
                 "message": f"SFC对比单独导出成功:\n{SFC_SFC_SAVE_PATH}",
@@ -840,8 +938,6 @@ async def export_single_module(module: str, req: ComparisonRequest):
 
         elif module == "cc":
             summary["cc"].Save_Customer_Customer_Comparison()
-            from const import CUSTOMER_CUSTOMER_SAVE_PATH
-
             return {
                 "status": "success",
                 "message": f"客户对比单独导出成功:\n{CUSTOMER_CUSTOMER_SAVE_PATH}",
@@ -849,8 +945,6 @@ async def export_single_module(module: str, req: ComparisonRequest):
 
         elif module == "fn":
             summary["fn"].Save_Finance_Notes_Comparison()
-            from const import FINANCE_NOTES_SAVE_PATH
-
             return {
                 "status": "success",
                 "message": f"财务-Notes对比单独导出成功:\n{FINANCE_NOTES_SAVE_PATH}",
@@ -858,8 +952,6 @@ async def export_single_module(module: str, req: ComparisonRequest):
 
         elif module == "ns":
             summary["ns"].Save_Notes_SFC_Comparison()
-            from const import NOTES_SFC_SAVE_PATH
-
             return {
                 "status": "success",
                 "message": f"Notes-SFC对比单独导出成功:\n{NOTES_SFC_SAVE_PATH}",
@@ -867,8 +959,6 @@ async def export_single_module(module: str, req: ComparisonRequest):
 
         elif module == "cn":
             summary["cn"].Save_Customer_Notes_Comparison()
-            from const import CUSTOMER_NOTES_SAVE_PATH
-
             return {
                 "status": "success",
                 "message": f"客户-Notes对比单独导出成功:\n{CUSTOMER_NOTES_SAVE_PATH}",
