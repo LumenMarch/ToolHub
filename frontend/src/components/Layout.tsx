@@ -18,9 +18,12 @@ const Layout: React.FC = () => {
       location.pathname.startsWith(`${tool.path}/`),
   );
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      navigate('/login');
+    }
   };
 
   // 导航只在用户允许动态效果时执行入场动画。
@@ -81,7 +84,7 @@ const Layout: React.FC = () => {
           </span>
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={() => void handleLogout()}
             className="group relative inline-flex min-h-11 items-center overflow-hidden whitespace-nowrap px-1 text-[0.8125rem] font-mono uppercase tracking-widest transition-colors hover:text-primary active:translate-y-px"
           >
             <span className="relative z-10">断开连接</span>

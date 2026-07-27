@@ -3,7 +3,7 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { AuthContext } from '../context/auth-context';
 
 const ProtectedRoute: React.FC = () => {
-  const { token, isLoading } = useContext(AuthContext);
+  const { user, isLoading } = useContext(AuthContext);
 
   if (isLoading) {
     return (
@@ -13,7 +13,7 @@ const ProtectedRoute: React.FC = () => {
     );
   }
 
-  if (!token) {
+  if (!user) {
     return <Navigate to="/login" replace />;
   }
 

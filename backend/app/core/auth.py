@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import InvalidTokenError
 from sqlalchemy.orm import Session
@@ -11,7 +11,10 @@ from app.core.config import settings
 from app.crud.crud_user import get_user_by_username
 from app.models.user import User
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_V1_STR}/auth/token",
+    auto_error=False,
+)
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
@@ -28,13 +31,22 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 
 
 def get_current_user(
-    db: Session = Depends(deps.get_db), token: str = Depends(oauth2_scheme)
+    db: Session = Depends(deps.get_db),
+    bearer_token: str | None = Depends(oauth2_scheme),
+    session_token: str | None = Cookie(
+        default=None,
+        alias=settings.AUTH_COOKIE_NAME,
+    ),
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    token = bearer_token or session_token
+    if token is None:
+        raise credentials_exception
+
     try:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]

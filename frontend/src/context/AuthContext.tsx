@@ -6,58 +6,54 @@ import type { User } from './auth-context';
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem('token'),
-  );
   const [isLoading, setIsLoading] = useState(true);
 
-  const login = useCallback((newToken: string) => {
-    localStorage.setItem('token', newToken);
-    setToken(newToken);
+  const login = useCallback((authenticatedUser: User) => {
+    setUser(authenticatedUser);
   }, []);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('token');
-    setToken(null);
-    setUser(null);
+  const logout = useCallback(async () => {
+    try {
+      await api.post('/auth/logout');
+    } finally {
+      setUser(null);
+    }
   }, []);
 
   useEffect(() => {
     let ignore = false;
 
     const fetchUser = async () => {
-      if (token) {
-        try {
-          const response = await api.get('/users/me');
-          if (!ignore) {
-            setUser(response.data);
-          }
-        } catch (error) {
-          if (!ignore) {
-            console.error('Failed to fetch user', error);
-            logout();
-          }
+      try {
+        const response = await api.get('/users/me');
+        if (!ignore) {
+          setUser(response.data);
         }
-      }
-      if (!ignore) {
-        setIsLoading(false);
+      } catch {
+        if (!ignore) {
+          setUser(null);
+        }
+      } finally {
+        if (!ignore) {
+          setIsLoading(false);
+        }
       }
     };
 
     void fetchUser();
 
-    const handleUnauthorized = () => logout();
+    const handleUnauthorized = () => setUser(null);
 
     window.addEventListener('unauthorized', handleUnauthorized);
     return () => {
       ignore = true;
       window.removeEventListener('unauthorized', handleUnauthorized);
     };
-  }, [logout, token]);
+  }, []);
 
   const value = useMemo(
-    () => ({ user, token, login, logout, isLoading }),
-    [isLoading, login, logout, token, user],
+    () => ({ user, login, logout, isLoading }),
+    [isLoading, login, logout, user],
   );
 
   return (
