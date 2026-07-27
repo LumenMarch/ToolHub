@@ -26,7 +26,6 @@ import pandas as pd  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
 from app.services.asset_engine.const import NOTES_SFC_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from loguru import logger  # noqa: E402, I001, UP015, F401
-from app.services.asset_engine.mod import safe_thread_run  # noqa: E402, I001, UP015, F401
 from app.services.asset_engine.TableParser import TableParser  # 使用自定義的 HTML 表格解析器  # noqa: E402, I001, UP015, F401
 
 

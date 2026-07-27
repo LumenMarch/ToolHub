@@ -27,7 +27,6 @@ import pandas as pd  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
 from app.services.asset_engine.const import CUSTOMER_NOTES_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from loguru import logger  # noqa: E402, I001, UP015, F401
-from app.services.asset_engine.mod import safe_thread_run  # noqa: E402, I001, UP015, F401
 
 Notes_RFID_rex = re.compile(r"(A15.*)")
 Notes_RFID_rex_2 = re.compile(r"\S.*(A15.*)")

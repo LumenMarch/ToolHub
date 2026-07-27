@@ -26,7 +26,6 @@ import pandas as pd  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
 from app.services.asset_engine.const import NOTES_NOTES_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from loguru import logger  # noqa: E402, I001, UP015, F401
-from app.services.asset_engine.mod import safe_thread_run  # noqa: E402, I001, UP015, F401
 
 No_CheckRFID = ["A1300011C5C3", "A13000103933", "A1300010E606"]
 
