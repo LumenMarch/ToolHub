@@ -12,21 +12,29 @@ from pydantic import BaseModel
 
 # 强行注入 Mock 来绕过对 PyQt5 等桌面 UI 库的依赖
 class MockQThread:
-    def __init__(self, *args, **kwargs): pass
+    def __init__(self, *args, **kwargs):
+        pass
+
+
 class MockQMainWindow:
-    def __init__(self, *args, **kwargs): pass
+    def __init__(self, *args, **kwargs):
+        pass
+
+
 class MockQWidget:
-    def __init__(self, *args, **kwargs): pass
+    def __init__(self, *args, **kwargs):
+        pass
+
 
 pyqt5_mock = MagicMock()
 pyqt5_mock.QtCore.QThread = MockQThread
 pyqt5_mock.QtWidgets.QMainWindow = MockQMainWindow
 pyqt5_mock.QtWidgets.QWidget = MockQWidget
-sys.modules['PyQt5'] = pyqt5_mock
-sys.modules['PyQt5.QtCore'] = pyqt5_mock.QtCore
-sys.modules['PyQt5.QtWidgets'] = pyqt5_mock.QtWidgets
-sys.modules['PyQt5.QtGui'] = MagicMock()
-sys.modules['qfluentwidgets'] = MagicMock()
+sys.modules["PyQt5"] = pyqt5_mock
+sys.modules["PyQt5.QtCore"] = pyqt5_mock.QtCore
+sys.modules["PyQt5.QtWidgets"] = pyqt5_mock.QtWidgets
+sys.modules["PyQt5.QtGui"] = MagicMock()
+sys.modules["qfluentwidgets"] = MagicMock()
 
 OLD_PROJECT_PATH = (
     "/Users/foxlink/Desktop/ATE/ATE/Asset_comparison/Asset_comparison_V1.2.7"
