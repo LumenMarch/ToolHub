@@ -8,7 +8,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import { toolsConfig } from './config/tools';
 
-// A minimal brutalist loading spinner for Suspense fallback
+// Suspense 使用极简粗野主义加载提示。
 const SuspendFallback = () => (
   <div className="w-full h-[60vh] flex items-center justify-center">
     <div className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground animate-pulse">
@@ -29,11 +29,11 @@ function App() {
               <Route element={<Layout />}>
                 <Route path="/" element={<Dashboard />} />
                 
-                {/* Dynamically generate routes from toolsConfig */}
+                {/* 根据工具配置动态生成嵌套路由。 */}
                 {toolsConfig.map((tool) => (
                   <Route 
                     key={tool.id} 
-                    path={tool.path.replace(/^\//, '')} // remove leading slash if present for nested routing
+                    path={tool.path.replace(/^\//, '')} // 嵌套路由不保留开头斜杠。
                     element={
                       <Suspense fallback={<SuspendFallback />}>
                         <tool.component />

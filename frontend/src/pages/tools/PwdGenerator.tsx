@@ -14,6 +14,10 @@ const PwdGenerator: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
     const ctx = gsap.context(() => {
       gsap.to('.clip-text > span', {
         y: 0,
@@ -46,7 +50,10 @@ const PwdGenerator: React.FC = () => {
     setPassword(newPassword);
     setCopied(false);
 
-    if (pwdDisplayRef.current) {
+    if (
+      pwdDisplayRef.current &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
       gsap.fromTo(pwdDisplayRef.current, 
         { opacity: 0, y: 10 }, 
         { opacity: 1, y: 0, duration: 0.5, ease: "expo.out" }
@@ -75,7 +82,7 @@ const PwdGenerator: React.FC = () => {
       </div>
 
       <div className="w-full max-w-4xl relative z-10">
-        {/* Massive Password Display */}
+        {/* 大尺寸密钥展示 */}
         <div className="relative mb-16 group gsap-reveal">
           <div 
             ref={pwdDisplayRef}
@@ -85,15 +92,16 @@ const PwdGenerator: React.FC = () => {
           </div>
           <button
             onClick={handleCopy}
+            aria-label={copied ? '密钥已复制' : '复制密钥到剪贴板'}
             className="absolute right-0 top-1/2 -translate-y-1/2 p-4 text-muted-foreground hover:text-primary transition-colors active:scale-90"
             title="复制到剪贴板"
           >
-            {copied ? <span className="font-mono text-xs uppercase tracking-widest text-primary">已复制</span> : <Copy weight="bold" className="w-8 h-8" />}
+            {copied ? <span role="status" className="font-mono text-xs uppercase tracking-widest text-primary">已复制</span> : <Copy weight="bold" className="w-8 h-8" />}
           </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12 gsap-reveal">
-          {/* Controls */}
+          {/* 密钥控制项 */}
           <div className="space-y-12">
             <div>
               <div className="flex justify-between items-end mb-6">
@@ -106,6 +114,7 @@ const PwdGenerator: React.FC = () => {
                 max="64"
                 value={length}
                 onChange={(e) => setLength(Number(e.target.value))}
+                aria-label="密钥长度"
                 className="w-full h-[2px] bg-border rounded-none appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-none active:[&::-webkit-slider-thumb]:scale-75 transition-all"
               />
             </div>
