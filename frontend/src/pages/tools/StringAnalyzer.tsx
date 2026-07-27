@@ -11,6 +11,10 @@ const StringAnalyzer: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
     const ctx = gsap.context(() => {
       gsap.to('.clip-text > span', {
         y: 0,
@@ -44,12 +48,14 @@ const StringAnalyzer: React.FC = () => {
       const res = await api.post('/tools/string/process', { text: input, action });
       setResult({ action, data: res.data.result });
       
-      setTimeout(() => {
-        gsap.fromTo('.result-box',
-          { opacity: 0, x: -20 },
-          { opacity: 1, x: 0, duration: 0.6, ease: 'expo.out' }
-        );
-      }, 50);
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        setTimeout(() => {
+          gsap.fromTo('.result-box',
+            { opacity: 0, x: -20 },
+            { opacity: 1, x: 0, duration: 0.6, ease: 'expo.out' }
+          );
+        }, 50);
+      }
 
     } catch (err: any) {
       setError(err.response?.data?.detail?.toUpperCase() || '系统发生错误');
@@ -69,7 +75,7 @@ const StringAnalyzer: React.FC = () => {
 
       <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-16 xl:gap-24 relative z-10">
         
-        {/* Left: Input & Actions */}
+        {/* 左侧输入与操作 */}
         <div className="gsap-reveal flex flex-col">
           <div className="relative group mb-12">
             <textarea
@@ -79,12 +85,14 @@ const StringAnalyzer: React.FC = () => {
               placeholder=" "
               spellCheck={false}
               id="payload"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'payload-error' : undefined}
             />
             <label htmlFor="payload" className="absolute left-0 top-4 text-muted-foreground font-mono text-[11px] tracking-[0.2em] uppercase transition-all duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8">
               原始数据 (Payload)
             </label>
             {error && (
-              <div className="absolute -bottom-8 left-0 text-[11px] font-mono tracking-widest text-primary uppercase">
+              <div id="payload-error" role="alert" className="absolute -bottom-8 left-0 text-[11px] font-mono tracking-widest text-primary uppercase">
                 [ 异常: {error} ]
               </div>
             )}
@@ -110,13 +118,13 @@ const StringAnalyzer: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Output */}
+        {/* 右侧输出 */}
         <div className="gsap-reveal flex flex-col pt-4 lg:pt-0">
           <p className="text-[10px] font-mono tracking-[0.2em] text-muted-foreground mb-6 uppercase">输出流 (Output Stream)</p>
           
           <div className="flex-1 min-h-[300px] border-l-2 border-border pl-8 md:pl-12">
             {loading ? (
-              <div className="text-3xl font-bold tracking-tighter uppercase text-muted-foreground animate-pulse">
+              <div role="status" className="text-3xl font-bold tracking-tighter uppercase text-muted-foreground animate-pulse">
                 处理中...
               </div>
             ) : result ? (

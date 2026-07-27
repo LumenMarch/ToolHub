@@ -1,0 +1,160 @@
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4
+ * macrostructure: Awwwards Split Canvas · tone: brutalist-kinetic
+ * theme: original dual-mode · anchor hue: modern-blue / acid-green
+ * display: Noto Serif SC 700 · body: Geist Sans 400 · outlier: Geist Mono 400
+ */
+
+@import "tailwindcss";
+
+:root {
+  --color-paper: #ffffff;
+  --color-ink: #09090b;
+  --color-accent: #3b82f6;
+  --color-accent-ink: #ffffff;
+  --color-surface: transparent;
+  --color-rule: #e4e4e7;
+  --color-muted-surface: #f4f4f5;
+  --color-muted-ink: #71717a;
+
+  --font-display: "Noto Serif SC", "Songti SC", ui-serif, serif;
+  --font-body: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-outlier: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+html.dark {
+  --color-paper: #050505;
+  --color-ink: #f4f4f5;
+  --color-accent: #d4ff00;
+  --color-accent-ink: #000000;
+  --color-rule: #27272a;
+  --color-muted-surface: #18181b;
+  --color-muted-ink: #767680;
+}
+
+@theme inline {
+  --color-background: var(--color-paper);
+  --color-foreground: var(--color-ink);
+  --color-primary: var(--color-accent);
+  --color-primary-foreground: var(--color-accent-ink);
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-ink);
+  --color-border: var(--color-rule);
+  --color-muted: var(--color-muted-surface);
+  --color-muted-foreground: var(--color-muted-ink);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-outlier);
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+h1,
+h2,
+h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-display);
+  font-style: normal;
+}
+
+:where(a, button):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* 胶片噪点在明亮模式下降低透明度，避免画面显脏。 */
+.grain-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.02; /* lighter in light mode */
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+html.dark .grain-overlay {
+  opacity: 0.04;
+}
+
+/* 文本切片用于 GSAP 入场动画。 */
+.clip-text {
+  overflow: hidden;
+  display: inline-block;
+  line-height: 1.1;
+  padding-bottom: 0.1em;
+}
+
+.clip-text > span {
+  display: inline-block;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .clip-text > span {
+    transform: translateY(100%);
+  }
+}
+
+/* 无框输入仅保留底部边界。 */
+.awwwards-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  padding: 1rem 0;
+  font-size: 1.5rem;
+  transition: border-color 0.4s ease;
+  color: var(--color-foreground);
+}
+
+.awwwards-input:focus {
+  border-bottom-color: var(--color-primary);
+}
+
+.awwwards-input:focus-visible {
+  outline: none;
+  box-shadow: 0 2px 0 var(--color-primary);
+}
+
+/* 自动填充继承当前主题颜色。 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px var(--color-background) inset !important;
+  -webkit-text-fill-color: var(--color-foreground) !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* 隐藏滚动条以保留沉浸式画布。 */
+::-webkit-scrollbar {
+  display: none;
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .clip-text > span {
+    transform: none !important;
+  }
+}

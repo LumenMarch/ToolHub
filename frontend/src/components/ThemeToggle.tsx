@@ -17,11 +17,13 @@ export function ThemeToggle() {
 
   return (
     <button
+      type="button"
       onClick={toggleTheme}
       className={cn(
         "p-2 transition-all duration-300 rounded-md bg-transparent border border-border text-muted-foreground hover:text-foreground hover:bg-muted"
       )}
       title={`切换主题 (当前: ${isDark ? '暗黑模式' : '明亮模式'})`}
+      aria-label={`切换主题，当前为${isDark ? '暗黑模式' : '明亮模式'}`}
     >
       {isDark ? (
         <Moon weight="fill" className="w-4 h-4" />
