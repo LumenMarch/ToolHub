@@ -27,9 +27,10 @@ line-length = 88
 [tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
-    "W",  # pyflakes warnings
-    "F",  # pyflakes
+    "W",  # pycodestyle warnings
+    "F",  # Pyflakes
     "I",  # isort
+    "UP", # pyupgrade
     "B",  # flake8-bugbear
 ]
 ignore = ["B008", "E501", "B904"]
