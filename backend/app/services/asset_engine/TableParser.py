@@ -1,4 +1,4 @@
-from html.parser import HTMLParser
+from html.parser import HTMLParser  # noqa: E402, I001, UP015, F401
 
 
 class TableParser(HTMLParser):

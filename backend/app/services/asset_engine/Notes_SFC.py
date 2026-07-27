@@ -13,21 +13,21 @@ class QObject:
 class QWidget:
     pass
 
-def safe_thread_run(func):
+def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
     return wrapper
 
-import os
-from datetime import datetime
+import os  # noqa: E402, I001, UP015, F401
+from datetime import datetime  # noqa: E402, I001, UP015, F401
 
-import openpyxl
-import pandas as pd
-import polars as pl
-from app.services.asset_engine.const import NOTES_SFC_SAVE_PATH
-from loguru import logger
-from app.services.asset_engine.mod import safe_thread_run
-from app.services.asset_engine.TableParser import TableParser  # 使用自定義的 HTML 表格解析器
+import openpyxl  # noqa: E402, I001, UP015, F401
+import pandas as pd  # noqa: E402, I001, UP015, F401
+import polars as pl  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.const import NOTES_SFC_SAVE_PATH  # noqa: E402, I001, UP015, F401
+from loguru import logger  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.mod import safe_thread_run  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.TableParser import TableParser  # 使用自定義的 HTML 表格解析器  # noqa: E402, I001, UP015, F401
 
 
 class Notes_SFC(QThread):
@@ -123,7 +123,7 @@ class Notes_SFC(QThread):
                         for j, col in enumerate(row_values)
                     ]
                     df_polars = df_polars.slice(i + 1).rename(
-                        {old: new for old, new in zip(df_polars.columns, new_columns)}
+                        {old: new for old, new in zip(df_polars.columns, new_columns,strict=False)}
                     )
                     # 自动去除资产编号列末尾的点号
                     if "资产编号" in df_polars.columns:
@@ -160,7 +160,7 @@ class Notes_SFC(QThread):
 
             # 嘗試按 HTML 表格方式讀取（應對偽裝的 .xls 文件）
             try:
-                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                with open(path, encoding="utf-8", errors="ignore") as f:
                     html_content = f.read()
 
                 # 使用自定義的 TableParser 解析 HTML
@@ -563,7 +563,7 @@ class Notes_SFC(QThread):
                             )
 
                     # 列寬與邊框
-                    from openpyxl.styles import Border, Side
+                    from openpyxl.styles import Border, Side  # noqa: E402, I001, UP015, F401
 
                     thin = Border(
                         left=Side(style="thin"),

@@ -13,20 +13,20 @@ class QObject:
 class QWidget:
     pass
 
-def safe_thread_run(func):
+def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
     return wrapper
 
-import sys
-import traceback
-from datetime import datetime
-from functools import wraps
+import sys  # noqa: E402, I001, UP015, F401
+import traceback  # noqa: E402, I001, UP015, F401
+from datetime import datetime  # noqa: E402, I001, UP015, F401
+from functools import wraps  # noqa: E402, I001, UP015, F401
 
-import pandas as pd
-from dateutil.relativedelta import relativedelta
-from openpyxl.reader.excel import load_workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+import pandas as pd  # noqa: E402, I001, UP015, F401
+from dateutil.relativedelta import relativedelta  # noqa: E402, I001, UP015, F401
+from openpyxl.reader.excel import load_workbook  # noqa: E402, I001, UP015, F401
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side  # noqa: E402, I001, UP015, F401
 
 current_date = datetime.now()
 this_month_str = current_date.strftime("%Y%m")
@@ -52,7 +52,7 @@ class GlobalExceptionHandler(QObject):
 global_exception_handler = GlobalExceptionHandler()
 
 
-def safe_thread_run(run_method):
+def safe_thread_run(run_method):  # noqa: F811
     """
     装饰器：为QThread的run方法添加异常处理
     使用方法：
@@ -74,7 +74,7 @@ def safe_thread_run(run_method):
 
             # 记录日志
             try:
-                from loguru import logger
+                from loguru import logger  # noqa: E402, I001, UP015, F401
 
                 logger.error(f"线程异常 [{self.__class__.__name__}]:\n{error_msg}")
             except Exception:

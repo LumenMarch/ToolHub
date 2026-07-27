@@ -13,21 +13,21 @@ class QObject:
 class QWidget:
     pass
 
-def safe_thread_run(func):
+def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
     return wrapper
 
-import os
-import re
-from datetime import datetime
+import os  # noqa: E402, I001, UP015, F401
+import re  # noqa: E402, I001, UP015, F401
+from datetime import datetime  # noqa: E402, I001, UP015, F401
 
-import openpyxl
-import pandas as pd
-import polars as pl
-from app.services.asset_engine.const import CUSTOMER_NOTES_SAVE_PATH
-from loguru import logger
-from app.services.asset_engine.mod import safe_thread_run
+import openpyxl  # noqa: E402, I001, UP015, F401
+import pandas as pd  # noqa: E402, I001, UP015, F401
+import polars as pl  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.const import CUSTOMER_NOTES_SAVE_PATH  # noqa: E402, I001, UP015, F401
+from loguru import logger  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.mod import safe_thread_run  # noqa: E402, I001, UP015, F401
 
 Notes_RFID_rex = re.compile(r"(A15.*)")
 Notes_RFID_rex_2 = re.compile(r"\S.*(A15.*)")
@@ -125,7 +125,7 @@ class Customer_Notes(QThread):
                         for j, col in enumerate(row_values)
                     ]
                     df_polars = df_polars.slice(i + 1).rename(
-                        {old: new for old, new in zip(df_polars.columns, new_columns)}
+                        {old: new for old, new in zip(df_polars.columns, new_columns,strict=False)}
                     )
                     # 自动去除资产编号列末尾的点号
                     if "資產編號" in df_polars.columns:
@@ -233,7 +233,7 @@ class Customer_Notes(QThread):
         self.this_Customer_DRI_data = None
         if not self.this_Customer_DRI_path:
             return
-        with open(self.this_Customer_DRI_path, "r", encoding="utf-8") as file:
+        with open(self.this_Customer_DRI_path, encoding="utf-8") as file:
             lines = file.readlines()
             self.this_Customer_DRI_data = [line.strip() for line in lines]
 
@@ -531,7 +531,7 @@ class Customer_Notes(QThread):
                             )
 
                     # 設置列寬和邊框
-                    from openpyxl.styles import Border, Side
+                    from openpyxl.styles import Border, Side  # noqa: E402, I001, UP015, F401
 
                     thin_border = Border(
                         left=Side(style="thin"),

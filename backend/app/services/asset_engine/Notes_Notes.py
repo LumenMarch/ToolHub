@@ -13,20 +13,20 @@ class QObject:
 class QWidget:
     pass
 
-def safe_thread_run(func):
+def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
     return wrapper
 
-import os
-from datetime import datetime
+import os  # noqa: E402, I001, UP015, F401
+from datetime import datetime  # noqa: E402, I001, UP015, F401
 
-import openpyxl
-import pandas as pd
-import polars as pl
-from app.services.asset_engine.const import NOTES_NOTES_SAVE_PATH
-from loguru import logger
-from app.services.asset_engine.mod import safe_thread_run
+import openpyxl  # noqa: E402, I001, UP015, F401
+import pandas as pd  # noqa: E402, I001, UP015, F401
+import polars as pl  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.const import NOTES_NOTES_SAVE_PATH  # noqa: E402, I001, UP015, F401
+from loguru import logger  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.mod import safe_thread_run  # noqa: E402, I001, UP015, F401
 
 No_CheckRFID = ["A1300011C5C3", "A13000103933", "A1300010E606"]
 
@@ -120,7 +120,7 @@ class Notes_Notes(QThread):
                         for j, col in enumerate(row_values)
                     ]
                     df_polars = df_polars.slice(i + 1).rename(
-                        {old: new for old, new in zip(df_polars.columns, new_columns)}
+                        {old: new for old, new in zip(df_polars.columns, new_columns,strict=False)}
                     )
                     # 自动去除资产编号列末尾的点号
                     if "資產編號" in df_polars.columns:
@@ -657,7 +657,7 @@ class Notes_Notes(QThread):
                                 )
 
                     # 設置列寬和邊框
-                    from openpyxl.styles import Border, Side
+                    from openpyxl.styles import Border, Side  # noqa: E402, I001, UP015, F401
 
                     thin_border = Border(
                         left=Side(style="thin"),

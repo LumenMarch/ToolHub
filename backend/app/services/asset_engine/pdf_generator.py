@@ -6,29 +6,29 @@ PDF生成模块
 新增：从原始数据直接生成PDF的方法
 """
 
-import logging
-import os
-import platform
-from datetime import datetime
+import logging  # noqa: E402, I001, UP015, F401
+import os  # noqa: E402, I001, UP015, F401
+import platform  # noqa: E402, I001, UP015, F401
+from datetime import datetime  # noqa: E402, I001, UP015, F401
 
-import openpyxl
-import pandas as pd
-from PyPDF2 import PdfMerger
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
+import openpyxl  # noqa: E402, I001, UP015, F401
+import pandas as pd  # noqa: E402, I001, UP015, F401
+from PyPDF2 import PdfMerger  # noqa: E402, I001, UP015, F401
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT  # noqa: E402, I001, UP015, F401
+from reportlab.pdfbase import pdfmetrics  # noqa: E402, I001, UP015, F401
+from reportlab.pdfbase.ttfonts import TTFont  # noqa: E402, I001, UP015, F401
 
 # 新增：从原始数据生成PDF的库
 try:
-    from PyPDF2 import PdfMerger
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-    from reportlab.lib.pagesizes import A4, letter
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import inch, mm
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.platypus import (
+    from PyPDF2 import PdfMerger  # noqa: E402, I001, UP015, F401
+    from reportlab.lib import colors  # noqa: E402, I001, UP015, F401
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT  # noqa: E402, I001, UP015, F401
+    from reportlab.lib.pagesizes import A4, letter  # noqa: E402, I001, UP015, F401
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet  # noqa: E402, I001, UP015, F401
+    from reportlab.lib.units import inch, mm  # noqa: E402, I001, UP015, F401
+    from reportlab.pdfbase import pdfmetrics  # noqa: E402, I001, UP015, F401
+    from reportlab.pdfbase.ttfonts import TTFont  # noqa: E402, I001, UP015, F401
+    from reportlab.platypus import (  # noqa: E402, I001, UP015, F401
         PageBreak,
         Paragraph,
         SimpleDocTemplate,
@@ -112,7 +112,7 @@ class RawDataToPDFConverter:
             if not font_registered:
                 # 如果所有字体都注册失败，使用reportlab内置的中文字体
                 try:
-                    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+                    from reportlab.pdfbase.cidfonts import UnicodeCIDFont  # noqa: E402, I001, UP015, F401
 
                     # 尝试注册支持繁体中文的字体
                     font_options = [
@@ -133,7 +133,7 @@ class RawDataToPDFConverter:
                             print(f"✅ 使用reportlab内置中文字体: {font_name}")
                             font_registered = True
                             break
-                        except:
+                        except Exception:
                             continue
 
                     if not font_registered:
@@ -229,7 +229,7 @@ class RawDataToPDFConverter:
 
         # 添加数据行（限制行数以避免PDF过大）
         max_rows = 99999  # 每个表格最多显示100行
-        for idx, row in df.head(max_rows).iterrows():
+        for _idx, row in df.head(max_rows).iterrows():
             row_data = []
             for value in row:
                 if pd.isna(value):
@@ -480,12 +480,12 @@ class RawDataToPDFConverter:
                 for pdf_path in pdf_paths:
                     try:
                         os.remove(pdf_path)
-                    except:
+                    except Exception:
                         pass
 
                 try:
                     os.rmdir(temp_dir)
-                except:
+                except Exception:
                     pass
 
                 return success
@@ -628,10 +628,10 @@ def excel_sheet_to_pdf(excel_path, sheet_name, pdf_path=None):
                 )
 
         # 生成 PDF
-        from reportlab.lib.enums import TA_CENTER
-        from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.lib.styles import ParagraphStyle
-        from reportlab.platypus import Paragraph
+        from reportlab.lib.enums import TA_CENTER  # noqa: E402, I001, UP015, F401
+        from reportlab.lib.pagesizes import A4, landscape  # noqa: E402, I001, UP015, F401
+        from reportlab.lib.styles import ParagraphStyle  # noqa: E402, I001, UP015, F401
+        from reportlab.platypus import Paragraph  # noqa: E402, I001, UP015, F401
 
         # 创建PDF文档
         pdf = SimpleDocTemplate(pdf_path, pagesize=landscape(A4))

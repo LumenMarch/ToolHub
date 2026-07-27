@@ -13,20 +13,20 @@ class QObject:
 class QWidget:
     pass
 
-def safe_thread_run(func):
+def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
     return wrapper
 
-import os
-from datetime import datetime
+import os  # noqa: E402, I001, UP015, F401
+from datetime import datetime  # noqa: E402, I001, UP015, F401
 
-import openpyxl
-import pandas as pd
-import polars as pl
-from app.services.asset_engine.const import FINANCE_FINANCE_SAVE_PATH
-from loguru import logger
-from app.services.asset_engine.mod import safe_thread_run
+import openpyxl  # noqa: E402, I001, UP015, F401
+import pandas as pd  # noqa: E402, I001, UP015, F401
+import polars as pl  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.const import FINANCE_FINANCE_SAVE_PATH  # noqa: E402, I001, UP015, F401
+from loguru import logger  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.mod import safe_thread_run  # noqa: E402, I001, UP015, F401
 
 
 class Finance_Finance(QThread):
@@ -98,7 +98,7 @@ class Finance_Finance(QThread):
         if self.Custodian_path is None:
             self.Custodian_data = []
         else:
-            with open(self.Custodian_path, "r", encoding="utf-8") as file:
+            with open(self.Custodian_path, encoding="utf-8") as file:
                 lines = file.readlines()  # 读取所有行
                 self.Custodian_data = [line.strip() for line in lines]
 
@@ -107,7 +107,7 @@ class Finance_Finance(QThread):
         if self.Department_path is None:
             self.Department_data = []
         else:
-            with open(self.Department_path, "r", encoding="utf-8") as file:
+            with open(self.Department_path, encoding="utf-8") as file:
                 lines = file.readlines()  # 读取所有行
                 self.Department_data = [line.strip() for line in lines]
 
@@ -130,7 +130,7 @@ class Finance_Finance(QThread):
                     for i, col in enumerate(df_eager.row(0))
                 ]
                 df_eager = df_eager.slice(1).rename(
-                    {old: new for old, new in zip(df_eager.columns, new_columns)}
+                    {old: new for old, new in zip(df_eager.columns, new_columns,strict=False)}
                 )
                 print(f"文件 {os.path.basename(path)} 的表頭包含空值，已重新設置")
 

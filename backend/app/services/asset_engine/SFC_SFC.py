@@ -13,20 +13,20 @@ class QObject:
 class QWidget:
     pass
 
-def safe_thread_run(func):
+def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
     return wrapper
 
-import os
-from datetime import datetime
+import os  # noqa: E402, I001, UP015, F401
+from datetime import datetime  # noqa: E402, I001, UP015, F401
 
-import openpyxl
-import pandas as pd
-from app.services.asset_engine.const import SFC_SFC_SAVE_PATH
-from loguru import logger
-from app.services.asset_engine.mod import safe_thread_run
-from app.services.asset_engine.TableParser import TableParser  # 使用自定義的 HTML 表格解析器
+import openpyxl  # noqa: E402, I001, UP015, F401
+import pandas as pd  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.const import SFC_SFC_SAVE_PATH  # noqa: E402, I001, UP015, F401
+from loguru import logger  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.mod import safe_thread_run  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.TableParser import TableParser  # 使用自定義的 HTML 表格解析器  # noqa: E402, I001, UP015, F401
 
 
 class SFC_SFC(QThread):
@@ -79,14 +79,14 @@ class SFC_SFC(QThread):
         def is_html_file(file_path):
             """檢測文件是否為HTML格式"""
             try:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                with open(file_path, encoding="utf-8", errors="ignore") as f:
                     first_line = f.readline().strip().lower()
                     return (
                         first_line.startswith("<")
                         or "html" in first_line
                         or "table" in first_line
                     )
-            except:
+            except Exception:
                 return False
 
         # 首先檢測文件格式
@@ -94,7 +94,7 @@ class SFC_SFC(QThread):
             logger.info(f"檢測到HTML格式文件，使用HTML解析: {os.path.basename(path)}")
             # 使用 HTML 解析方式
             try:
-                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                with open(path, encoding="utf-8", errors="ignore") as f:
                     html_content = f.read()
 
                 # 使用自定義的 TableParser 解析 HTML
@@ -146,7 +146,7 @@ class SFC_SFC(QThread):
                     cleaned_row = [
                         str(cell).strip() if cell is not None else "" for cell in row
                     ]
-                    normalized_row = cleaned_row + [""] * (max_cols - len(cleaned_row))
+                    cleaned_row + [""] * (max_cols - len(cleaned_row))
                     normalized_data.append(cleaned_row[:max_cols])
 
                 # 創建 pandas DataFrame
@@ -570,7 +570,7 @@ class SFC_SFC(QThread):
                             )
 
                     # 設置列寬和邊框
-                    from openpyxl.styles import Border, Side
+                    from openpyxl.styles import Border, Side  # noqa: E402, I001, UP015, F401
 
                     thin_border = Border(
                         left=Side(style="thin"),

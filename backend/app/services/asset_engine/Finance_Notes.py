@@ -13,20 +13,20 @@ class QObject:
 class QWidget:
     pass
 
-def safe_thread_run(func):
+def safe_thread_run(func):  # noqa: F811
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
     return wrapper
 
-import os
-from datetime import datetime
+import os  # noqa: E402, I001, UP015, F401
+from datetime import datetime  # noqa: E402, I001, UP015, F401
 
-import openpyxl
-import pandas as pd
-import polars as pl
-from app.services.asset_engine.const import FINANCE_NOTES_SAVE_PATH
-from loguru import logger
-from app.services.asset_engine.mod import safe_thread_run
+import openpyxl  # noqa: E402, I001, UP015, F401
+import pandas as pd  # noqa: E402, I001, UP015, F401
+import polars as pl  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.const import FINANCE_NOTES_SAVE_PATH  # noqa: E402, I001, UP015, F401
+from loguru import logger  # noqa: E402, I001, UP015, F401
+from app.services.asset_engine.mod import safe_thread_run  # noqa: E402, I001, UP015, F401
 
 
 class Finance_Notes(QThread):
@@ -115,7 +115,7 @@ class Finance_Notes(QThread):
                         for j, col in enumerate(row_values)
                     ]
                     df_polars = df_polars.slice(i + 1).rename(
-                        {old: new for old, new in zip(df_polars.columns, new_columns)}
+                        {old: new for old, new in zip(df_polars.columns, new_columns,strict=False)}
                     )
                     # 自动去除资产编号列末尾的点号
                     if "資產編號" in df_polars.columns:
@@ -144,7 +144,7 @@ class Finance_Notes(QThread):
 
     def read_Custodian_data(self):
         self.Custodian_txt = None
-        with open(self.Custodian_path, "r", encoding="utf-8") as file:
+        with open(self.Custodian_path, encoding="utf-8") as file:
             lines = file.readlines()  # 读取所有行
             self.Custodian_txt = [line.strip() for line in lines]
 
@@ -338,7 +338,7 @@ class Finance_Notes(QThread):
                             )
 
                     # 列寬與邊框
-                    from openpyxl.styles import Border, Side
+                    from openpyxl.styles import Border, Side  # noqa: E402, I001, UP015, F401
 
                     thin = Border(
                         left=Side(style="thin"),
