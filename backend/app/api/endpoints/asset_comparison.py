@@ -9,6 +9,7 @@ from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+
 # 强行注入 Mock 来绕过对 PyQt5 等桌面 UI 库的依赖
 class MockQThread:
     def __init__(self, *args, **kwargs): pass
