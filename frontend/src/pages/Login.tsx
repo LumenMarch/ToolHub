@@ -4,6 +4,7 @@ import { AuthContext } from '../context/auth-context';
 import api from '../api/axios';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { gsap } from 'gsap';
+import { useHitokoto, splitIntoLines } from '../hooks/useHitokoto';
 
 const Login: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -16,6 +17,9 @@ const Login: React.FC = () => {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+
+  const { text: hitokotoText, loading: hitokotoLoading } = useHitokoto();
+  const lines = splitIntoLines(hitokotoText, 3);
 
   useEffect(() => {
     if (user) {
@@ -38,14 +42,14 @@ const Login: React.FC = () => {
         ease: 'power4.out',
         delay: 0.1
       });
-      
-      gsap.fromTo('.gsap-fade', 
+
+      gsap.fromTo('.gsap-fade',
         { opacity: 0, y: 20 },
         { opacity: 1, y: 0, duration: 1, stagger: 0.1, ease: 'power3.out', delay: 0.8 }
       );
     }, containerRef);
     return () => ctx.revert();
-  }, [isLogin]);
+  }, [isLogin, hitokotoLoading]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,12 +109,14 @@ const Login: React.FC = () => {
         <ThemeToggle />
       </div>
       
-      {/* 左侧超大标题 */}
-      <div className="flex-1 flex flex-col justify-center p-8 md:p-16 lg:p-24 relative z-10 ">
-        <h1 ref={titleRef} className="text-6xl md:text-8xl lg:text-[10vw] font-bold tracking-tighter leading-[0.85] uppercase">
-          <div className="clip-text"><span>{isLogin ? '进入' : '加入'}</span></div><br/>
-          <div className="clip-text"><span>系统</span></div><br/>
-          <div className="clip-text"><span className="text-primary">核心.</span></div>
+      {/* 左侧每日一言 */}
+      <div className="flex-1 flex flex-col justify-center p-8 md:p-16 lg:p-24 relative z-10">
+        <h1 ref={titleRef} className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight leading-[1.2] max-w-xl">
+          {lines.map((line, i) => (
+            <div key={i} className="clip-text">
+              <span>{line}</span>
+            </div>
+          ))}
         </h1>
       </div>
 
