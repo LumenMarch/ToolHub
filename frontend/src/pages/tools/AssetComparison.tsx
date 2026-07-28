@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { gsap } from 'gsap';
 import { FileArrowUp, CheckSquareOffset, FloppyDisk, MagicWand, DownloadSimple } from '@phosphor-icons/react';
-import axios from 'axios';
+import api from '../../api/axios';
 
 const UnboxedFileInput: React.FC<{ label: string, value: string, onChange: (val: string) => void }> = ({ label, value, onChange }) => {
   const [isFocused, setIsFocused] = useState(false);
@@ -98,7 +98,7 @@ const AssetComparison: React.FC = () => {
     setStatusMsg('正在扫描桌面文件...');
     setIsProcessing(true);
     try {
-      const res = await axios.get('http://localhost:8000/api/v1/tools/asset/auto-paths');
+      const res = await api.get('/tools/asset/auto-paths');
       if (res.data.status === 'success') {
         setPaths(res.data.data);
         setStatusMsg('✅ 一键注入完成：已自动匹配桌面 /对比数据 目录下的文件。');
@@ -119,7 +119,7 @@ const AssetComparison: React.FC = () => {
     // Init reviews with default option
     setReviews({});
     try {
-      const res = await axios.post('http://localhost:8000/api/v1/tools/asset/check', { ...paths, remarks, reviews });
+      const res = await api.post('/tools/asset/check', { ...paths, remarks, reviews });
       
       if (res.data.status === 'error') {
         setStatusMsg(`❌ 错误: ${res.data.message} \n ${res.data.errors?.join(' | ') || ''}`);
@@ -155,7 +155,7 @@ const AssetComparison: React.FC = () => {
     setIsProcessing(true);
     setStatusMsg('正在生成完整对比总结及PDF...');
     try {
-      const res = await axios.post('http://localhost:8000/api/v1/tools/asset/save', { ...paths, remarks, reviews });
+      const res = await api.post('/tools/asset/save', { ...paths, remarks, reviews });
       if (res.data.status === 'error') {
         setStatusMsg(`❌ 保存失败: ${res.data.message}`);
       } else {
@@ -178,7 +178,7 @@ const AssetComparison: React.FC = () => {
     setStatusMsg(`正在单独导出 ${label} 模块...`);
     try {
       // Re-trigger the specific export from python backend
-      const res = await axios.post(`http://localhost:8000/api/v1/tools/asset/export/${key}`, { ...paths, remarks, reviews });
+      const res = await api.post(`/tools/asset/export/${key}`, { ...paths, remarks, reviews });
       if (res.data.status === 'error') {
         setStatusMsg(`❌ 单独导出失败: ${res.data.message}`);
       } else {

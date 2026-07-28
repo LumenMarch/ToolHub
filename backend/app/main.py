@@ -4,9 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.api_router import api_router
 from app.db.base_class import Base
 from app.db.session import engine
+from app.seed import run_seed
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
+
+# 写入默认权限与角色（幂等 — 已有数据时跳过）
+run_seed()
 
 app = FastAPI(title="ToolHub API", openapi_url="/api/v1/openapi.json")
 

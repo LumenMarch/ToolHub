@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -8,8 +8,15 @@ from app.api import deps
 from app.core.auth import create_access_token
 from app.core.config import settings
 from app.core.security import verify_password
-from app.crud.crud_user import create_user, get_user_by_username
+from app.crud.crud_role import get_role_by_name
+from app.crud.crud_user import (
+    count_users,
+    create_user,
+    get_user_by_username,
+    update_last_login,
+)
 from app.schemas.user import Token, UserCreate, UserResponse
+from app.services.audit import log_action
 
 router = APIRouter()
 
@@ -48,25 +55,68 @@ def _set_session_cookie(response: Response, access_token: str) -> None:
     )
 
 
+def _user_to_response(user, db: Session) -> dict:
+    from app.crud.crud_role import get_user_permissions
+
+    return {
+        "id": user.id,
+        "username": user.username,
+        "is_active": user.is_active,
+        "created_at": user.created_at,
+        "last_login_at": user.last_login_at,
+        "roles": [role.name for role in user.roles],
+        "permissions": sorted(get_user_permissions(db, user)),
+    }
+
+
 @router.post("/register", response_model=UserResponse)
-def register_user(user_in: UserCreate, db: Session = Depends(deps.get_db)):
-    """Register a new user."""
+def register_user(
+    user_in: UserCreate,
+    request: Request,
+    db: Session = Depends(deps.get_db),
+):
+    """注册新用户。首个用户自动获得超级管理员角色。"""
     user = get_user_by_username(db, username=user_in.username)
     if user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already registered",
         )
-    user = create_user(db, user_in)
-    return user
+    new_user = create_user(db, user_in)
+
+    # 所有用户默认拥有"工具使用者"角色
+    tool_user = get_role_by_name(db, "工具使用者")
+    if tool_user:
+        new_user.roles.append(tool_user)
+
+    # 创建后判断是否为首个用户（避免并发注册竞态）
+    if count_users(db) == 1:
+        super_admin = get_role_by_name(db, "超级管理员")
+        if super_admin:
+            new_user.roles.append(super_admin)
+
+    if new_user.roles:
+        db.commit()
+        db.refresh(new_user)
+    return _user_to_response(new_user, db)
 
 
 @router.post("/token", response_model=Token)
 def login_for_access_token(
-    db: Session = Depends(deps.get_db), form_data: OAuth2PasswordRequestForm = Depends()
+    request: Request,
+    db: Session = Depends(deps.get_db),
+    form_data: OAuth2PasswordRequestForm = Depends(),
 ):
     """OAuth2 compatible token login, get an access token for future requests."""
     user = _authenticate_user(db, form_data)
+    update_last_login(db, user)
+    log_action(
+        db,
+        request=request,
+        user=user,
+        action="user.login",
+        detail={"method": "token"},
+    )
     access_token = _create_user_access_token(user.username)
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -74,13 +124,22 @@ def login_for_access_token(
 @router.post("/session", response_model=UserResponse)
 def login_for_session(
     response: Response,
+    request: Request,
     db: Session = Depends(deps.get_db),
     form_data: OAuth2PasswordRequestForm = Depends(),
 ):
     user = _authenticate_user(db, form_data)
+    update_last_login(db, user)
+    log_action(
+        db,
+        request=request,
+        user=user,
+        action="user.login",
+        detail={"method": "session"},
+    )
     access_token = _create_user_access_token(user.username)
     _set_session_cookie(response, access_token)
-    return user
+    return _user_to_response(user, db)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

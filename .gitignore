@@ -29,6 +29,7 @@ yarn-error.log*
 *.swp
 
 .hallmark
+.zcode
 
 # Browser automation artifacts
 .playwright-mcp/

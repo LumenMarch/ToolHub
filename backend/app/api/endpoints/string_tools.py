@@ -3,7 +3,7 @@ import base64
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.core.auth import get_current_user
+from app.core.auth import require_permission, require_tool_enabled
 from app.models.user import User
 
 router = APIRouter()
@@ -16,7 +16,9 @@ class StringProcessRequest(BaseModel):
 
 @router.post("/process")
 def process_string(
-    request: StringProcessRequest, current_user: User = Depends(get_current_user)
+    request: StringProcessRequest,
+    current_user: User = Depends(require_permission("tool:use")),
+    __: None = Depends(require_tool_enabled("string-analyzer")),
 ):
     """Process a string based on the requested action. Requires authentication."""
     if not request.text:

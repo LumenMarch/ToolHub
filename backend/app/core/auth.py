@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.core.config import settings
+from app.crud.crud_role import get_user_permissions
 from app.crud.crud_user import get_user_by_username
 from app.models.user import User
 
@@ -60,4 +61,75 @@ def get_current_user(
     user = get_user_by_username(db, username=username)
     if user is None:
         raise credentials_exception
+    if not user.is_active:
+        raise credentials_exception
     return user
+
+
+class _PermissionChecker:
+    """FastAPI Dependency: 校验当前用户是否持有指定权限。
+
+    通过 Depends 注入后，FastAPI 会自动解析 __call__ 的依赖参数。
+    """
+
+    def __init__(self, required: str) -> None:
+        self.required = required
+
+    def __call__(
+        self,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(deps.get_db),
+    ) -> User:
+        permissions = get_user_permissions(db, current_user)
+        if self.required not in permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"需要 {self.required} 权限",
+            )
+        return current_user
+
+
+def require_permission(permission: str) -> _PermissionChecker:
+    """要求当前用户持有指定权限，否则返回 403。
+
+    用法:
+        @router.get("/admin/users")
+        def list_users(
+            db: Session = Depends(get_db),
+            _: User = Depends(require_permission("user:read")),
+        ):
+            ...
+    """
+    return _PermissionChecker(permission)
+
+
+class _ToolEnabledChecker:
+    """FastAPI Dependency: 校验工具是否已被管理员启用。"""
+
+    def __init__(self, tool_id: str) -> None:
+        self.tool_id = tool_id
+
+    def __call__(
+        self,
+        db: Session = Depends(deps.get_db),
+    ) -> None:
+        from app.crud.crud_tool_meta import is_tool_enabled
+
+        if not is_tool_enabled(db, self.tool_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"工具 {self.tool_id} 已被禁用",
+            )
+
+
+def require_tool_enabled(tool_id: str) -> _ToolEnabledChecker:
+    """要求指定工具当前处于启用状态，否则返回 403。
+
+    用法:
+        @router.post("/process")
+        def process(
+            _: None = Depends(require_tool_enabled("string_tools")),
+        ):
+            ...
+    """
+    return _ToolEnabledChecker(tool_id)
