@@ -227,7 +227,7 @@ const AdminUsers: React.FC = () => {
       <EditUserModal
         target={editTarget}
         onClose={() => setEditTarget(null)}
-        onSubmit={(input) => editTarget && handleUpdate(editTarget.id, input)}
+        onSubmit={(input) => editTarget ? handleUpdate(editTarget.id, input) : Promise.resolve()}
         isSelf={!!editTarget && currentUser?.id === editTarget.id}
       />
 

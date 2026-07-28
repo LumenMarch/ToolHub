@@ -42,7 +42,7 @@ interface EditableRow {
 const AdminTools: React.FC = () => {
   const api = useAdminApi();
   const [rows, setRows] = useState<EditableRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
