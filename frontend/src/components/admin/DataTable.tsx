@@ -54,7 +54,7 @@ function DataTable<T>({
     if (!sortKey) return data;
     const col = columns.find((c) => c.key === sortKey);
     if (!col?.sortValue) return data;
-    const sorted = [...data].sort((a, b) => {
+    const sorted = data.toSorted((a, b) => {
       const av = col.sortValue!(a);
       const bv = col.sortValue!(b);
       if (av < bv) return sortDir === 'asc' ? -1 : 1;
@@ -87,15 +87,22 @@ function DataTable<T>({
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  className={`text-left py-3 px-3 text-[11px] font-mono uppercase tracking-widest text-muted-foreground font-medium ${col.sortable ? 'cursor-pointer hover:text-foreground select-none' : ''} ${col.className ?? ''}`}
-                  onClick={() => handleSort(col)}
+                  className={`text-left py-3 px-3 text-[11px] font-mono uppercase tracking-widest text-muted-foreground font-medium ${col.className ?? ''}`}
                 >
-                  <span className="inline-flex items-center gap-1">
-                    {col.header}
-                    {col.sortable && sortKey === col.key && (
-                      sortDir === 'asc' ? <CaretUp className="w-3 h-3" /> : <CaretDown className="w-3 h-3" />
-                    )}
-                  </span>
+                  {col.sortable ? (
+                    <button
+                      type="button"
+                      onClick={() => handleSort(col)}
+                      className="inline-flex items-center gap-1 cursor-pointer hover:text-foreground select-none"
+                    >
+                      {col.header}
+                      {sortKey === col.key && (
+                        sortDir === 'asc' ? <CaretUp className="w-3 h-3" /> : <CaretDown className="w-3 h-3" />
+                      )}
+                    </button>
+                  ) : (
+                    <span>{col.header}</span>
+                  )}
                 </th>
               ))}
             </tr>

@@ -1,4 +1,10 @@
-import React, { useCallback, useContext, useEffect, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useState,
+} from 'react';
 import {
   PencilSimple,
   Plus,
@@ -11,8 +17,20 @@ import { useAdminApi } from '../../hooks/useAdminApi';
 import type { AdminUser, UserCreateInput, UserUpdateInput, Role } from '../../hooks/useAdminApi';
 import DataTable from '../../components/admin/DataTable';
 import type { Column } from '../../components/admin/DataTable';
+import AdminLoadingState from '../../components/admin/AdminLoadingState';
 import Modal from '../../components/admin/Modal';
 import PermissionGuard from '../../components/PermissionGuard';
+
+const formatAdminDate = (value: string | null) => {
+  if (!value) return '从未';
+  return new Date(value).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
 
 const AdminUsers: React.FC = () => {
   const api = useAdminApi();
@@ -40,14 +58,13 @@ const AdminUsers: React.FC = () => {
     [api],
   );
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const refreshUsers = useEffectEvent((query: string) => {
+    refresh(query);
+  });
 
   useEffect(() => {
-    const timer = setTimeout(() => refresh(search), 300);
+    const timer = setTimeout(() => refreshUsers(search), search ? 300 : 0);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
   const handleCreate = async (input: UserCreateInput) => {
@@ -66,17 +83,6 @@ const AdminUsers: React.FC = () => {
     await api.deleteUser(userId);
     setDeleteTarget(null);
     refresh(search);
-  };
-
-  const formatDate = (s: string | null) => {
-    if (!s) return '从未';
-    return new Date(s).toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
   };
 
   const columns: Column<AdminUser>[] = [
@@ -129,7 +135,7 @@ const AdminUsers: React.FC = () => {
       sortValue: (u) => u.created_at,
       render: (u) => (
         <span className="text-[11px] font-mono text-muted-foreground">
-          {formatDate(u.created_at)}
+          {formatAdminDate(u.created_at)}
         </span>
       ),
     },
@@ -140,7 +146,7 @@ const AdminUsers: React.FC = () => {
       sortValue: (u) => u.last_login_at ?? '',
       render: (u) => (
         <span className="text-[11px] font-mono text-muted-foreground">
-          {formatDate(u.last_login_at)}
+          {formatAdminDate(u.last_login_at)}
         </span>
       ),
     },
@@ -184,13 +190,20 @@ const AdminUsers: React.FC = () => {
           管理系统账号、角色与状态
         </p>
         <div className="flex items-center gap-2">
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索用户名..."
-            className="awwwards-input w-48"
-          />
+          <label
+            htmlFor="admin-user-search"
+            className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-widest text-muted-foreground"
+          >
+            筛选
+            <input
+              id="admin-user-search"
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="搜索用户名..."
+              className="awwwards-input w-48"
+            />
+          </label>
           <PermissionGuard permission="user:write">
             <button
               type="button"
@@ -209,14 +222,22 @@ const AdminUsers: React.FC = () => {
         </div>
       )}
 
-      <div className="border border-border">
-        <DataTable
-          columns={columns}
-          data={users}
-          rowKey={(u) => u.id}
-          emptyHint={loading ? '加载中...' : '无匹配用户'}
+      {loading ? (
+        <AdminLoadingState
+          ariaLabel="正在加载后台用户目录"
+          label="[ 用户目录 · 同步中 ]"
+          detail="等待账号索引"
         />
-      </div>
+      ) : (
+        <div className="border border-border">
+          <DataTable
+            columns={columns}
+            data={users}
+            rowKey={(u) => u.id}
+            emptyHint="无匹配用户"
+          />
+        </div>
+      )}
 
       <CreateUserModal
         open={createOpen}
@@ -329,6 +350,8 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({ open, onClose, onSubm
     );
   };
 
+  const selectedRoleIdSet = new Set(selectedRoleIds);
+
   return (
     <Modal
       open={open}
@@ -357,20 +380,24 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({ open, onClose, onSubm
       <form id="create-user-form" onSubmit={handleSubmit} className="space-y-4">
         <div className="relative">
           <input
+            id="create-user-username"
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             className="awwwards-input w-full"
             placeholder=" "
             required
-            autoFocus
           />
-          <label className="absolute left-0 -top-6 text-muted-foreground font-mono text-[11px] tracking-widest uppercase pointer-events-none">
+          <label
+            htmlFor="create-user-username"
+            className="absolute left-0 -top-6 text-muted-foreground font-mono text-[11px] tracking-widest uppercase pointer-events-none"
+          >
             用户名
           </label>
         </div>
         <div className="relative">
           <input
+            id="create-user-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -378,7 +405,10 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({ open, onClose, onSubm
             placeholder=" "
             required
           />
-          <label className="absolute left-0 -top-6 text-muted-foreground font-mono text-[11px] tracking-widest uppercase pointer-events-none">
+          <label
+            htmlFor="create-user-password"
+            className="absolute left-0 -top-6 text-muted-foreground font-mono text-[11px] tracking-widest uppercase pointer-events-none"
+          >
             密码
           </label>
         </div>
@@ -394,7 +424,7 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({ open, onClose, onSubm
               >
                 <input
                   type="checkbox"
-                  checked={selectedRoleIds.includes(role.id)}
+                  checked={selectedRoleIdSet.has(role.id)}
                   onChange={() => toggleRole(role.id)}
                   className="w-4 h-4 accent-[var(--color-accent)]"
                 />
@@ -482,6 +512,8 @@ const EditUserModal: React.FC<EditUserModalProps> = ({
     );
   };
 
+  const selectedRoleIdSet = new Set(selectedRoleIds);
+
   return (
     <Modal
       open={!!target}
@@ -527,7 +559,7 @@ const EditUserModal: React.FC<EditUserModalProps> = ({
               >
                 <input
                   type="checkbox"
-                  checked={selectedRoleIds.includes(role.id)}
+                  checked={selectedRoleIdSet.has(role.id)}
                   onChange={() => toggleRole(role.id)}
                   disabled={isSelf}
                   className="w-4 h-4 accent-[var(--color-accent)] disabled:opacity-40"
@@ -558,10 +590,14 @@ const EditUserModal: React.FC<EditUserModalProps> = ({
         )}
 
         <div className="border-t border-border pt-4">
-          <label className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+          <label
+            htmlFor="edit-user-password"
+            className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-2"
+          >
             重置密码（留空则不修改）
           </label>
           <input
+            id="edit-user-password"
             type="password"
             value={resetPassword}
             onChange={(e) => setResetPassword(e.target.value)}

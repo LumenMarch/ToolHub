@@ -7,16 +7,21 @@ import AdminRoute from './components/AdminRoute';
 import ToolGuard from './components/ToolGuard';
 import Layout from './components/Layout';
 import AdminLayout from './components/admin/AdminLayout';
+import { LoadingSignal } from './components/LoadingSignal';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import { toolsConfig } from './config/tools';
 
-// Suspense 使用极简粗野主义加载提示。
+// Suspense 与数据请求使用同一套信号扫描等待态。
 const SuspendFallback = () => (
-  <div className="w-full h-[60vh] flex items-center justify-center">
-    <div className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground animate-pulse">
-      [ 装载模块中... ]
-    </div>
+  <div className="flex h-[60vh] w-full items-center justify-center">
+    <LoadingSignal
+      ariaLabel="正在装载功能模块"
+      meta="Module / Lazy Boundary"
+      label="[ 功能模块 · 装载中 ]"
+      detail="等待代码分片"
+      className="max-w-2xl"
+    />
   </div>
 );
 

@@ -116,21 +116,6 @@ html.dark .grain-overlay {
   display: inline-block;
 }
 
-/* 分析状态只表达持续处理，不模拟无法获知的百分比进度。 */
-@keyframes attendance-progress {
-  from {
-    transform: translateX(-110%);
-  }
-
-  to {
-    transform: translateX(310%);
-  }
-}
-
-.attendance-progress > span {
-  animation: attendance-progress 1.4s linear infinite;
-}
-
 @media (prefers-reduced-motion: no-preference) {
   .clip-text > span {
     transform: translateY(100%);

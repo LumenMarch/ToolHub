@@ -20,6 +20,7 @@ import React, {
 } from 'react';
 
 import api from '../../api/axios';
+import { LoadingSignal } from '../../components/LoadingSignal';
 import { cn } from '../../lib/cn';
 
 type FileKind = 'attendance' | 'shift';
@@ -175,9 +176,6 @@ const AnalysisInProgress: React.FC<{
   shiftFile: File;
 }> = ({ attendanceFile, shiftFile }) => (
   <section
-    role="status"
-    aria-live="polite"
-    aria-label="正在分析出勤资料"
     className="flex min-h-96 flex-col justify-between border-2 border-border p-6 md:p-10"
   >
     <div className="flex items-start justify-between gap-6">
@@ -193,9 +191,13 @@ const AnalysisInProgress: React.FC<{
     </div>
 
     <div>
-      <div className="attendance-progress mb-8 h-0.5 overflow-hidden bg-border">
-        <span className="block h-full w-1/3 bg-primary" />
-      </div>
+      <LoadingSignal
+        ariaLabel="正在分析出勤资料"
+        meta="Attendance / Verify"
+        label="[ 出勤资料 · 核对中 ]"
+        detail="解析通行记录与班别明细"
+        className="mb-8"
+      />
       <dl className="grid gap-5 border-t border-border pt-6 font-mono text-xs md:grid-cols-2">
         <div className="min-w-0">
           <dt className="uppercase tracking-[0.16em] text-muted-foreground">

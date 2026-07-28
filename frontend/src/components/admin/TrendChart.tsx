@@ -5,6 +5,8 @@ interface TrendChartProps {
   emptyHint?: string;
 }
 
+const CHART_PADDING = { top: 20, right: 20, bottom: 30, left: 30 };
+
 const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据' }) => {
   if (data.length === 0 || data.every((d) => d.count === 0)) {
     return (
@@ -16,17 +18,16 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
 
   const width = 600;
   const height = 200;
-  const padding = { top: 20, right: 20, bottom: 30, left: 30 };
-  const innerWidth = width - padding.left - padding.right;
-  const innerHeight = height - padding.top - padding.bottom;
+  const innerWidth = width - CHART_PADDING.left - CHART_PADDING.right;
+  const innerHeight = height - CHART_PADDING.top - CHART_PADDING.bottom;
 
   const maxValue = Math.max(...data.map((d) => d.count), 1);
   const stepX = data.length > 1 ? innerWidth / (data.length - 1) : 0;
 
   // 各点坐标。
   const points = data.map((d, i) => ({
-    x: padding.left + i * stepX,
-    y: padding.top + innerHeight - (d.count / maxValue) * innerHeight,
+    x: CHART_PADDING.left + i * stepX,
+    y: CHART_PADDING.top + innerHeight - (d.count / maxValue) * innerHeight,
     ...d,
   }));
 
@@ -38,7 +39,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
   // 填充区域路径（折线 + 底部封闭）。
   const areaPath =
     points.length > 0
-      ? `${linePath} L ${points[points.length - 1].x} ${padding.top + innerHeight} L ${points[0].x} ${padding.top + innerHeight} Z`
+      ? `${linePath} L ${points[points.length - 1].x} ${CHART_PADDING.top + innerHeight} L ${points[0].x} ${CHART_PADDING.top + innerHeight} Z`
       : '';
 
   return (
@@ -50,13 +51,13 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
       >
         {/* 水平网格线 */}
         {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-          const y = padding.top + innerHeight - ratio * innerHeight;
+          const y = CHART_PADDING.top + innerHeight - ratio * innerHeight;
           return (
             <line
               key={ratio}
-              x1={padding.left}
+              x1={CHART_PADDING.left}
               y1={y}
-              x2={width - padding.right}
+              x2={width - CHART_PADDING.right}
               y2={y}
               stroke="currentColor"
               strokeWidth="0.5"

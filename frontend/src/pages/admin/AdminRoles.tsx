@@ -9,6 +9,7 @@ import { useAdminApi } from '../../hooks/useAdminApi';
 import type { Role, RoleDetail, Permission, RoleCreateInput } from '../../hooks/useAdminApi';
 import DataTable from '../../components/admin/DataTable';
 import type { Column } from '../../components/admin/DataTable';
+import AdminLoadingState from '../../components/admin/AdminLoadingState';
 import Modal from '../../components/admin/Modal';
 import PermissionGuard from '../../components/PermissionGuard';
 
@@ -143,14 +144,22 @@ const AdminRoles: React.FC = () => {
         </div>
       )}
 
-      <div className="border border-border">
-        <DataTable
-          columns={columns}
-          data={roles}
-          rowKey={(r) => r.id}
-          emptyHint={loading ? '加载中...' : '暂无角色'}
+      {loading ? (
+        <AdminLoadingState
+          ariaLabel="正在加载后台角色目录"
+          label="[ 角色目录 · 同步中 ]"
+          detail="等待权限索引"
         />
-      </div>
+      ) : (
+        <div className="border border-border">
+          <DataTable
+            columns={columns}
+            data={roles}
+            rowKey={(r) => r.id}
+            emptyHint="暂无角色"
+          />
+        </div>
+      )}
 
       <CreateRoleModal
         open={createOpen}
@@ -158,11 +167,14 @@ const AdminRoles: React.FC = () => {
         onSubmit={handleCreate}
       />
 
-      <EditRoleModal
-        target={editTarget}
-        onClose={() => setEditTarget(null)}
-        onSubmit={handleUpdate}
-      />
+      {editTarget && (
+        <EditRoleModal
+          key={editTarget.id}
+          target={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSubmit={handleUpdate}
+        />
+      )}
 
       <Modal
         open={!!deleteTarget}
@@ -269,23 +281,30 @@ const CreateRoleModal: React.FC<CreateRoleModalProps> = ({ open, onClose, onSubm
     >
       <form id="create-role-form" onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1">
+          <label
+            htmlFor="create-role-name"
+            className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1"
+          >
             角色名
           </label>
           <input
+            id="create-role-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="awwwards-input w-full"
             required
-            autoFocus
           />
         </div>
         <div>
-          <label className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1">
+          <label
+            htmlFor="create-role-description"
+            className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1"
+          >
             描述
           </label>
           <input
+            id="create-role-description"
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -305,7 +324,7 @@ const CreateRoleModal: React.FC<CreateRoleModalProps> = ({ open, onClose, onSubm
 // ===== 编辑角色弹窗 =====
 
 interface EditRoleModalProps {
-  target: RoleDetail | null;
+  target: RoleDetail;
   onClose: () => void;
   onSubmit: (roleId: number, name?: string, description?: string) => Promise<void>;
 }
@@ -313,24 +332,18 @@ interface EditRoleModalProps {
 const EditRoleModal: React.FC<EditRoleModalProps> = ({ target, onClose, onSubmit }) => {
   const api = useAdminApi();
 
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  const [name, setName] = useState(target.name);
+  const [description, setDescription] = useState(target.description);
   const [allPermissions, setAllPermissions] = useState<Permission[]>([]);
-  const [selectedPermIds, setSelectedPermIds] = useState<number[]>([]);
+  const [selectedPermIds, setSelectedPermIds] = useState<number[]>(
+    () => target.permissions.map((permission) => permission.id),
+  );
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (target) {
-      setName(target.name);
-      setDescription(target.description);
-      setSelectedPermIds(target.permissions.map((p) => p.id));
-      setError('');
-      api.listPermissions().then(setAllPermissions).catch(() => {});
-    }
-  }, [target, api]);
-
-  if (!target) return null;
+    api.listPermissions().then(setAllPermissions).catch(() => {});
+  }, [api]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -351,6 +364,8 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ target, onClose, onSubmit
       prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
     );
   };
+
+  const selectedPermissionIdSet = new Set(selectedPermIds);
 
   return (
     <Modal
@@ -379,10 +394,14 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ target, onClose, onSubmit
     >
       <form id="edit-role-form" onSubmit={handleSubmit} className="space-y-5">
         <div>
-          <label className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1">
+          <label
+            htmlFor="edit-role-name"
+            className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1"
+          >
             角色名
           </label>
           <input
+            id="edit-role-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -391,10 +410,14 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ target, onClose, onSubmit
           />
         </div>
         <div>
-          <label className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1">
+          <label
+            htmlFor="edit-role-description"
+            className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1"
+          >
             描述
           </label>
           <input
+            id="edit-role-description"
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -414,7 +437,7 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ target, onClose, onSubmit
               >
                 <input
                   type="checkbox"
-                  checked={selectedPermIds.includes(perm.id)}
+                  checked={selectedPermissionIdSet.has(perm.id)}
                   onChange={() => togglePermission(perm.id)}
                   className="w-4 h-4 accent-[var(--color-accent)]"
                 />

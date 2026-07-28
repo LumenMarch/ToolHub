@@ -1,12 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Outlet, useLocation, Navigate } from 'react-router-dom';
-import { toolsConfig } from '../config/tools';
-import api from '../api/axios';
-
-interface ToolMetaOverride {
-  tool_id: string;
-  enabled: boolean;
-}
+import { useVisibleTools } from '../hooks/useToolsMeta';
 
 /**
  * 工具路由守卫 — 已禁用的工具重定向到首页。
@@ -14,40 +8,27 @@ interface ToolMetaOverride {
  */
 const ToolGuard: React.FC = () => {
   const location = useLocation();
-  const [disabledIds, setDisabledIds] = useState<Set<string>>(new Set());
-  const [ready, setReady] = useState(false);
+  const { visibleTools, isPending } = useVisibleTools();
 
-  useEffect(() => {
-    let active = true;
-    api
-      .get<ToolMetaOverride[]>('/tools-meta')
-      .then((res) => {
-        if (!active) return;
-        const ids = new Set<string>();
-        for (const item of res.data) {
-          if (!item.enabled) ids.add(item.tool_id);
-        }
-        setDisabledIds(ids);
-        setReady(true);
-      })
-      .catch(() => {
-        if (!active) setReady(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  if (isPending) {
+    return (
+      <div
+        role="status"
+        aria-label="正在验证工具状态"
+        className="flex min-h-[40vh] items-center justify-center"
+      >
+        <span className="size-5 animate-spin rounded-full border-[1.5px] border-border border-t-foreground" />
+      </div>
+    );
+  }
 
-  if (!ready) return <Outlet />;
-
-  // 检查当前路径对应的工具是否被禁用
-  const currentTool = toolsConfig.find(
-    (t) =>
-      location.pathname === t.path ||
-      location.pathname.startsWith(`${t.path}/`),
+  const currentToolEnabled = visibleTools.some(
+    (tool) =>
+      location.pathname === tool.path ||
+      location.pathname.startsWith(`${tool.path}/`),
   );
 
-  if (currentTool && disabledIds.has(currentTool.id)) {
+  if (!currentToolEnabled) {
     return <Navigate to="/" replace />;
   }
 

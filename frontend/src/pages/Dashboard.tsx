@@ -1,66 +1,25 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { toolsConfig } from '../config/tools';
 import { gsap } from 'gsap';
 import { ArrowUpRight } from '@phosphor-icons/react';
-import api from '../api/axios';
-
-// 后端覆盖项结构（与 /tools-meta 返回一致）。
-interface ToolMetaOverride {
-  tool_id: string;
-  enabled: boolean;
-  sort_order: number;
-  custom_name: string | null;
-  custom_description: string | null;
-}
+import { useVisibleTools } from '../hooks/useToolsMeta';
+import { LoadingSignal } from '../components/LoadingSignal';
 
 const Dashboard: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [overrides, setOverrides] = useState<Map<string, ToolMetaOverride>>(new Map());
-
-  // 拉取工具元数据覆盖层。
-  useEffect(() => {
-    let active = true;
-    api
-      .get<ToolMetaOverride[]>('/tools-meta')
-      .then((response) => {
-        if (!active) return;
-        const map = new Map<string, ToolMetaOverride>();
-        for (const item of response.data) {
-          map.set(item.tool_id, item);
-        }
-        setOverrides(map);
-      })
-      .catch(() => {
-        // 拉取失败时使用默认配置，不影响主控台可用性。
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // 合并硬编码配置与后端覆盖项：过滤禁用、应用排序、覆盖名称/描述。
-  const visibleTools = React.useMemo(() => {
-    return toolsConfig
-      .map((tool, index) => {
-        const override = overrides.get(tool.id);
-        return {
-          ...tool,
-          name: override?.custom_name?.trim() || tool.name,
-          description: override?.custom_description?.trim() || tool.description,
-          sort_order: override?.sort_order ?? index,
-          _enabled: override?.enabled ?? true,
-        };
-      })
-      .filter((t) => t._enabled)
-      .sort((a, b) => a.sort_order - b.sort_order);
-  }, [overrides]);
+  const hasAnimatedRef = useRef(false);
+  const { visibleTools, isPending } = useVisibleTools();
 
   useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (
+      isPending ||
+      hasAnimatedRef.current ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
       return;
     }
 
+    hasAnimatedRef.current = true;
     const ctx = gsap.context(() => {
       gsap.from('.tool-item', {
         x: -40,
@@ -72,12 +31,21 @@ const Dashboard: React.FC = () => {
       });
     }, containerRef);
     return () => ctx.revert();
-  }, [visibleTools.length]);
+  }, [isPending]);
 
   return (
     <div ref={containerRef} className="w-full flex flex-col justify-center min-h-[60vh]">
       <div className="flex flex-col gap-0 w-full max-w-5xl">
-        {visibleTools.map((tool, index) => {
+        {isPending ? (
+          <div className="flex min-h-72 items-center border-b border-border px-4 md:px-8">
+            <LoadingSignal
+              ariaLabel="正在加载工具列表"
+              meta="Tools / Access Metadata"
+              label="[ 工具入口 · 同步中 ]"
+              detail="等待权限索引"
+            />
+          </div>
+        ) : visibleTools.map((tool, index) => {
           return (
             <Link
               key={tool.id}
