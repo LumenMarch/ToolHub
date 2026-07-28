@@ -24,6 +24,7 @@ const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'));
 const AdminAudit = lazy(() => import('./pages/admin/AdminAudit'));
 const AdminTools = lazy(() => import('./pages/admin/AdminTools'));
+const AdminRoles = lazy(() => import('./pages/admin/AdminRoles'));
 
 function App() {
   return (
@@ -74,6 +75,11 @@ function App() {
                 <Route path="/admin/tools" element={
                   <Suspense fallback={<SuspendFallback />}>
                     <AdminTools />
+                  </Suspense>
+                } />
+                <Route path="/admin/roles" element={
+                  <Suspense fallback={<SuspendFallback />}>
+                    <AdminRoles />
                   </Suspense>
                 } />
               </Route>

@@ -5,8 +5,13 @@ from app.api.api_router import api_router
 from app.db.base_class import Base
 from app.db.session import engine
 
+from app.migrations import run_rbac_migration
+
 # Create database tables
 Base.metadata.create_all(bind=engine)
+
+# 执行 RBAC 数据迁移（幂等 — 已有数据时跳过）
+run_rbac_migration()
 
 app = FastAPI(title="ToolHub API", openapi_url="/api/v1/openapi.json")
 

@@ -3,6 +3,7 @@ import { gsap } from 'gsap';
 import StatCard from '../../components/admin/StatCard';
 import BarChart from '../../components/admin/BarChart';
 import TrendChart from '../../components/admin/TrendChart';
+import PermissionGuard from '../../components/PermissionGuard';
 import { useAdminApi } from '../../hooks/useAdminApi';
 import type {
   DailyActiveStat,
@@ -81,28 +82,36 @@ const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* 统计卡片 */}
+      {/* 统计卡片 — 按权限过滤 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 admin-stat-card">
-        <StatCard
-          label="总用户数"
-          value={overview?.total_users ?? '—'}
-          hint="全部已注册账号"
-        />
-        <StatCard
-          label="活跃用户"
-          value={overview?.active_users_7d ?? '—'}
-          hint="最近 7 天登录"
-        />
-        <StatCard
-          label="工具配置"
-          value={overview?.total_tools ?? '—'}
-          hint="已自定义工具数"
-        />
-        <StatCard
-          label="今日操作"
-          value={overview?.audit_logs_today ?? '—'}
-          hint="审计日志条数"
-        />
+        <PermissionGuard permission="user:read">
+          <StatCard
+            label="总用户数"
+            value={overview?.total_users ?? '—'}
+            hint="全部已注册账号"
+          />
+        </PermissionGuard>
+        <PermissionGuard permission="user:read">
+          <StatCard
+            label="活跃用户"
+            value={overview?.active_users_7d ?? '—'}
+            hint="最近 7 天登录"
+          />
+        </PermissionGuard>
+        <PermissionGuard permission="tool_meta:read">
+          <StatCard
+            label="工具配置"
+            value={overview?.total_tools ?? '—'}
+            hint="已自定义工具数"
+          />
+        </PermissionGuard>
+        <PermissionGuard permission="audit:read">
+          <StatCard
+            label="今日操作"
+            value={overview?.audit_logs_today ?? '—'}
+            hint="审计日志条数"
+          />
+        </PermissionGuard>
       </div>
 
       {/* 图表区 */}

@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash
+from app.crud.crud_role import get_roles_by_ids
 from app.models.user import User
 from app.schemas.user import UserCreate, UserCreateByAdmin, UserUpdate
 
@@ -41,13 +42,15 @@ def create_user(db: Session, user_in: UserCreate) -> User:
 
 
 def create_user_by_admin(db: Session, user_in: UserCreateByAdmin) -> User:
-    """管理员创建用户，可指定 is_admin。"""
+    """管理员创建用户，可指定初始角色。"""
     hashed_password = get_password_hash(user_in.password)
     db_user = User(
         username=user_in.username,
         hashed_password=hashed_password,
-        is_admin=user_in.is_admin,
     )
+    if user_in.role_ids:
+        roles = get_roles_by_ids(db, user_in.role_ids)
+        db_user.roles = roles
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
@@ -55,13 +58,14 @@ def create_user_by_admin(db: Session, user_in: UserCreateByAdmin) -> User:
 
 
 def update_user(db: Session, user: User, user_in: UserUpdate) -> User:
-    """按需更新用户字段，仅修改显式传入的字段。"""
-    if user_in.is_admin is not None:
-        user.is_admin = user_in.is_admin
+    """按需更新用户字段。"""
     if user_in.is_active is not None:
         user.is_active = user_in.is_active
     if user_in.password is not None:
         user.hashed_password = get_password_hash(user_in.password)
+    if user_in.role_ids is not None:
+        roles = get_roles_by_ids(db, user_in.role_ids)
+        user.roles = roles
     db.commit()
     db.refresh(user)
     return user

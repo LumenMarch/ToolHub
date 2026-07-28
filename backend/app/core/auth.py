@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.core.config import settings
+from app.crud.crud_role import get_user_permissions
 from app.crud.crud_user import get_user_by_username
 from app.models.user import User
 
@@ -60,19 +61,43 @@ def get_current_user(
     user = get_user_by_username(db, username=username)
     if user is None:
         raise credentials_exception
-    # 被封禁用户即使 token 有效也拒绝。
     if not user.is_active:
         raise credentials_exception
     return user
 
 
-def get_current_admin_user(
-    current_user: User = Depends(get_current_user),
-) -> User:
-    """要求当前用户是管理员且账号可用。"""
-    if not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required",
-        )
-    return current_user
+class _PermissionChecker:
+    """FastAPI Dependency: 校验当前用户是否持有指定权限。
+
+    通过 Depends 注入后，FastAPI 会自动解析 __call__ 的依赖参数。
+    """
+
+    def __init__(self, required: str) -> None:
+        self.required = required
+
+    def __call__(
+        self,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(deps.get_db),
+    ) -> User:
+        permissions = get_user_permissions(db, current_user)
+        if self.required not in permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"需要 {self.required} 权限",
+            )
+        return current_user
+
+
+def require_permission(permission: str) -> _PermissionChecker:
+    """要求当前用户持有指定权限，否则返回 403。
+
+    用法:
+        @router.get("/admin/users")
+        def list_users(
+            db: Session = Depends(get_db),
+            _: User = Depends(require_permission("user:read")),
+        ):
+            ...
+    """
+    return _PermissionChecker(permission)

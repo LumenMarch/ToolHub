@@ -3,17 +3,16 @@ import {
   PencilSimple,
   Plus,
   Trash,
-  ShieldCheck,
-  ShieldSlash,
   CheckCircle,
   Circle,
 } from '@phosphor-icons/react';
 import { AuthContext } from '../../context/auth-context';
 import { useAdminApi } from '../../hooks/useAdminApi';
-import type { AdminUser, UserCreateInput, UserUpdateInput } from '../../hooks/useAdminApi';
+import type { AdminUser, UserCreateInput, UserUpdateInput, Role } from '../../hooks/useAdminApi';
 import DataTable from '../../components/admin/DataTable';
 import type { Column } from '../../components/admin/DataTable';
 import Modal from '../../components/admin/Modal';
+import PermissionGuard from '../../components/PermissionGuard';
 
 const AdminUsers: React.FC = () => {
   const api = useAdminApi();
@@ -24,7 +23,6 @@ const AdminUsers: React.FC = () => {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
 
-  // 弹窗状态
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
@@ -46,7 +44,6 @@ const AdminUsers: React.FC = () => {
     refresh();
   }, [refresh]);
 
-  // 搜索去抖。
   useEffect(() => {
     const timer = setTimeout(() => refresh(search), 300);
     return () => clearTimeout(timer);
@@ -73,8 +70,7 @@ const AdminUsers: React.FC = () => {
 
   const formatDate = (s: string | null) => {
     if (!s) return '从未';
-    const d = new Date(s);
-    return d.toLocaleString('zh-CN', {
+    return new Date(s).toLocaleString('zh-CN', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -92,19 +88,22 @@ const AdminUsers: React.FC = () => {
       render: (u) => <span className="font-mono">{u.username}</span>,
     },
     {
-      key: 'is_admin',
+      key: 'roles',
       header: '角色',
-      sortable: true,
-      sortValue: (u) => (u.is_admin ? 1 : 0),
       render: (u) =>
-        u.is_admin ? (
-          <span className="inline-flex items-center gap-1 text-[11px] font-mono uppercase tracking-widest text-primary">
-            <ShieldCheck className="w-3.5 h-3.5" /> 管理员
-          </span>
+        u.roles.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {u.roles.map((r) => (
+              <span
+                key={r}
+                className="inline-flex items-center text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 border border-border text-muted-foreground"
+              >
+                {r}
+              </span>
+            ))}
+          </div>
         ) : (
-          <span className="inline-flex items-center gap-1 text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
-            <ShieldSlash className="w-3.5 h-3.5" /> 用户
-          </span>
+          <span className="text-[11px] font-mono text-muted-foreground">—</span>
         ),
     },
     {
@@ -150,25 +149,29 @@ const AdminUsers: React.FC = () => {
       header: '操作',
       render: (u) => (
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setEditTarget(u)}
-            className="p-1.5 text-muted-foreground hover:text-primary transition-colors"
-            aria-label="编辑用户"
-            title="编辑"
-          >
-            <PencilSimple className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setDeleteTarget(u)}
-            disabled={currentUser?.id === u.id}
-            className="p-1.5 text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            aria-label="删除用户"
-            title={currentUser?.id === u.id ? '不能删除自己' : '删除'}
-          >
-            <Trash className="w-4 h-4" />
-          </button>
+          <PermissionGuard permission="user:write">
+            <button
+              type="button"
+              onClick={() => setEditTarget(u)}
+              className="p-1.5 text-muted-foreground hover:text-primary transition-colors"
+              aria-label="编辑用户"
+              title="编辑"
+            >
+              <PencilSimple className="w-4 h-4" />
+            </button>
+          </PermissionGuard>
+          <PermissionGuard permission="user:write">
+            <button
+              type="button"
+              onClick={() => setDeleteTarget(u)}
+              disabled={currentUser?.id === u.id}
+              className="p-1.5 text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              aria-label="删除用户"
+              title={currentUser?.id === u.id ? '不能删除自己' : '删除'}
+            >
+              <Trash className="w-4 h-4" />
+            </button>
+          </PermissionGuard>
         </div>
       ),
     },
@@ -188,13 +191,15 @@ const AdminUsers: React.FC = () => {
             placeholder="搜索用户名..."
             className="awwwards-input w-48"
           />
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-mono uppercase tracking-widest border border-border hover:border-primary hover:text-primary transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" /> 新建
-          </button>
+          <PermissionGuard permission="user:write">
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-mono uppercase tracking-widest border border-border hover:border-primary hover:text-primary transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" /> 新建
+            </button>
+          </PermissionGuard>
         </div>
       </div>
 
@@ -213,14 +218,12 @@ const AdminUsers: React.FC = () => {
         />
       </div>
 
-      {/* 新建用户弹窗 */}
       <CreateUserModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onSubmit={handleCreate}
       />
 
-      {/* 编辑用户弹窗 */}
       <EditUserModal
         target={editTarget}
         onClose={() => setEditTarget(null)}
@@ -228,7 +231,6 @@ const AdminUsers: React.FC = () => {
         isSelf={!!editTarget && currentUser?.id === editTarget.id}
       />
 
-      {/* 删除确认弹窗 */}
       <Modal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -273,16 +275,24 @@ interface CreateUserModalProps {
 }
 
 const CreateUserModal: React.FC<CreateUserModalProps> = ({ open, onClose, onSubmit }) => {
+  const api = useAdminApi();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([]);
+  const [allRoles, setAllRoles] = useState<Role[]>([]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      api.listRoles().then(setAllRoles).catch(() => {});
+    }
+  }, [open, api]);
 
   const reset = () => {
     setUsername('');
     setPassword('');
-    setIsAdmin(false);
+    setSelectedRoleIds([]);
     setError('');
   };
 
@@ -300,13 +310,23 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({ open, onClose, onSubm
     setSubmitting(true);
     setError('');
     try {
-      await onSubmit({ username: username.trim(), password, is_admin: isAdmin });
+      await onSubmit({
+        username: username.trim(),
+        password,
+        role_ids: selectedRoleIds,
+      });
       reset();
     } catch {
       setError('创建失败，用户名可能已存在');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const toggleRole = (id: number) => {
+    setSelectedRoleIds((prev) =>
+      prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id],
+    );
   };
 
   return (
@@ -345,7 +365,7 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({ open, onClose, onSubm
             required
             autoFocus
           />
-          <label className="absolute left-0 top-4 text-muted-foreground font-mono text-sm tracking-widest uppercase pointer-events-none transition-[color,font-size,transform] duration-300 [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px] [.awwwards-input:not(:placeholder-shown)~&]:text-primary">
+          <label className="absolute left-0 -top-6 text-muted-foreground font-mono text-[11px] tracking-widest uppercase pointer-events-none">
             用户名
           </label>
         </div>
@@ -358,21 +378,34 @@ const CreateUserModal: React.FC<CreateUserModalProps> = ({ open, onClose, onSubm
             placeholder=" "
             required
           />
-          <label className="absolute left-0 top-4 text-muted-foreground font-mono text-sm tracking-widest uppercase pointer-events-none transition-[color,font-size,transform] duration-300 [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px] [.awwwards-input:not(:placeholder-shown)~&]:text-primary">
+          <label className="absolute left-0 -top-6 text-muted-foreground font-mono text-[11px] tracking-widest uppercase pointer-events-none">
             密码
           </label>
         </div>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isAdmin}
-            onChange={(e) => setIsAdmin(e.target.checked)}
-            className="w-4 h-4 accent-[var(--color-accent)]"
-          />
-          <span className="text-sm font-mono uppercase tracking-widest">
-            设为管理员
-          </span>
-        </label>
+        <div>
+          <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+            角色
+          </p>
+          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+            {allRoles.map((role) => (
+              <label
+                key={role.id}
+                className="flex items-center gap-2 cursor-pointer text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedRoleIds.includes(role.id)}
+                  onChange={() => toggleRole(role.id)}
+                  className="w-4 h-4 accent-[var(--color-accent)]"
+                />
+                <span className="font-mono">{role.name}</span>
+                <span className="text-[11px] text-muted-foreground ml-auto">
+                  {role.permission_count} 项权限
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
         {error && (
           <p className="text-[11px] font-mono uppercase tracking-widest text-primary">
             [ {error} ]
@@ -392,21 +425,33 @@ interface EditUserModalProps {
   isSelf: boolean;
 }
 
-const EditUserModal: React.FC<EditUserModalProps> = ({ target, onClose, onSubmit, isSelf }) => {
-  const [isAdmin, setIsAdmin] = useState(false);
+const EditUserModal: React.FC<EditUserModalProps> = ({
+  target,
+  onClose,
+  onSubmit,
+  isSelf,
+}) => {
+  const api = useAdminApi();
+  const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([]);
   const [isActive, setIsActive] = useState(true);
   const [resetPassword, setResetPassword] = useState('');
+  const [allRoles, setAllRoles] = useState<Role[]>([]);
+  const [currentRoles, setCurrentRoles] = useState<Role[]>([]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (target) {
-      setIsAdmin(target.is_admin);
       setIsActive(target.is_active);
       setResetPassword('');
       setError('');
+      api.listRoles().then(setAllRoles).catch(() => {});
+      api.getUserRoles(target.id).then((roles) => {
+        setCurrentRoles(roles);
+        setSelectedRoleIds(roles.map((r) => r.id));
+      }).catch(() => {});
     }
-  }, [target]);
+  }, [target, api]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -415,8 +460,8 @@ const EditUserModal: React.FC<EditUserModalProps> = ({ target, onClose, onSubmit
     setError('');
     try {
       const input: UserUpdateInput = {
-        is_admin: isAdmin,
         is_active: isActive,
+        role_ids: selectedRoleIds,
       };
       if (resetPassword.trim()) {
         input.password = resetPassword;
@@ -427,6 +472,13 @@ const EditUserModal: React.FC<EditUserModalProps> = ({ target, onClose, onSubmit
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const toggleRole = (id: number) => {
+    if (isSelf) return;
+    setSelectedRoleIds((prev) =>
+      prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id],
+    );
   };
 
   return (
@@ -462,21 +514,31 @@ const EditUserModal: React.FC<EditUserModalProps> = ({ target, onClose, onSubmit
           <p className="font-mono font-bold">{target?.username}</p>
         </div>
 
-        <label className="flex items-center justify-between cursor-pointer">
-          <span className="text-sm font-mono uppercase tracking-widest">管理员权限</span>
-          <input
-            type="checkbox"
-            checked={isAdmin}
-            disabled={isSelf}
-            onChange={(e) => setIsAdmin(e.target.checked)}
-            className="w-4 h-4 accent-[var(--color-accent)] disabled:opacity-40"
-          />
-        </label>
-        {isSelf && (
-          <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60 -mt-3">
-            不能修改自己的管理员权限
+        <div>
+          <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+            角色 {isSelf && '(不能修改自己的角色)'}
           </p>
-        )}
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {allRoles.map((role) => (
+              <label
+                key={role.id}
+                className={`flex items-center gap-2 text-sm ${isSelf ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedRoleIds.includes(role.id)}
+                  onChange={() => toggleRole(role.id)}
+                  disabled={isSelf}
+                  className="w-4 h-4 accent-[var(--color-accent)] disabled:opacity-40"
+                />
+                <span className="font-mono">{role.name}</span>
+                <span className="text-[11px] text-muted-foreground ml-auto">
+                  {role.permission_count} 项权限
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
 
         <label className="flex items-center justify-between cursor-pointer">
           <span className="text-sm font-mono uppercase tracking-widest">账号启用</span>

@@ -1,9 +1,10 @@
-import React, { useContext } from 'react';
+import React, { useContext, useMemo } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   ChartBar,
   ClockCountdown,
   ListChecks,
+  ShieldCheck,
   Users,
 } from '@phosphor-icons/react';
 import { AuthContext } from '../../context/auth-context';
@@ -15,13 +16,15 @@ interface NavItem {
   label: string;
   title: string;
   icon: React.ComponentType<{ className?: string }>;
+  permission: string;
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { to: '/admin', label: '概览', title: '概览', icon: ChartBar },
-  { to: '/admin/users', label: '用户', title: '用户', icon: Users },
-  { to: '/admin/audit', label: '审计日志', title: '审计日志', icon: ClockCountdown },
-  { to: '/admin/tools', label: '工具', title: '工具', icon: ListChecks },
+const ALL_NAV_ITEMS: NavItem[] = [
+  { to: '/admin', label: '概览', title: '概览', icon: ChartBar, permission: 'stats:read' },
+  { to: '/admin/users', label: '用户', title: '用户', icon: Users, permission: 'user:read' },
+  { to: '/admin/audit', label: '审计日志', title: '审计日志', icon: ClockCountdown, permission: 'audit:read' },
+  { to: '/admin/tools', label: '工具', title: '工具', icon: ListChecks, permission: 'tool_meta:read' },
+  { to: '/admin/roles', label: '角色管理', title: '角色管理', icon: ShieldCheck, permission: 'role:read' },
 ];
 
 const AdminLayout: React.FC = () => {
@@ -29,12 +32,18 @@ const AdminLayout: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout } = useContext(AuthContext);
 
+  // 按当前用户权限过滤可见导航项
+  const NAV_ITEMS = useMemo(
+    () =>
+      ALL_NAV_ITEMS.filter((item) => user?.permissions.includes(item.permission)),
+    [user],
+  );
+
   const isActive = (to: string) =>
     to === '/admin'
       ? location.pathname === '/admin'
       : location.pathname.startsWith(to);
 
-  // 根据当前路由推导页面标题（header 中显示）。
   const currentItem =
     NAV_ITEMS.find((item) => isActive(item.to)) ?? NAV_ITEMS[0];
 
@@ -50,7 +59,7 @@ const AdminLayout: React.FC = () => {
     <div className="h-dvh bg-background flex overflow-hidden">
       <div className="grain-overlay" />
 
-      {/* 侧边栏：仅保留纯菜单项 */}
+      {/* 侧边栏 */}
       <aside className="hidden md:flex w-60 flex-col border-r border-border relative z-10 shrink-0">
         <div className="h-16 px-6 flex items-center border-b border-border">
           <Link
@@ -87,11 +96,9 @@ const AdminLayout: React.FC = () => {
 
       {/* 右侧主区 */}
       <div className="flex-1 flex flex-col relative z-10 min-w-0 overflow-hidden">
-        {/* 顶部状态栏：左侧 logo + 分隔线 + 页面标题，右侧 ThemeToggle + 管理员标识 + 登出 */}
         <header className="sticky top-0 z-20 bg-background border-b border-border">
           <div className="flex items-center justify-between gap-4 px-4 md:px-8 h-16">
             <div className="flex items-center gap-4 md:gap-5 min-w-0">
-              {/* 移动端显示 logo，桌面端 logo 由侧边栏承载 */}
               <Link
                 to="/admin"
                 className="md:hidden text-base font-bold uppercase tracking-tighter whitespace-nowrap"
@@ -99,7 +106,7 @@ const AdminLayout: React.FC = () => {
                 控制<span className="text-primary">台</span>.
               </Link>
               <h1 className="min-w-0 text-base font-bold leading-tight tracking-tight md:text-xl truncate">
-                {currentItem.title}
+                {currentItem?.title ?? '控制台'}
               </h1>
             </div>
 

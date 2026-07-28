@@ -13,11 +13,16 @@ const AdminRoute: React.FC = () => {
     );
   }
 
-  // 未登录跳登录页，已登录但非管理员回主页。
   if (!user) {
     return <Navigate to="/login" replace />;
   }
-  if (!user.is_admin) {
+
+  // 有任意管理相关权限即可进入控制台
+  const hasAdminAccess = user.permissions.some((p) =>
+    p !== 'tool:use',
+  );
+
+  if (!hasAdminAccess) {
     return <Navigate to="/" replace />;
   }
 

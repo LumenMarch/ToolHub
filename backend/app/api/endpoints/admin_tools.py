@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.auth import get_current_admin_user
+from app.core.auth import require_permission
 from app.crud.crud_tool_meta import bulk_upsert, get_all_metas, upsert_meta
 from app.models.user import User
 from app.schemas.tool_meta import (
@@ -18,7 +18,7 @@ router = APIRouter()
 @router.get("", response_model=list[ToolMetaResponse])
 def list_tool_metas(
     db: Session = Depends(deps.get_db),
-    _: User = Depends(get_current_admin_user),
+    _: User = Depends(require_permission("tool_meta:read")),
 ):
     """列出所有工具元数据覆盖项。"""
     return get_all_metas(db)
@@ -30,7 +30,7 @@ def update_tool_meta(
     meta_in: ToolMetaUpdate,
     request: Request,
     db: Session = Depends(deps.get_db),
-    admin: User = Depends(get_current_admin_user),
+    admin: User = Depends(require_permission("tool_meta:write")),
 ):
     """更新单个工具元数据（不存在则创建）。"""
     meta = upsert_meta(db, tool_id, meta_in)
@@ -51,7 +51,7 @@ def bulk_update_tool_metas(
     payload: ToolMetaBulkUpdate,
     request: Request,
     db: Session = Depends(deps.get_db),
-    admin: User = Depends(get_current_admin_user),
+    admin: User = Depends(require_permission("tool_meta:write")),
 ):
     """批量更新工具元数据（主要用于保存排序）。"""
     metas = bulk_upsert(db, payload.items)

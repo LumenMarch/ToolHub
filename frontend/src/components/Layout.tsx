@@ -82,7 +82,7 @@ const Layout: React.FC = () => {
           <span className="hidden text-[0.8125rem] font-mono tracking-widest uppercase opacity-50 lg:block">
             [ 标识: {user?.username} ]
           </span>
-          {user?.is_admin && (
+          {user && user.permissions.some((p) => p !== 'tool:use') && (
             <Link
               to="/admin"
               className="group relative inline-flex min-h-11 items-center overflow-hidden whitespace-nowrap px-1 text-[0.8125rem] font-mono uppercase tracking-widest transition-colors hover:text-primary active:translate-y-px"

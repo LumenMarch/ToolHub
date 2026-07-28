@@ -6,8 +6,9 @@ import api from '../api/axios';
 export interface AdminUser {
   id: number;
   username: string;
-  is_admin: boolean;
   is_active: boolean;
+  roles: string[];
+  permissions: string[];
   created_at: string;
   last_login_at: string | null;
 }
@@ -64,10 +65,30 @@ export interface DailyActiveStat {
   count: number;
 }
 
+export interface Role {
+  id: number;
+  name: string;
+  description: string;
+  permission_count: number;
+}
+
+export interface RoleDetail {
+  id: number;
+  name: string;
+  description: string;
+  permissions: Permission[];
+}
+
+export interface Permission {
+  id: number;
+  codename: string;
+  description: string;
+}
+
 // ===== 请求/响应参数类型 =====
 
 export interface UserUpdateInput {
-  is_admin?: boolean;
+  role_ids?: number[];
   is_active?: boolean;
   password?: string;
 }
@@ -75,7 +96,7 @@ export interface UserUpdateInput {
 export interface UserCreateInput {
   username: string;
   password: string;
-  is_admin?: boolean;
+  role_ids?: number[];
 }
 
 export interface ToolMetaUpdateInput {
@@ -83,6 +104,16 @@ export interface ToolMetaUpdateInput {
   sort_order?: number;
   custom_name?: string;
   custom_description?: string;
+}
+
+export interface RoleCreateInput {
+  name: string;
+  description?: string;
+}
+
+export interface RoleUpdateInput {
+  name?: string;
+  description?: string;
 }
 
 // ===== Hook =====
@@ -179,7 +210,69 @@ export function useAdminApi() {
     [],
   );
 
-  // 用 useMemo 稳定返回对象引用，避免下游 useEffect 把 api 作为依赖时陷入死循环。
+  // 角色管理
+  const listRoles = useCallback(
+    () => api.get<Role[]>('/admin/roles').then((r) => r.data),
+    [],
+  );
+
+  const createRole = useCallback(
+    (input: RoleCreateInput) =>
+      api.post<Role>('/admin/roles', input).then((r) => r.data),
+    [],
+  );
+
+  const updateRole = useCallback(
+    (roleId: number, input: RoleUpdateInput) =>
+      api.patch<RoleDetail>(`/admin/roles/${roleId}`, input).then((r) => r.data),
+    [],
+  );
+
+  const deleteRole = useCallback(
+    (roleId: number) =>
+      api.delete(`/admin/roles/${roleId}`).then((r) => r.data),
+    [],
+  );
+
+  const listPermissions = useCallback(
+    () => api.get<Permission[]>('/admin/permissions').then((r) => r.data),
+    [],
+  );
+
+  const getRolePermissions = useCallback(
+    (roleId: number) =>
+      api
+        .get<Permission[]>(`/admin/roles/${roleId}/permissions`)
+        .then((r) => r.data),
+    [],
+  );
+
+  const updateRolePermissions = useCallback(
+    (roleId: number, permissionIds: number[]) =>
+      api
+        .put<RoleDetail>(`/admin/roles/${roleId}/permissions`, {
+          permission_ids: permissionIds,
+        })
+        .then((r) => r.data),
+    [],
+  );
+
+  const getUserRoles = useCallback(
+    (userId: number) =>
+      api.get<Role[]>(`/admin/users/${userId}/roles`).then((r) => r.data),
+    [],
+  );
+
+  const updateUserRoles = useCallback(
+    (userId: number, roleIds: number[]) =>
+      api
+        .patch<Role[]>(`/admin/users/${userId}/roles`, {
+          role_ids: roleIds,
+        })
+        .then((r) => r.data),
+    [],
+  );
+
   return useMemo(
     () => ({
       listUsers,
@@ -194,6 +287,15 @@ export function useAdminApi() {
       getOverview,
       getToolCalls,
       getDailyActiveUsers,
+      listRoles,
+      createRole,
+      updateRole,
+      deleteRole,
+      listPermissions,
+      getRolePermissions,
+      updateRolePermissions,
+      getUserRoles,
+      updateUserRoles,
     }),
     [
       listUsers,
@@ -208,6 +310,15 @@ export function useAdminApi() {
       getOverview,
       getToolCalls,
       getDailyActiveUsers,
+      listRoles,
+      createRole,
+      updateRole,
+      deleteRole,
+      listPermissions,
+      getRolePermissions,
+      updateRolePermissions,
+      getUserRoles,
+      updateUserRoles,
     ],
   );
 }

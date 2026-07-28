@@ -3,8 +3,9 @@ import { createContext } from 'react';
 export interface User {
   id: number;
   username: string;
-  is_admin: boolean;
   is_active: boolean;
+  roles: string[];
+  permissions: string[];
 }
 
 export interface AuthContextValue {

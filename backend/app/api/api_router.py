@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.endpoints import (
     admin_audit,
+    admin_roles,
     admin_stats,
     admin_tools,
     admin_users,
@@ -53,4 +54,7 @@ api_router.include_router(
 )
 api_router.include_router(
     admin_stats.router, prefix="/admin/stats", tags=["admin_stats"]
+)
+api_router.include_router(
+    admin_roles.router, prefix="/admin", tags=["admin_roles"]
 )

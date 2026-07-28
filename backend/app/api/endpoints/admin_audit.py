@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.auth import get_current_admin_user
+from app.core.auth import require_permission
 from app.crud.crud_audit_log import get_logs
 from app.models.user import User
 from app.schemas.audit_log import AuditLogResponse
@@ -28,7 +28,7 @@ def list_audit_logs(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     db: Session = Depends(deps.get_db),
-    _: User = Depends(get_current_admin_user),
+    _: User = Depends(require_permission("audit:read")),
 ):
     """查询审计日志，支持多维度筛选。"""
     items, total = get_logs(
