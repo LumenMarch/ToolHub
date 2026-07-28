@@ -23,6 +23,7 @@ router = APIRouter()
 
 # ===== 输出 Schema =====
 
+
 class PermissionOut(BaseModel):
     id: int
     codename: str
@@ -48,6 +49,7 @@ class RoleListItem(BaseModel):
 
 # ===== 输入 Schema =====
 
+
 class RoleCreate(BaseModel):
     name: str
     description: str = ""
@@ -67,6 +69,7 @@ class UserRolesUpdate(BaseModel):
 
 
 # ===== 角色 CRUD =====
+
 
 @router.get("/roles", response_model=list[RoleListItem])
 def list_roles(
@@ -157,6 +160,7 @@ def delete_role_endpoint(
 
 # ===== 角色权限管理 =====
 
+
 @router.get("/roles/{role_id}/permissions", response_model=list[PermissionOut])
 def get_role_permissions(
     role_id: int,
@@ -197,6 +201,7 @@ def update_role_permissions(
 
 # ===== 权限列表（供 UI 勾选） =====
 
+
 @router.get("/permissions", response_model=list[PermissionOut])
 def list_permissions(
     db: Session = Depends(deps.get_db),
@@ -207,6 +212,7 @@ def list_permissions(
 
 
 # ===== 用户角色管理 =====
+
 
 @router.get("/users/{user_id}/roles", response_model=list[RoleListItem])
 def get_user_roles(

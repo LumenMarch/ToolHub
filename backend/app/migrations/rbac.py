@@ -6,7 +6,6 @@
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.crud.crud_role import get_role_by_name
 from app.db.session import SessionLocal
 from app.models.permission import Permission
 from app.models.role import Role
@@ -27,12 +26,15 @@ PERMISSIONS = [
 # 6 个默认角色 — 角色名 → 权限 codename 列表
 ROLES = {
     "超级管理员": [
-        "user:read", "user:write",
+        "user:read",
+        "user:write",
         "audit:read",
-        "tool_meta:read", "tool_meta:write",
+        "tool_meta:read",
+        "tool_meta:write",
         "stats:read",
         "tool:use",
-        "role:read", "role:write",
+        "role:read",
+        "role:write",
     ],
     "用户管理员": ["user:read", "user:write"],
     "审计员": ["audit:read"],
@@ -81,16 +83,22 @@ def _migrate_existing_users(db: Session, roles: dict[str, Role]) -> None:
     for user_id, is_admin in rows:
         if is_admin:
             db.execute(
-                text("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (:uid, :rid)"),
+                text(
+                    "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (:uid, :rid)"
+                ),
                 {"uid": user_id, "rid": super_admin.id},
             )
             db.execute(
-                text("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (:uid, :rid)"),
+                text(
+                    "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (:uid, :rid)"
+                ),
                 {"uid": user_id, "rid": tool_user.id},
             )
         else:
             db.execute(
-                text("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (:uid, :rid)"),
+                text(
+                    "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (:uid, :rid)"
+                ),
                 {"uid": user_id, "rid": tool_user.id},
             )
     db.commit()

@@ -17,9 +17,7 @@ def get_meta_by_tool_id(db: Session, tool_id: str) -> ToolMeta | None:
     return db.query(ToolMeta).filter(ToolMeta.tool_id == tool_id).first()
 
 
-def upsert_meta(
-    db: Session, tool_id: str, meta_in: ToolMetaUpdate
-) -> ToolMeta:
+def upsert_meta(db: Session, tool_id: str, meta_in: ToolMetaUpdate) -> ToolMeta:
     """按需更新工具元数据，不存在则新建。"""
     meta = get_meta_by_tool_id(db, tool_id)
     if meta is None:

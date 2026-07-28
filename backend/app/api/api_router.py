@@ -38,9 +38,7 @@ api_router.include_router(
 )
 
 # 工具元数据（已登录用户可读，主控台用）
-api_router.include_router(
-    tools_meta.router, prefix="/tools-meta", tags=["tools_meta"]
-)
+api_router.include_router(tools_meta.router, prefix="/tools-meta", tags=["tools_meta"])
 
 # 管理员 endpoints（需 admin 角色）
 api_router.include_router(
@@ -55,6 +53,4 @@ api_router.include_router(
 api_router.include_router(
     admin_stats.router, prefix="/admin/stats", tags=["admin_stats"]
 )
-api_router.include_router(
-    admin_roles.router, prefix="/admin", tags=["admin_roles"]
-)
+api_router.include_router(admin_roles.router, prefix="/admin", tags=["admin_roles"])

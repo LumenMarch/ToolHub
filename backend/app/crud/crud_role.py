@@ -29,7 +29,9 @@ def create_role(db: Session, name: str, description: str = "") -> Role:
     return role
 
 
-def update_role(db: Session, role: Role, name: str | None, description: str | None) -> Role:
+def update_role(
+    db: Session, role: Role, name: str | None, description: str | None
+) -> Role:
     if name is not None:
         role.name = name
     if description is not None:
@@ -45,9 +47,7 @@ def delete_role(db: Session, role: Role) -> None:
 
 
 def set_role_permissions(db: Session, role: Role, permission_ids: list[int]) -> Role:
-    permissions = (
-        db.query(Permission).filter(Permission.id.in_(permission_ids)).all()
-    )
+    permissions = db.query(Permission).filter(Permission.id.in_(permission_ids)).all()
     role.permissions = permissions
     db.commit()
     db.refresh(role)

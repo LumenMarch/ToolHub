@@ -436,7 +436,6 @@ const EditUserModal: React.FC<EditUserModalProps> = ({
   const [isActive, setIsActive] = useState(true);
   const [resetPassword, setResetPassword] = useState('');
   const [allRoles, setAllRoles] = useState<Role[]>([]);
-  const [currentRoles, setCurrentRoles] = useState<Role[]>([]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -447,7 +446,6 @@ const EditUserModal: React.FC<EditUserModalProps> = ({
       setError('');
       api.listRoles().then(setAllRoles).catch(() => {});
       api.getUserRoles(target.id).then((roles) => {
-        setCurrentRoles(roles);
         setSelectedRoleIds(roles.map((r) => r.id));
       }).catch(() => {});
     }

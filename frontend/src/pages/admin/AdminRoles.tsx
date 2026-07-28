@@ -1,11 +1,10 @@
-import React, { useCallback, useContext, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   PencilSimple,
   Plus,
   Trash,
   ShieldCheck,
 } from '@phosphor-icons/react';
-import { AuthContext } from '../../context/auth-context';
 import { useAdminApi } from '../../hooks/useAdminApi';
 import type { Role, RoleDetail, Permission, RoleCreateInput } from '../../hooks/useAdminApi';
 import DataTable from '../../components/admin/DataTable';

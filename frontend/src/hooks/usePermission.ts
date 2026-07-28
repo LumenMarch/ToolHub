@@ -1,4 +1,4 @@
-import { useContext, useCallback } from 'react';
+import { useContext, useCallback, useMemo } from 'react';
 import { AuthContext } from '../context/auth-context';
 
 /**
@@ -6,7 +6,10 @@ import { AuthContext } from '../context/auth-context';
  */
 export function usePermission() {
   const { user } = useContext(AuthContext);
-  const permissions = user?.permissions ?? [];
+  const permissions: string[] = useMemo(
+    () => user?.permissions ?? [],
+    [user?.permissions],
+  );
 
   const has = useCallback(
     (perm: string) => permissions.includes(perm),

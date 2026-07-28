@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useRef } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { AuthContext } from '../context/auth-context';
 import { toolsConfig } from '../config/tools';
@@ -6,13 +6,62 @@ import { ThemeToggle } from './ThemeToggle';
 import { gsap } from 'gsap';
 import { ArrowRight } from '@phosphor-icons/react';
 import { cn } from '../lib/cn';
+import api from '../api/axios';
+
+interface ToolMetaOverride {
+  tool_id: string;
+  enabled: boolean;
+  sort_order: number;
+  custom_name: string | null;
+  custom_description: string | null;
+}
 
 const Layout: React.FC = () => {
   const { user, logout } = useContext(AuthContext);
   const navigate = useNavigate();
   const location = useLocation();
   const navRef = useRef<HTMLElement>(null);
-  const activeTool = toolsConfig.find(
+
+  const [overrides, setOverrides] = useState<Map<string, ToolMetaOverride>>(new Map());
+
+  // 拉取工具元数据覆盖层，用于索引过滤。
+  useEffect(() => {
+    let active = true;
+    api
+      .get<ToolMetaOverride[]>('/tools-meta')
+      .then((response) => {
+        if (!active) return;
+        const map = new Map<string, ToolMetaOverride>();
+        for (const item of response.data) {
+          map.set(item.tool_id, item);
+        }
+        setOverrides(map);
+      })
+      .catch(() => {
+        // 拉取失败时使用默认配置。
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // 合并配置与覆盖项，只保留已启用的工具。
+  const visibleTools = useMemo(() => {
+    return toolsConfig
+      .map((tool, index) => {
+        const override = overrides.get(tool.id);
+        return {
+          ...tool,
+          name: override?.custom_name?.trim() || tool.name,
+          sort_order: override?.sort_order ?? index,
+          enabled: override?.enabled ?? true,
+        };
+      })
+      .filter((t) => t.enabled)
+      .sort((a, b) => a.sort_order - b.sort_order);
+  }, [overrides]);
+
+  const activeTool = visibleTools.find(
     (tool) =>
       location.pathname === tool.path ||
       location.pathname.startsWith(`${tool.path}/`),
@@ -32,8 +81,8 @@ const Layout: React.FC = () => {
       return;
     }
 
-    gsap.fromTo(navRef.current, 
-      { y: -20, opacity: 0 }, 
+    gsap.fromTo(navRef.current,
+      { y: -20, opacity: 0 },
       { y: 0, opacity: 1, duration: 1, ease: 'expo.out', delay: 0.2 }
     );
   }, []);
@@ -41,7 +90,7 @@ const Layout: React.FC = () => {
   return (
     <div className="relative flex min-h-dvh flex-col bg-background">
       <div className="grain-overlay" />
-      
+
       {/* 工具页使用上下文页头，主控台保留浮动页头。 */}
       <header
         ref={navRef}
@@ -76,7 +125,7 @@ const Layout: React.FC = () => {
             </>
           )}
         </div>
-        
+
         <div className="flex items-center gap-3 pointer-events-auto md:gap-8">
           <ThemeToggle />
           <span className="hidden text-[0.8125rem] font-mono tracking-widest uppercase opacity-50 lg:block">
@@ -112,10 +161,10 @@ const Layout: React.FC = () => {
         <Outlet />
       </main>
 
-      {/* 左下角浮动工具索引 */}
+      {/* 左下角浮动工具索引 — 只显示已启用的工具 */}
       <div className="hidden lg:flex fixed bottom-12 left-12 flex-col gap-2 z-40  w-48">
         <p className="mb-2 text-[0.625rem] font-mono uppercase tracking-[0.2em] opacity-40">索引</p>
-        {toolsConfig.map((tool) => {
+        {visibleTools.map((tool) => {
           const isActive = activeTool?.id === tool.id;
 
           return (

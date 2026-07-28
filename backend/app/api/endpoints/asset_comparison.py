@@ -15,8 +15,6 @@ from sqlalchemy.orm import Session
 from app.api import deps
 from app.core.auth import get_current_user
 from app.models.user import User
-from app.services.audit import log_action
-
 from app.services.asset_engine.Customer_Customer import Customer_Customer
 from app.services.asset_engine.Customer_Notes import Customer_Notes
 from app.services.asset_engine.Finance_Finance import Finance_Finance
@@ -24,6 +22,7 @@ from app.services.asset_engine.Finance_Notes import Finance_Notes
 from app.services.asset_engine.Notes_Notes import Notes_Notes
 from app.services.asset_engine.Notes_SFC import Notes_SFC
 from app.services.asset_engine.SFC_SFC import SFC_SFC
+from app.services.audit import log_action
 
 try:
     from app.services.asset_engine.mod import create_excel_template

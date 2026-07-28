@@ -73,7 +73,9 @@ def update_user_endpoint(
     """
     user = get_user_by_id(db, user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     # 自保护 — 不能封禁自己
     if admin.id == user.id and user_in.is_active is False:
@@ -105,7 +107,9 @@ def delete_user_endpoint(
     """管理员删除用户。不允许删除自己。"""
     user = get_user_by_id(db, user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     if admin.id == user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

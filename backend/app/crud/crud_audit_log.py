@@ -54,12 +54,7 @@ def get_logs(
     if date_to is not None:
         query = query.filter(AuditLog.created_at <= date_to)
     total = query.count()
-    items = (
-        query.order_by(AuditLog.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
+    items = query.order_by(AuditLog.created_at.desc()).offset(skip).limit(limit).all()
     return items, total
 
 

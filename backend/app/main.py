@@ -4,7 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.api_router import api_router
 from app.db.base_class import Base
 from app.db.session import engine
-
 from app.migrations import run_rbac_migration
 
 # Create database tables

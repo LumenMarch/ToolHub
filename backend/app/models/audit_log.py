@@ -18,6 +18,4 @@ class AuditLog(Base):
     target_id = Column(String, nullable=True)
     detail = Column(Text, nullable=True)
     ip_address = Column(String, nullable=True)
-    created_at = Column(
-        DateTime, default=datetime.utcnow, nullable=False, index=True
-    )
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
