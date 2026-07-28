@@ -20,6 +20,7 @@ app = FastAPI(
     title="ToolHub API",
     openapi_url="/api/v1/openapi.json",
 )
+
 # Configure CORS
 origins = [
     "http://localhost:5173",
