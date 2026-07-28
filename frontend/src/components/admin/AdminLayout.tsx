@@ -1,4 +1,4 @@
-import React, { useContext, useMemo } from 'react';
+import React, { useContext, useEffect, useMemo } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   ChartBar,
@@ -54,6 +54,16 @@ const AdminLayout: React.FC = () => {
       navigate('/login');
     }
   };
+
+  // 动态浏览器标题 — "{页面名} · 控制台"
+  useEffect(() => {
+    if (currentItem) {
+      document.title = `${currentItem.title} · 控制台`;
+    }
+    return () => {
+      document.title = '工具枢纽';
+    };
+  }, [currentItem]);
 
   return (
     <div className="h-dvh bg-background flex overflow-hidden">

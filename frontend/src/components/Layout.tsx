@@ -67,6 +67,18 @@ const Layout: React.FC = () => {
       location.pathname.startsWith(`${tool.path}/`),
   );
 
+  // 动态浏览器标题 — 首页 "工具枢纽"，工具页 "{工具名} · 工具枢纽"
+  useEffect(() => {
+    if (activeTool) {
+      document.title = `${activeTool.name} · 工具枢纽`;
+    } else {
+      document.title = '工具枢纽';
+    }
+    return () => {
+      document.title = '工具枢纽';
+    };
+  }, [activeTool]);
+
   const handleLogout = async () => {
     try {
       await logout();
