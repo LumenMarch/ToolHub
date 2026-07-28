@@ -442,7 +442,7 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
                       {row.values.map((value, columnIndex) => (
                         <td
                           key={`${row.key}-${analysis.columns[columnIndex]}`}
-                          className="max-w-80 whitespace-nowrap border-r border-current/10 px-4 py-3"
+                          className="max-w-80 whitespace-pre-line border-r border-current/10 px-4 py-3 align-top"
                         >
                           {value || '—'}
                         </td>
@@ -485,7 +485,7 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
                           <dt className="font-mono text-[0.6875rem] opacity-65">
                             {column}
                           </dt>
-                          <dd className="min-w-0 break-words text-sm">
+                          <dd className="min-w-0 whitespace-pre-line break-words text-sm">
                             {row.values[index]}
                           </dd>
                         </div>
