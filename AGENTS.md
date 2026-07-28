@@ -24,7 +24,7 @@ uv run ruff format .  # Ruff formatter (auto-fix)
 
 **Frontend** (`frontend/`):
 ```bash
-npm run lint          # oxlint static analysis
-npm run build         # tsc type-check + vite build
-npx react-doctor      # React component diagnostics (run last)
+bun run lint          # oxlint static analysis
+bun run build         # tsc type-check + vite build
+bunx react-doctor     # React component diagnostics (run last)
 ```
