@@ -37,6 +37,8 @@ OUTPUT_HEADERS = (
     "体温",
     "抓拍时间",
     "记录时间",
+    "出时间",
+    "进时间",
     "差異時間",
     "備註",
     "備註2",
@@ -82,6 +84,8 @@ class AttendanceRecord:
 class LeaveResult:
     duration: int
     status_text: str
+    leave_time: datetime
+    return_time: datetime
 
 
 @dataclass(frozen=True)
@@ -164,7 +168,7 @@ class AttendanceService:
             grouped_records[record.emp_id].append(record)
 
         leave_results: dict[tuple[str, int], LeaveResult] = {}
-        missing_records: set[tuple[str, int]] = set()
+        missing_records: dict[tuple[str, int], datetime] = {}
 
         for emp_id, employee_records in grouped_records.items():
             employee_records.sort(key=lambda item: item.effective_time)
@@ -502,6 +506,8 @@ class AttendanceService:
                                 duration,
                                 shift,
                             ),
+                            leave_time=leave_record.effective_time,
+                            return_time=return_record.effective_time,
                         )
                     index = return_index + 1
                     break
@@ -515,8 +521,8 @@ class AttendanceService:
     def _detect_missing_entries(
         self,
         records: list[AttendanceRecord],
-    ) -> set[tuple[str, int]]:
-        missing: set[tuple[str, int]] = set()
+    ) -> dict[tuple[str, int], datetime]:
+        missing: dict[tuple[str, int], datetime] = {}
         for current, following in zip(records, records[1:], strict=False):
             if current.direction != "出" or following.direction != "出":
                 continue
@@ -524,7 +530,7 @@ class AttendanceService:
                 following.effective_time - current.effective_time
             ).total_seconds() / 60
             if self.max_leave_minutes < interval_minutes <= self.max_pair_minutes:
-                missing.add(current.key)
+                missing[current.key] = following.effective_time
         return missing
 
     def _get_leave_status(
@@ -578,7 +584,7 @@ class AttendanceService:
         sheet_order: list[str],
         records: list[AttendanceRecord],
         leave_results: dict[tuple[str, int], LeaveResult],
-        missing_records: set[tuple[str, int]],
+        missing_records: dict[tuple[str, int], datetime],
     ) -> list[AttendanceOutputSheet]:
         records_by_sheet: dict[str, list[AttendanceRecord]] = defaultdict(list)
         for record in records:
@@ -598,13 +604,25 @@ class AttendanceService:
             output_rows: list[AttendanceOutputRow] = []
             for record in sheet_records:
                 row_data = list(record.original_data[:14])
-                while len(row_data) < 14:
+                while len(row_data) < 16:
                     row_data.append("")
 
                 leave_result = leave_results.get(record.key)
                 if record.direction == "出" and leave_result:
-                    row_data[11] = self._format_duration(leave_result.duration)
-                    row_data[12] = leave_result.status_text
+                    row_data[11] = leave_result.leave_time.strftime("%Y-%m-%d %H:%M:%S")
+                    following_time = missing_records.get(record.key)
+                    return_time_str = leave_result.return_time.strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                    if following_time:
+                        return_time_str = (
+                            following_time.strftime("%Y-%m-%d %H:%M:%S")
+                            + "\n"
+                            + return_time_str
+                        )
+                    row_data[12] = return_time_str
+                    row_data[13] = self._format_duration(leave_result.duration)
+                    row_data[14] = leave_result.status_text
 
                 anomaly_messages: list[str] = []
                 flags: list[str] = []
@@ -621,15 +639,15 @@ class AttendanceService:
                 if record.key in missing_records:
                     flags.append("missing_entry")
                     anomaly_messages.append("缺少进入时间数据")
-                row_data[13] = "；".join(anomaly_messages)
+                row_data[15] = "；".join(anomaly_messages)
 
-                status_text = self._string_value(row_data[12])
+                status_text = self._string_value(row_data[14])
                 if status_text == "超时离岗":
                     flags.append("overtime")
                 elif status_text in {"午餐超时", "晚餐超时"}:
                     flags.extend(("overtime", "meal_overtime"))
 
-                if row_data[13]:
+                if row_data[15]:
                     tone = "warning"
                 elif "overtime" in flags:
                     tone = "danger"
@@ -646,7 +664,7 @@ class AttendanceService:
                             self._display_value(value) for value in row_data
                         ),
                         status_text=status_text,
-                        anomaly_text=self._string_value(row_data[13]),
+                        anomaly_text=self._string_value(row_data[15]),
                         flags=tuple(flags),
                         tone=tone,
                         attention=bool(flags),
@@ -669,7 +687,7 @@ class AttendanceService:
         for sheet_index, output_sheet in enumerate(sheets):
             worksheet = workbook.active if sheet_index == 0 else workbook.create_sheet()
             worksheet.title = output_sheet.name
-            worksheet.merge_cells("A1:N1")
+            worksheet.merge_cells("A1:P1")
             worksheet["A1"] = "通行记录"
             worksheet["A1"].font = Font(bold=True, size=12)
 
