@@ -60,4 +60,19 @@ def get_current_user(
     user = get_user_by_username(db, username=username)
     if user is None:
         raise credentials_exception
+    # 被封禁用户即使 token 有效也拒绝。
+    if not user.is_active:
+        raise credentials_exception
     return user
+
+
+def get_current_admin_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """要求当前用户是管理员且账号可用。"""
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+    return current_user

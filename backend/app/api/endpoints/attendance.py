@@ -2,9 +2,11 @@ from dataclasses import asdict
 from datetime import datetime
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
+from sqlalchemy.orm import Session
 
+from app.api import deps
 from app.core.auth import get_current_user
 from app.models.user import User
 from app.schemas.attendance import (
@@ -22,6 +24,7 @@ from app.services.attendance import (
     attendance_result_cache,
     validate_upload_extensions,
 )
+from app.services.audit import log_action
 
 router = APIRouter()
 
@@ -63,9 +66,11 @@ def _build_download_response(content: bytes, filename: str) -> Response:
 
 @router.post("/process")
 def process_attendance(
+    request: Request,
+    db: Session = Depends(deps.get_db),
     attendance_file: UploadFile = File(...),
     shift_file: UploadFile = File(...),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> Response:
     try:
         attendance_content, attendance_suffix, shift_content = _read_uploads(
@@ -83,6 +88,15 @@ def process_attendance(
         attendance_file.file.close()
         shift_file.file.close()
 
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.attendance.process",
+        target_type="tool",
+        target_id="attendance",
+    )
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"出勤整理_完整_{timestamp}.xlsx"
     return _build_download_response(output, filename)
@@ -90,6 +104,8 @@ def process_attendance(
 
 @router.post("/analyze", response_model=AttendanceAnalyzeResponse)
 def analyze_attendance(
+    request: Request,
+    db: Session = Depends(deps.get_db),
     attendance_file: UploadFile = File(...),
     shift_file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -118,6 +134,16 @@ def analyze_attendance(
         user_id=current_user.id,
         filename=filename,
         content=output,
+    )
+
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.attendance.analyze",
+        target_type="tool",
+        target_id="attendance",
+        detail={"result_id": cached_result.result_id},
     )
 
     return AttendanceAnalyzeResponse(

@@ -82,6 +82,15 @@ const Layout: React.FC = () => {
           <span className="hidden text-[0.8125rem] font-mono tracking-widest uppercase opacity-50 lg:block">
             [ 标识: {user?.username} ]
           </span>
+          {user?.is_admin && (
+            <Link
+              to="/admin"
+              className="group relative inline-flex min-h-11 items-center overflow-hidden whitespace-nowrap px-1 text-[0.8125rem] font-mono uppercase tracking-widest transition-colors hover:text-primary active:translate-y-px"
+            >
+              <span className="relative z-10">控制台</span>
+              <div className="absolute bottom-0 left-0 w-full h-[1px] bg-primary -translate-x-[101%] group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
+            </Link>
+          )}
           <button
             type="button"
             onClick={() => void handleLogout()}

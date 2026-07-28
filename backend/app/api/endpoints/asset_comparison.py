@@ -5,11 +5,17 @@ from datetime import datetime
 from pathlib import Path
 
 from dateutil.relativedelta import relativedelta
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.api import deps
+from app.core.auth import get_current_user
+from app.models.user import User
+from app.services.audit import log_action
 
 from app.services.asset_engine.Customer_Customer import Customer_Customer
 from app.services.asset_engine.Customer_Notes import Customer_Notes
@@ -48,7 +54,7 @@ class ComparisonRequest(BaseModel):
 
 
 @router.get("/auto-paths")
-async def get_auto_paths():
+async def get_auto_paths(_: User = Depends(get_current_user)):
     current_date = datetime.now()
     this_month_str = current_date.strftime("%Y%m")
     last_month_date = current_date - relativedelta(months=1)
@@ -375,7 +381,7 @@ def apply_review_colors(ws, req_reviews):
 
 
 @router.post("/check")
-async def check_data(req: ComparisonRequest):
+async def check_data(req: ComparisonRequest, _: User = Depends(get_current_user)):
     try:
         summary = run_comparisons(req)
         return {
@@ -567,9 +573,22 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
 
 
 @router.post("/save")
-async def save_results(req: ComparisonRequest):
+async def save_results(
+    req: ComparisonRequest,
+    request: Request,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(get_current_user),
+):
     try:
         summary = run_comparisons(req)
+        log_action(
+            db,
+            request=request,
+            user=current_user,
+            action="tool.asset.save",
+            target_type="tool",
+            target_id="asset_comparison",
+        )
         ff = summary.get("ff")
         nn = summary.get("nn")
         sfc = summary.get("sfc")
@@ -902,9 +921,24 @@ async def save_results(req: ComparisonRequest):
 
 
 @router.post("/export/{module}")
-async def export_single_module(module: str, req: ComparisonRequest):
+async def export_single_module(
+    module: str,
+    req: ComparisonRequest,
+    request: Request,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(get_current_user),
+):
     try:
         summary = run_comparisons(req)
+        log_action(
+            db,
+            request=request,
+            user=current_user,
+            action="tool.asset.export",
+            target_type="tool",
+            target_id="asset_comparison",
+            detail={"module": module},
+        )
         from app.services.asset_engine.const import (
             CUSTOMER_CUSTOMER_SAVE_PATH,
             CUSTOMER_NOTES_SAVE_PATH,
