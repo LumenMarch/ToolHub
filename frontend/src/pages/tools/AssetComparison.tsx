@@ -3,21 +3,22 @@ import { gsap } from 'gsap';
 import { FileArrowUp, CheckSquareOffset, FloppyDisk, DownloadSimple, Plus, Minus, Warning, FolderOpen } from '@phosphor-icons/react';
 import api from '../../api/axios';
 
-const UnboxedFileInput: React.FC<{ label: string, value: string, onChange: (val: string) => void }> = ({ label, value, onChange }) => {
+const UnboxedFileInput: React.FC<{ label: string, value: string, onChange: (val: string) => void; displayValue?: string }> = ({ label, value, onChange, displayValue }) => {
   const [isFocused, setIsFocused] = useState(false);
+  const shown = displayValue ?? (value.includes('/') ? value.split('/').pop()! : value.includes('\\') ? value.split('\\').pop()! : value);
 
   return (
     <div className="relative group w-full mb-8">
-      <div className={`pointer-events-none absolute left-0 top-2 font-mono uppercase tracking-[0.1em] text-muted-foreground transition-[color,transform] duration-300 ease-out ${isFocused || value ? '-translate-y-7 text-[0.625rem] text-primary' : 'translate-y-0 text-sm'}`}>
+      <div className={`pointer-events-none absolute left-0 top-2 font-mono uppercase tracking-[0.1em] text-muted-foreground transition-[color,transform] duration-300 ease-out ${isFocused || shown ? '-translate-y-7 text-[0.625rem] text-primary' : 'translate-y-0 text-sm'}`}>
         {label}
       </div>
       <div className="flex items-center border-b border-border group-focus-within:border-primary transition-colors">
         <input
           type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
+          value={shown}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
+          onChange={(e) => onChange(e.target.value)}
           className="w-full bg-transparent border-none outline-none py-1.5 text-base md:text-lg font-medium tracking-wide text-foreground truncate"
           placeholder=""
         />
@@ -159,6 +160,7 @@ const AssetComparison: React.FC = () => {
         }
         const res = await api.post('/tools/asset/upload-and-scan', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 120000,  // 120秒超时，大文件 + 局域网传输可能较慢
         });
         if (res.data.status === 'success') {
           const data = res.data.data;
@@ -183,7 +185,9 @@ const AssetComparison: React.FC = () => {
           setStatusMsg(<span><Badge variant="err">失败</Badge> {res.data.message}</span>);
         }
       } catch (err: any) {
-        setStatusMsg(<span><Badge variant="err">错误</Badge> 上传: {err.message}</span>);
+        const detail = err.response?.data?.message || err.response?.data?.detail || err.response?.statusText || err.message;
+        const status = err.response?.status ? ` [HTTP ${err.response.status}]` : '';
+        setStatusMsg(<span><Badge variant="err">错误{status}</Badge> {detail}</span>);
       } finally {
         setIsProcessing(false);
         selectedFilesRef.current = [];
