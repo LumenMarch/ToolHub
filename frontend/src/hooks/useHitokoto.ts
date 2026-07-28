@@ -1,44 +1,29 @@
-import { useEffect, useState } from 'react';
+import { queryOptions, useQuery } from '@tanstack/react-query';
 import api from '../api/axios';
 
-// 后端调用失败时的兜底句，保证页面始终有内容。
 const FALLBACK_HITOKOTO = '落霞与孤鹜齐飞，秋水共长天一色。';
 
 interface HitokotoState {
-  text: string;
+  text: string | null;
   loading: boolean;
 }
 
-/**
- * 拉取每日一言。每次组件挂载都会获取一条新句，失败时回退到兜底句。
- */
-export function useHitokoto(): HitokotoState {
-  const [state, setState] = useState<HitokotoState>({
-    text: FALLBACK_HITOKOTO,
-    loading: true,
-  });
-
-  useEffect(() => {
-    let active = true;
-
+const hitokotoQueryOptions = queryOptions({
+  queryKey: ['hitokoto'],
+  queryFn: () =>
     api
       .get<{ hitokoto: string }>('/tools/sixty-seconds/hitokoto')
-      .then((response) => {
-        if (!active) return;
-        const hitokoto = response.data?.hitokoto?.trim();
-        setState({ text: hitokoto || FALLBACK_HITOKOTO, loading: false });
-      })
-      .catch(() => {
-        if (!active) return;
-        setState({ text: FALLBACK_HITOKOTO, loading: false });
-      });
+      .then((response) => response.data?.hitokoto?.trim() || FALLBACK_HITOKOTO),
+  staleTime: Infinity,
+  retry: 1,
+});
 
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  return state;
+export function useHitokoto(): HitokotoState {
+  const query = useQuery(hitokotoQueryOptions);
+  return {
+    text: query.data ?? (query.isError ? FALLBACK_HITOKOTO : null),
+    loading: query.isPending,
+  };
 }
 
 /**

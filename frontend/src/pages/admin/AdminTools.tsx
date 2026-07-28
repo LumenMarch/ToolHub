@@ -23,8 +23,11 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { useQueryClient } from '@tanstack/react-query';
 import { toolsConfig } from '../../config/tools';
+import AdminLoadingState from '../../components/admin/AdminLoadingState';
 import { useAdminApi } from '../../hooks/useAdminApi';
+import { toolsMetaQueryKey } from '../../hooks/useToolsMeta';
 import type { ToolMeta, ToolMetaUpdateInput } from '../../hooks/useAdminApi';
 
 // 与硬编码 tools.ts 合并后的本地编辑行结构。
@@ -41,8 +44,9 @@ interface EditableRow {
 
 const AdminTools: React.FC = () => {
   const api = useAdminApi();
+  const queryClient = useQueryClient();
   const [rows, setRows] = useState<EditableRow[]>([]);
-  const [_loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -80,7 +84,7 @@ const AdminTools: React.FC = () => {
 
   // 按当前 sort_order 排序展示，作为 dnd-kit 的数据源。
   const sortedRows = useMemo(
-    () => [...rows].sort((a, b) => a.sort_order - b.sort_order),
+    () => rows.toSorted((a, b) => a.sort_order - b.sort_order),
     [rows],
   );
 
@@ -147,6 +151,7 @@ const AdminTools: React.FC = () => {
         return item;
       });
       await api.bulkUpdateToolMetas(items);
+      await queryClient.invalidateQueries({ queryKey: toolsMetaQueryKey });
       setSavedAt(Date.now());
       setRows((prev) => prev.map((r) => ({ ...r, dirty: false })));
     } catch {
@@ -195,28 +200,36 @@ const AdminTools: React.FC = () => {
         </div>
       )}
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext
-          items={sortedRows.map((r) => r.tool_id)}
-          strategy={verticalListSortingStrategy}
+      {loading ? (
+        <AdminLoadingState
+          ariaLabel="正在加载后台工具配置"
+          label="[ 工具配置 · 同步中 ]"
+          detail="等待元数据"
+        />
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
         >
-          <div className="space-y-2">
-            {sortedRows.map((row) => (
-              <ToolRow
-                key={row.tool_id}
-                row={row}
-                onToggleEnabled={(v) => updateRow(row.tool_id, { enabled: v })}
-                onNameChange={(v) => updateRow(row.tool_id, { custom_name: v })}
-                onDescChange={(v) => updateRow(row.tool_id, { custom_description: v })}
-              />
-            ))}
-          </div>
-        </SortableContext>
-      </DndContext>
+          <SortableContext
+            items={sortedRows.map((r) => r.tool_id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <div className="space-y-2">
+              {sortedRows.map((row) => (
+                <ToolRow
+                  key={row.tool_id}
+                  row={row}
+                  onToggleEnabled={(v) => updateRow(row.tool_id, { enabled: v })}
+                  onNameChange={(v) => updateRow(row.tool_id, { custom_name: v })}
+                  onDescChange={(v) => updateRow(row.tool_id, { custom_description: v })}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      )}
     </div>
   );
 };

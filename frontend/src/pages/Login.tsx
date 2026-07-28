@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/auth-context';
 import api from '../api/axios';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { LoadingSignal } from '../components/LoadingSignal';
 import { gsap } from 'gsap';
 import { useHitokoto, splitIntoLines } from '../hooks/useHitokoto';
 
@@ -19,7 +20,13 @@ const Login: React.FC = () => {
   const titleRef = useRef<HTMLHeadingElement>(null);
 
   const { text: hitokotoText, loading: hitokotoLoading } = useHitokoto();
-  const lines = splitIntoLines(hitokotoText, 3);
+  const lines = hitokotoText ? splitIntoLines(hitokotoText, 3) : [];
+  let lineOffset = 0;
+  const displayLines = lines.map((text) => {
+    const line = { id: `${lineOffset}:${text}`, text };
+    lineOffset += text.length;
+    return line;
+  });
 
   useEffect(() => {
     if (user) {
@@ -27,14 +34,16 @@ const Login: React.FC = () => {
     }
   }, [user, navigate]);
 
-  // 仅在用户允许动态效果时执行大标题入场。
+  // 每日一言加载完成后只执行标题动画。
   useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (
+      !hitokotoText ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
       return;
     }
 
     const ctx = gsap.context(() => {
-      // 标题切片依次显现。
       gsap.to('.clip-text > span', {
         y: 0,
         duration: 1.2,
@@ -42,14 +51,9 @@ const Login: React.FC = () => {
         ease: 'power4.out',
         delay: 0.1
       });
-
-      gsap.fromTo('.gsap-fade',
-        { opacity: 0, y: 20 },
-        { opacity: 1, y: 0, duration: 1, stagger: 0.1, ease: 'power3.out', delay: 0.8 }
-      );
     }, containerRef);
     return () => ctx.revert();
-  }, [isLogin, hitokotoLoading]);
+  }, [hitokotoText]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,25 +115,40 @@ const Login: React.FC = () => {
       
       {/* 左侧每日一言 */}
       <div className="flex-1 flex flex-col justify-center p-8 md:p-16 lg:p-24 relative z-10">
-        <h1 ref={titleRef} className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight leading-[1.2] max-w-xl">
-          {lines.map((line, i) => (
-            <div key={i} className="clip-text">
-              <span>{line}</span>
-            </div>
-          ))}
-        </h1>
+        <div className="min-h-32 w-full max-w-xl">
+          {hitokotoLoading ? (
+            <LoadingSignal
+              ariaLabel="正在加载每日一言"
+              meta="Hitokoto / Remote"
+              label="[ 每日一言 · 握手中 ]"
+              detail="等待远端响应"
+              className="pt-4"
+            />
+          ) : (
+            <h1
+              ref={titleRef}
+              className="text-3xl font-bold leading-[1.2] tracking-tight md:text-4xl lg:text-5xl"
+            >
+              {displayLines.map((line) => (
+                <div key={line.id} className="clip-text">
+                  <span>{line.text}</span>
+                </div>
+              ))}
+            </h1>
+          )}
+        </div>
       </div>
 
       {/* 右侧极简粗野主义表单 */}
       <div className="flex-1 flex flex-col justify-center p-8 md:p-16 lg:p-24 relative z-10 form-wrapper max-w-2xl">
         <form onSubmit={handleSubmit} className="space-y-12 w-full">
           {error && (
-            <div id="auth-error" role="alert" className="text-sm font-mono text-primary bg-primary/10 p-4 border-l-2 border-primary gsap-fade uppercase tracking-widest">
+            <div id="auth-error" role="alert" className="text-sm font-mono text-primary bg-primary/10 p-4 border-l-2 border-primary uppercase tracking-widest">
               [ 异常: {error} ]
             </div>
           )}
           
-          <div className="gsap-fade relative group">
+          <div className="relative group">
             <input
               type="text"
               value={username}
@@ -147,7 +166,7 @@ const Login: React.FC = () => {
             </label>
           </div>
           
-          <div className="gsap-fade relative group">
+          <div className="relative group">
             <input
               type="password"
               value={password}
@@ -164,7 +183,7 @@ const Login: React.FC = () => {
             </label>
           </div>
 
-          <div className="gsap-fade pt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-8">
+          <div className="pt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-8">
             <button
               type="submit"
               disabled={loading}

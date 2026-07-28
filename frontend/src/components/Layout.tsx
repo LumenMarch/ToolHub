@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { AuthContext } from '../context/auth-context';
 import { toolsConfig } from '../config/tools';
@@ -6,15 +6,8 @@ import { ThemeToggle } from './ThemeToggle';
 import { gsap } from 'gsap';
 import { ArrowRight } from '@phosphor-icons/react';
 import { cn } from '../lib/cn';
-import api from '../api/axios';
-
-interface ToolMetaOverride {
-  tool_id: string;
-  enabled: boolean;
-  sort_order: number;
-  custom_name: string | null;
-  custom_description: string | null;
-}
+import { useVisibleTools } from '../hooks/useToolsMeta';
+import { LoadingSignal } from './LoadingSignal';
 
 const Layout: React.FC = () => {
   const { user, logout } = useContext(AuthContext);
@@ -22,46 +15,14 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const navRef = useRef<HTMLElement>(null);
 
-  const [overrides, setOverrides] = useState<Map<string, ToolMetaOverride>>(new Map());
-
-  // 拉取工具元数据覆盖层，用于索引过滤。
-  useEffect(() => {
-    let active = true;
-    api
-      .get<ToolMetaOverride[]>('/tools-meta')
-      .then((response) => {
-        if (!active) return;
-        const map = new Map<string, ToolMetaOverride>();
-        for (const item of response.data) {
-          map.set(item.tool_id, item);
-        }
-        setOverrides(map);
-      })
-      .catch(() => {
-        // 拉取失败时使用默认配置。
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // 合并配置与覆盖项，只保留已启用的工具。
-  const visibleTools = useMemo(() => {
-    return toolsConfig
-      .map((tool, index) => {
-        const override = overrides.get(tool.id);
-        return {
-          ...tool,
-          name: override?.custom_name?.trim() || tool.name,
-          sort_order: override?.sort_order ?? index,
-          enabled: override?.enabled ?? true,
-        };
-      })
-      .filter((t) => t.enabled)
-      .sort((a, b) => a.sort_order - b.sort_order);
-  }, [overrides]);
+  const { visibleTools, isPending } = useVisibleTools();
 
   const activeTool = visibleTools.find(
+    (tool) =>
+      location.pathname === tool.path ||
+      location.pathname.startsWith(`${tool.path}/`),
+  );
+  const isToolRoute = toolsConfig.some(
     (tool) =>
       location.pathname === tool.path ||
       location.pathname.startsWith(`${tool.path}/`),
@@ -108,7 +69,7 @@ const Layout: React.FC = () => {
         ref={navRef}
         className={cn(
           'left-0 top-0 z-50 grid w-full grid-cols-[minmax(0,1fr)_auto] gap-4 pointer-events-none',
-          activeTool
+          isToolRoute
             ? 'sticky items-start border-b border-border bg-background px-6 py-4 md:items-center md:px-10 md:py-5'
             : 'fixed items-center p-6 md:p-10',
         )}
@@ -116,7 +77,7 @@ const Layout: React.FC = () => {
         <div
           className={cn(
             'min-w-0 pointer-events-auto',
-            activeTool && 'flex flex-col gap-1 md:flex-row md:items-center md:gap-5',
+            isToolRoute && 'flex flex-col gap-1 md:flex-row md:items-center md:gap-5',
           )}
         >
           <Link
@@ -125,15 +86,24 @@ const Layout: React.FC = () => {
           >
             工具<span className="text-primary">枢纽</span>.
           </Link>
-          {activeTool && (
+          {isToolRoute && (
             <>
               <span
                 aria-hidden="true"
                 className="hidden h-6 w-px shrink-0 bg-border md:block"
               />
-              <h1 className="min-w-0 text-base font-bold leading-tight tracking-tight md:text-2xl">
-                {activeTool.name}
-              </h1>
+              {activeTool ? (
+                <h1 className="min-w-0 text-base font-bold leading-tight tracking-tight md:text-2xl">
+                  {activeTool.name}
+                </h1>
+              ) : (
+                <LoadingSignal
+                  ariaLabel="正在加载工具名称"
+                  label="[ 工具同步中 ]"
+                  compact
+                  className="w-32"
+                />
+              )}
             </>
           )}
         </div>
@@ -167,7 +137,7 @@ const Layout: React.FC = () => {
       <main
         className={cn(
           'relative z-10 mx-auto flex w-full max-w-[1400px] flex-1 flex-col px-6 pb-20 md:px-24 lg:px-48',
-          activeTool ? 'pt-8 md:pt-12' : 'pt-32 md:pt-48',
+          isToolRoute ? 'pt-8 md:pt-12' : 'pt-32 md:pt-48',
         )}
       >
         <Outlet />
@@ -176,7 +146,14 @@ const Layout: React.FC = () => {
       {/* 左下角浮动工具索引 — 只显示已启用的工具 */}
       <div className="hidden lg:flex fixed bottom-12 left-12 flex-col gap-2 z-40  w-48">
         <p className="mb-2 text-[0.625rem] font-mono uppercase tracking-[0.2em] opacity-40">索引</p>
-        {visibleTools.map((tool) => {
+        {isPending ? (
+          <LoadingSignal
+            ariaLabel="正在加载工具索引"
+            label="[ 建立索引 ]"
+            detail="等待工具元数据"
+            compact
+          />
+        ) : visibleTools.map((tool) => {
           const isActive = activeTool?.id === tool.id;
 
           return (
