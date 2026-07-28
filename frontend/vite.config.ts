@@ -10,7 +10,7 @@ export default defineConfig({
   ],
   server: {
     allowedHosts: [
-      "tool.sabervibe.com"
+      "tool.sabervibe.com",
     ],
     proxy: {
       '/api/v1': {

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.formparsers import MultiPartParser
 
@@ -21,11 +21,16 @@ app = FastAPI(
     openapi_url="/api/v1/openapi.json",
 )
 
-# Configure CORS — 局域网内其他 Mac 也能访问
-# allow_credentials=True 不能搭配 allow_origins=["*"]，用正则匹配所有局域网地址
+# Configure CORS
+origins = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5175",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,12 +44,3 @@ app.include_router(api_router, prefix="/api/v1")
 @app.get("/")
 def read_root():
     return {"message": "Welcome to ToolHub API"}
-
-
-@app.get("/health")
-def health(request: Request):
-    """健康检查 + 客户端 IP 信息"""
-    return {
-        "status": "ok",
-        "client_host": request.client.host if request.client else "unknown",
-    }
