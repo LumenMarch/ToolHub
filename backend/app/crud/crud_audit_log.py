@@ -36,6 +36,7 @@ def get_logs(
     skip: int = 0,
     limit: int = 50,
     user_id: int | None = None,
+    username: str | None = None,
     action: str | None = None,
     action_prefix: str | None = None,
     date_from: datetime | None = None,
@@ -45,6 +46,8 @@ def get_logs(
     query = db.query(AuditLog)
     if user_id is not None:
         query = query.filter(AuditLog.user_id == user_id)
+    if username is not None:
+        query = query.filter(AuditLog.username.ilike(f"%{username}%"))
     if action is not None:
         query = query.filter(AuditLog.action == action)
     if action_prefix is not None:

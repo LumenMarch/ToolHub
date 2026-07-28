@@ -101,3 +101,35 @@ def require_permission(permission: str) -> _PermissionChecker:
             ...
     """
     return _PermissionChecker(permission)
+
+
+class _ToolEnabledChecker:
+    """FastAPI Dependency: 校验工具是否已被管理员启用。"""
+
+    def __init__(self, tool_id: str) -> None:
+        self.tool_id = tool_id
+
+    def __call__(
+        self,
+        db: Session = Depends(deps.get_db),
+    ) -> None:
+        from app.crud.crud_tool_meta import is_tool_enabled
+
+        if not is_tool_enabled(db, self.tool_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"工具 {self.tool_id} 已被禁用",
+            )
+
+
+def require_tool_enabled(tool_id: str) -> _ToolEnabledChecker:
+    """要求指定工具当前处于启用状态，否则返回 403。
+
+    用法:
+        @router.post("/process")
+        def process(
+            _: None = Depends(require_tool_enabled("string_tools")),
+        ):
+            ...
+    """
+    return _ToolEnabledChecker(tool_id)

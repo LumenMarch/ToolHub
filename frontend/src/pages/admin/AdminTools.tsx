@@ -141,12 +141,9 @@ const AdminTools: React.FC = () => {
           enabled: r.enabled,
           sort_order: r.sort_order,
         };
-        if (r.custom_name.trim()) {
-          item.custom_name = r.custom_name.trim();
-        }
-        if (r.custom_description.trim()) {
-          item.custom_description = r.custom_description.trim();
-        }
+        // 始终发送名称和描述，空字符串表示恢复默认值
+        item.custom_name = r.custom_name.trim();
+        item.custom_description = r.custom_description.trim();
         return item;
       });
       await api.bulkUpdateToolMetas(items);

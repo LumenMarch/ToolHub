@@ -81,7 +81,7 @@ def get_daily_active_users(
 ):
     """最近 N 天每日活跃用户数（基于审计日志）。"""
     now = datetime.now(UTC)
-    date_from = (now - timedelta(days=days)).replace(
+    date_from = (now - timedelta(days=days - 1)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     rows = count_daily_active_users(db, date_from, now)

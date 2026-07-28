@@ -459,8 +459,11 @@ const EditUserModal: React.FC<EditUserModalProps> = ({
     try {
       const input: UserUpdateInput = {
         is_active: isActive,
-        role_ids: selectedRoleIds,
       };
+      // 编辑自己时不提交 role_ids，避免后端拦截
+      if (!isSelf) {
+        input.role_ids = selectedRoleIds;
+      }
       if (resetPassword.trim()) {
         input.password = resetPassword;
       }

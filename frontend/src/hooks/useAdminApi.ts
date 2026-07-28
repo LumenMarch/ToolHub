@@ -152,6 +152,7 @@ export function useAdminApi() {
       skip?: number;
       limit?: number;
       user_id?: number;
+      username?: string;
       action?: string;
       action_prefix?: string;
       date_from?: string;

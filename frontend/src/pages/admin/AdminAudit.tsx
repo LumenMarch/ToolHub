@@ -29,6 +29,7 @@ const AdminAudit: React.FC = () => {
           skip: (p - 1) * size,
           limit: size,
           action_prefix: actionPrefix || undefined,
+          username: username || undefined,
         })
         .then((data) => {
           setLogs(data.items);
@@ -37,7 +38,7 @@ const AdminAudit: React.FC = () => {
         .catch(() => setError('加载审计日志失败'))
         .finally(() => setLoading(false));
     },
-    [api, actionPrefix],
+    [api, actionPrefix, username],
   );
 
   useEffect(() => {
@@ -53,13 +54,6 @@ const AdminAudit: React.FC = () => {
     setActionPrefix(value);
     setPage(1);
   };
-
-  // 客户端按用户名二次筛选（后端未提供 username 模糊查询参数）。
-  const filteredLogs = username
-    ? logs.filter(
-        (l) => l.username?.toLowerCase().includes(username.toLowerCase()),
-      )
-    : logs;
 
   const formatDate = (s: string) => {
     const d = new Date(s);
@@ -177,7 +171,10 @@ const AdminAudit: React.FC = () => {
         <input
           type="search"
           value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          onChange={(e) => {
+            setUsername(e.target.value);
+            setPage(1);
+          }}
           placeholder="筛选用户名..."
           className="awwwards-input w-48"
         />
@@ -211,7 +208,7 @@ const AdminAudit: React.FC = () => {
       <div className="border border-border">
         <DataTable
           columns={columns}
-          data={filteredLogs}
+          data={logs}
           rowKey={(l) => l.id}
           emptyHint={loading ? '加载中...' : '无日志记录'}
           pageSize={pageSize}

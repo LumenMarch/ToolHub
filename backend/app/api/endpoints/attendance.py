@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.auth import require_permission
+from app.core.auth import require_permission, require_tool_enabled
 from app.models.user import User
 from app.schemas.attendance import (
     AttendanceAnalyzeResponse,
@@ -71,6 +71,7 @@ def process_attendance(
     attendance_file: UploadFile = File(...),
     shift_file: UploadFile = File(...),
     current_user: User = Depends(require_permission("tool:use")),
+    __: None = Depends(require_tool_enabled("attendance-organizer")),
 ) -> Response:
     try:
         attendance_content, attendance_suffix, shift_content = _read_uploads(
@@ -109,6 +110,7 @@ def analyze_attendance(
     attendance_file: UploadFile = File(...),
     shift_file: UploadFile = File(...),
     current_user: User = Depends(require_permission("tool:use")),
+    __: None = Depends(require_tool_enabled("attendance-organizer")),
 ) -> AttendanceAnalyzeResponse:
     try:
         attendance_content, attendance_suffix, shift_content = _read_uploads(

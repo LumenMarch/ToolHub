@@ -82,7 +82,6 @@ def register_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already registered",
         )
-    is_first_user = count_users(db) == 0
     new_user = create_user(db, user_in)
 
     # 所有用户默认拥有"工具使用者"角色
@@ -90,8 +89,8 @@ def register_user(
     if tool_user:
         new_user.roles.append(tool_user)
 
-    # 首个用户额外获得超级管理员角色
-    if is_first_user:
+    # 创建后判断是否为首个用户（避免并发注册竞态）
+    if count_users(db) == 1:
         super_admin = get_role_by_name(db, "超级管理员")
         if super_admin:
             new_user.roles.append(super_admin)

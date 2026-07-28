@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.auth import require_permission
+from app.core.auth import require_permission, require_tool_enabled
 from app.models.user import User
 from app.services.asset_engine.Customer_Customer import Customer_Customer
 from app.services.asset_engine.Customer_Notes import Customer_Notes
@@ -53,7 +53,10 @@ class ComparisonRequest(BaseModel):
 
 
 @router.get("/auto-paths")
-async def get_auto_paths(_: User = Depends(require_permission("tool:use"))):
+async def get_auto_paths(
+    _: User = Depends(require_permission("tool:use")),
+    __: None = Depends(require_tool_enabled("asset-comparison")),
+):
     current_date = datetime.now()
     this_month_str = current_date.strftime("%Y%m")
     last_month_date = current_date - relativedelta(months=1)
@@ -381,7 +384,9 @@ def apply_review_colors(ws, req_reviews):
 
 @router.post("/check")
 async def check_data(
-    req: ComparisonRequest, _: User = Depends(require_permission("tool:use"))
+    req: ComparisonRequest,
+    _: User = Depends(require_permission("tool:use")),
+    __: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     try:
         summary = run_comparisons(req)
@@ -579,6 +584,7 @@ async def save_results(
     request: Request,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(require_permission("tool:use")),
+    __: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     try:
         summary = run_comparisons(req)
