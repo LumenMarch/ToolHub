@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { gsap } from 'gsap';
 import { FileArrowUp, CheckSquareOffset, FloppyDisk, DownloadSimple, Plus, Minus, Warning, FolderOpen } from '@phosphor-icons/react';
-import axios from 'axios';
+import api from '../../api/axios';
 
 const UnboxedFileInput: React.FC<{ label: string, value: string, onChange: (val: string) => void }> = ({ label, value, onChange }) => {
   const [isFocused, setIsFocused] = useState(false);
@@ -157,7 +157,7 @@ const AssetComparison: React.FC = () => {
         for (const f of fileArr) {
           formData.append('files', f);
         }
-        const res = await axios.post('http://localhost:8000/api/v1/tools/asset/upload-and-scan', formData, {
+        const res = await api.post('/tools/asset/upload-and-scan', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
         if (res.data.status === 'success') {
@@ -199,7 +199,7 @@ const AssetComparison: React.FC = () => {
     setIsProcessing(true);
     setStatusMsg(<span>正在解析文件夹: {folderPath} ...</span>);
     try {
-      const res = await axios.get('http://localhost:8000/api/v1/tools/asset/auto-paths', {
+      const res = await api.get('/tools/asset/auto-paths', {
         params: { folder: folderPath.trim() }
       });
       if (res.data.status === 'success') {
@@ -236,7 +236,7 @@ const AssetComparison: React.FC = () => {
     setCheckResults([]);
     setReviews({});
     try {
-      const res = await axios.post('http://localhost:8000/api/v1/tools/asset/check', { ...paths, remarks, reviews });
+      const res = await api.post('/tools/asset/check', { ...paths, remarks, reviews });
 
       if (res.data.status === 'error') {
         setStatusMsg(
@@ -272,7 +272,7 @@ const AssetComparison: React.FC = () => {
     setIsProcessing(true);
     setStatusMsg('正在生成完整对比总结及PDF...');
     try {
-      const res = await axios.post('http://localhost:8000/api/v1/tools/asset/save', { ...paths, remarks, reviews });
+      const res = await api.post('/tools/asset/save', { ...paths, remarks, reviews });
       if (res.data.status === 'error') {
         setStatusMsg(<span><Badge variant="err">失败</Badge> {res.data.message}</span>);
       } else {
@@ -294,7 +294,7 @@ const AssetComparison: React.FC = () => {
     setIsProcessing(true);
     setStatusMsg(<span>正在单独导出 {label} 模块...</span>);
     try {
-      const res = await axios.post(`http://localhost:8000/api/v1/tools/asset/export/${key}`, { ...paths, remarks, reviews });
+      const res = await api.post(`/tools/asset/export/${key}`, { ...paths, remarks, reviews });
       if (res.data.status === 'error') {
         setStatusMsg(<span><Badge variant="err">失败</Badge> {res.data.message}</span>);
       } else {

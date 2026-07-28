@@ -7,12 +7,14 @@ from datetime import datetime
 from pathlib import Path
 
 from dateutil.relativedelta import relativedelta
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
 
+from app.core.auth import require_permission, require_tool_enabled
+from app.models.user import User
 from app.services.asset_engine.Customer_Customer import Customer_Customer
 from app.services.asset_engine.Customer_Notes import Customer_Notes
 from app.services.asset_engine.Finance_Finance import Finance_Finance
@@ -50,7 +52,11 @@ class ComparisonRequest(BaseModel):
 
 
 @router.get("/resolve-folder")
-async def resolve_folder(name: str = ""):
+async def resolve_folder(
+    name: str = "",
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
     """前端选文件夹后只能拿到文件夹名，用 find 搜索定位绝对路径"""
     import subprocess
 
@@ -167,7 +173,11 @@ def _scan_and_match(folder: Path, match_rules: dict) -> tuple:
 
 
 @router.post("/upload-and-scan")
-async def upload_and_scan(files: list[UploadFile] = File(...)):
+async def upload_and_scan(
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
     """接收前端上传的数据文件，存入服务器临时目录，扫描匹配后返回路径"""
     session_id = uuid.uuid4().hex[:8]
     temp_dir = Path(tempfile.gettempdir()) / "asset-compare" / session_id
@@ -205,7 +215,11 @@ async def upload_and_scan(files: list[UploadFile] = File(...)):
 
 
 @router.get("/auto-paths")
-async def get_auto_paths(folder: str = ""):
+async def get_auto_paths(
+    folder: str = "",
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
     current_date = datetime.now()
     this_month_str = current_date.strftime("%Y%m")
     last_month_date = current_date - relativedelta(months=1)
@@ -549,7 +563,11 @@ def apply_review_colors(ws, req_reviews):
 
 
 @router.post("/check")
-async def check_data(req: ComparisonRequest):
+async def check_data(
+    req: ComparisonRequest,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
     try:
         summary = run_comparisons(req)
         return {
@@ -741,7 +759,11 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
 
 
 @router.post("/save")
-async def save_results(req: ComparisonRequest):
+async def save_results(
+    req: ComparisonRequest,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
     try:
         summary = run_comparisons(req)
         ff = summary.get("ff")
@@ -1076,7 +1098,12 @@ async def save_results(req: ComparisonRequest):
 
 
 @router.post("/export/{module}")
-async def export_single_module(module: str, req: ComparisonRequest):
+async def export_single_module(
+    module: str,
+    req: ComparisonRequest,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
     try:
         summary = run_comparisons(req)
         from app.services.asset_engine.const import (
