@@ -90,6 +90,15 @@ def update_user_endpoint(
                 detail="Cannot change your own roles",
             )
 
+    # 层级保护 — 不能修改比自己权限更高的用户（拥有自己不具备的角色）
+    admin_role_names = {r.name for r in admin.roles}
+    target_role_names = {r.name for r in user.roles}
+    if not admin_role_names.issuperset(target_role_names):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify a user with higher privileges",
+        )
+
     updated = update_user(db, user, user_in)
     log_action(
         db,
@@ -121,6 +130,14 @@ def delete_user_endpoint(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete yourself",
+        )
+    # 层级保护
+    admin_role_names = {r.name for r in admin.roles}
+    target_role_names = {r.name for r in user.roles}
+    if not admin_role_names.issuperset(target_role_names):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete a user with higher privileges",
         )
     deleted_username = user.username
     delete_user(db, user)

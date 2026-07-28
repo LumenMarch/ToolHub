@@ -141,7 +141,7 @@ const AdminDashboard: React.FC = () => {
           </div>
         </PermissionGuard>
 
-        <PermissionGuard permission="user:read">
+        <PermissionGuard permission="stats:read">
           <div className="admin-chart-block border border-border p-6">
             <h2 className="text-sm font-bold tracking-tight mb-1">每日活跃用户</h2>
             <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60 mb-6">

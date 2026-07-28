@@ -142,10 +142,15 @@ def delete_role_endpoint(
     db: Session = Depends(deps.get_db),
     admin: User = Depends(require_permission("role:write")),
 ):
-    """删除角色。"""
+    """删除角色。不允许删除自己拥有的角色。"""
     role = get_role_by_id(db, role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="角色不存在")
+    if role in admin.roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete a role assigned to yourself",
+        )
     delete_role(db, role)
     log_action(
         db,
@@ -251,6 +256,14 @@ def update_user_roles(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot change your own roles",
+        )
+    # 层级保护 — 不能修改比自己权限更高的用户
+    admin_role_names = {r.name for r in admin.roles}
+    target_role_names = {r.name for r in user.roles}
+    if not admin_role_names.issuperset(target_role_names):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify a user with higher privileges",
         )
     roles = get_roles_by_ids(db, roles_in.role_ids)
     user.roles = roles
