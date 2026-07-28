@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class UserBase(BaseModel):
@@ -35,6 +35,24 @@ class UserResponse(UserBase):
     last_login_at: datetime | None
     roles: list[str] = []
     permissions: list[str] = []
+
+    @field_validator("roles", mode="before")
+    @classmethod
+    def _roles_to_names(cls, v: object) -> list[str]:
+        """将 Role ORM 对象列表转为角色名字符串列表。"""
+        if v is None:
+            return []
+        return [getattr(r, "name", str(r)) for r in v]  # type: ignore[arg-type]
+
+    @field_validator("permissions", mode="before")
+    @classmethod
+    def _permissions_default(cls, v: object) -> list[str]:
+        """permissions 不在 ORM 模型上时使用空列表。"""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v  # type: ignore[return-value]
+        return []
 
 
 class Token(BaseModel):
