@@ -42,31 +42,30 @@ ROLES = {
 }
 
 
-def _seed_permissions(db: Session) -> dict[str, Permission]:
-    mapping: dict[str, Permission] = {}
+def _seed_all(db: Session) -> None:
+    """写入权限和角色（同一事务，失败时整体回滚）。"""
+    # 写入权限
+    perm_map: dict[str, Permission] = {}
     for codename, description in PERMISSIONS:
         perm = Permission(codename=codename, description=description)
         db.add(perm)
-        mapping[codename] = perm
-    db.commit()
-    return mapping
+        perm_map[codename] = perm
 
-
-def _seed_roles(db: Session, perm_map: dict[str, Permission]) -> None:
+    # 写入角色并挂权限
     for name, perm_names in ROLES.items():
         role = Role(name=name)
         role.permissions = [perm_map[p] for p in perm_names]
         db.add(role)
+
     db.commit()
 
 
 def run_seed() -> None:
-    """如果权限表为空则写入初始数据。幂等。"""
+    """如果权限表为空则写入初始数据。同一事务保证权限和角色同时写入或同时回滚。"""
     db = SessionLocal()
     try:
         if db.query(Permission).first() is not None:
             return
-        perm_map = _seed_permissions(db)
-        _seed_roles(db, perm_map)
+        _seed_all(db)
     finally:
         db.close()

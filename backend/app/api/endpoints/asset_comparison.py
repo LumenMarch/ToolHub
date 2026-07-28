@@ -934,6 +934,7 @@ async def export_single_module(
     request: Request,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(require_permission("tool:use")),
+    __: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     try:
         summary = run_comparisons(req)

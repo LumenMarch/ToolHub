@@ -121,7 +121,7 @@ export interface RoleUpdateInput {
 export function useAdminApi() {
   // 用户管理
   const listUsers = useCallback(
-    (params?: { search?: string }) =>
+    (params?: { search?: string; skip?: number; limit?: number }) =>
       api
         .get<AdminUser[]>('/admin/users', { params })
         .then((r) => r.data),

@@ -98,7 +98,8 @@ def update_user_endpoint(
         action="user.update",
         target_type="user",
         target_id=user.id,
-        detail=user_in.model_dump(exclude_none=True),
+        # 排除 password，防止明文密码写入审计日志
+        detail=user_in.model_dump(exclude_none=True, exclude={"password"}),
     )
     return _user_to_response(updated, db)
 
