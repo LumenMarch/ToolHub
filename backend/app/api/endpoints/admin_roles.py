@@ -243,10 +243,15 @@ def update_user_roles(
     db: Session = Depends(deps.get_db),
     admin: User = Depends(require_permission("user:write")),
 ):
-    """为用户设置角色（覆盖式）。"""
+    """为用户设置角色（覆盖式）。不允许修改自己的角色。"""
     user = get_user_by_id(db, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    if admin.id == user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change your own roles",
+        )
     roles = get_roles_by_ids(db, roles_in.role_ids)
     user.roles = roles
     db.commit()

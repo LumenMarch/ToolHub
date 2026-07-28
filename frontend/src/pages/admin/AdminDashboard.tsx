@@ -4,6 +4,7 @@ import StatCard from '../../components/admin/StatCard';
 import BarChart from '../../components/admin/BarChart';
 import TrendChart from '../../components/admin/TrendChart';
 import PermissionGuard from '../../components/PermissionGuard';
+import { usePermission } from '../../hooks/usePermission';
 import { useAdminApi } from '../../hooks/useAdminApi';
 import type {
   DailyActiveStat,
@@ -13,15 +14,19 @@ import type {
 
 const AdminDashboard: React.FC = () => {
   const api = useAdminApi();
+  const { has } = usePermission();
+  const canViewStats = has('stats:read');
+
   const [overview, setOverview] = useState<OverviewStats | null>(null);
   const [toolCalls, setToolCalls] = useState<ToolCallStat[]>([]);
   const [dailyActive, setDailyActive] = useState<DailyActiveStat[]>([]);
   const [error, setError] = useState('');
   const containerRef = React.useRef<HTMLDivElement>(null);
 
-  // 数据加载只在挂载时执行一次。
-  // useAdminApi 返回的对象每次渲染都变，不能作为依赖。
   useEffect(() => {
+    // 无 stats:read 权限时不请求任何统计接口
+    if (!canViewStats) return;
+
     let active = true;
     setError('');
     Promise.all([api.getOverview(), api.getToolCalls(), api.getDailyActiveUsers(7)])
@@ -39,7 +44,7 @@ const AdminDashboard: React.FC = () => {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canViewStats]);
 
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -62,13 +67,25 @@ const AdminDashboard: React.FC = () => {
     return () => ctx.revert();
   }, []);
 
-  // 把 tool.attendance.process 这类 action 转成更可读的标签。
   const toolCallChartData = toolCalls
     .filter((t) => t.action.startsWith('tool.'))
     .map((t) => ({
       label: t.action.replace('tool.', '').replace(/\./g, ' '),
       value: t.count,
     }));
+
+  if (!canViewStats) {
+    return (
+      <div className="space-y-10">
+        <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+          系统运行状态总览
+        </p>
+        <div className="text-sm font-mono text-muted-foreground p-8 border border-border text-center">
+          [ 无统计数据查看权限 — 请使用侧边栏导航 ]
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={containerRef} className="space-y-10">
@@ -82,7 +99,6 @@ const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* 统计卡片 — 按权限过滤 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 admin-stat-card">
         <PermissionGuard permission="user:read">
           <StatCard
@@ -114,23 +130,26 @@ const AdminDashboard: React.FC = () => {
         </PermissionGuard>
       </div>
 
-      {/* 图表区 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="admin-chart-block border border-border p-6">
-          <h2 className="text-sm font-bold tracking-tight mb-1">工具调用次数</h2>
-          <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60 mb-6">
-            TOOL CALLS
-          </p>
-          <BarChart data={toolCallChartData} emptyHint="暂无工具调用记录" />
-        </div>
+        <PermissionGuard permission="stats:read">
+          <div className="admin-chart-block border border-border p-6">
+            <h2 className="text-sm font-bold tracking-tight mb-1">工具调用次数</h2>
+            <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60 mb-6">
+              TOOL CALLS
+            </p>
+            <BarChart data={toolCallChartData} emptyHint="暂无工具调用记录" />
+          </div>
+        </PermissionGuard>
 
-        <div className="admin-chart-block border border-border p-6">
-          <h2 className="text-sm font-bold tracking-tight mb-1">每日活跃用户</h2>
-          <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60 mb-6">
-            DAILY ACTIVE USERS · 最近 7 天
-          </p>
-          <TrendChart data={dailyActive} emptyHint="暂无活跃数据" />
-        </div>
+        <PermissionGuard permission="user:read">
+          <div className="admin-chart-block border border-border p-6">
+            <h2 className="text-sm font-bold tracking-tight mb-1">每日活跃用户</h2>
+            <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60 mb-6">
+              DAILY ACTIVE USERS · 最近 7 天
+            </p>
+            <TrendChart data={dailyActive} emptyHint="暂无活跃数据" />
+          </div>
+        </PermissionGuard>
       </div>
     </div>
   );

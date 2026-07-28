@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models.user import User
 from app.schemas.attendance import (
     AttendanceAnalyzeResponse,
@@ -70,7 +70,7 @@ def process_attendance(
     db: Session = Depends(deps.get_db),
     attendance_file: UploadFile = File(...),
     shift_file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("tool:use")),
 ) -> Response:
     try:
         attendance_content, attendance_suffix, shift_content = _read_uploads(
@@ -108,7 +108,7 @@ def analyze_attendance(
     db: Session = Depends(deps.get_db),
     attendance_file: UploadFile = File(...),
     shift_file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("tool:use")),
 ) -> AttendanceAnalyzeResponse:
     try:
         attendance_content, attendance_suffix, shift_content = _read_uploads(
@@ -177,7 +177,7 @@ def analyze_attendance(
 @router.get("/results/{result_id}/download")
 def download_attendance_result(
     result_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("tool:use")),
 ) -> Response:
     try:
         cached_result = attendance_result_cache.get(result_id, current_user.id)
@@ -198,7 +198,7 @@ def download_attendance_result(
 @router.delete("/results/{result_id}", status_code=204)
 def delete_attendance_result(
     result_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("tool:use")),
 ) -> Response:
     attendance_result_cache.delete(result_id, current_user.id)
     return Response(status_code=204)

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.auth import get_current_user
+from app.core.auth import require_permission
 from app.models.user import User
 from app.services.asset_engine.Customer_Customer import Customer_Customer
 from app.services.asset_engine.Customer_Notes import Customer_Notes
@@ -53,7 +53,7 @@ class ComparisonRequest(BaseModel):
 
 
 @router.get("/auto-paths")
-async def get_auto_paths(_: User = Depends(get_current_user)):
+async def get_auto_paths(_: User = Depends(require_permission("tool:use"))):
     current_date = datetime.now()
     this_month_str = current_date.strftime("%Y%m")
     last_month_date = current_date - relativedelta(months=1)
@@ -380,7 +380,9 @@ def apply_review_colors(ws, req_reviews):
 
 
 @router.post("/check")
-async def check_data(req: ComparisonRequest, _: User = Depends(get_current_user)):
+async def check_data(
+    req: ComparisonRequest, _: User = Depends(require_permission("tool:use"))
+):
     try:
         summary = run_comparisons(req)
         return {
@@ -576,7 +578,7 @@ async def save_results(
     req: ComparisonRequest,
     request: Request,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("tool:use")),
 ):
     try:
         summary = run_comparisons(req)
@@ -925,7 +927,7 @@ async def export_single_module(
     req: ComparisonRequest,
     request: Request,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("tool:use")),
 ):
     try:
         summary = run_comparisons(req)

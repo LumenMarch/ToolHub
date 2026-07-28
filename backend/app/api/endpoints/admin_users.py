@@ -77,12 +77,18 @@ def update_user_endpoint(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    # 自保护 — 不能封禁自己
-    if admin.id == user.id and user_in.is_active is False:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot deactivate yourself",
-        )
+    # 自保护 — 不能封禁自己或修改自己的角色
+    if admin.id == user.id:
+        if user_in.is_active is False:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot deactivate yourself",
+            )
+        if user_in.role_ids is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot change your own roles",
+            )
 
     updated = update_user(db, user, user_in)
     log_action(

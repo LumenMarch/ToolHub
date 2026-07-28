@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './components/ThemeProvider';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
+import ToolGuard from './components/ToolGuard';
 import Layout from './components/Layout';
 import AdminLayout from './components/admin/AdminLayout';
 import Login from './pages/Login';
@@ -39,18 +40,20 @@ function App() {
               <Route element={<Layout />}>
                 <Route path="/" element={<Dashboard />} />
 
-                {/* 根据工具配置动态生成嵌套路由。 */}
-                {toolsConfig.map((tool) => (
-                  <Route
-                    key={tool.id}
-                    path={tool.path.replace(/^\//, '')} // 嵌套路由不保留开头斜杠。
-                    element={
-                      <Suspense fallback={<SuspendFallback />}>
-                        <tool.component />
-                      </Suspense>
-                    }
-                  />
-                ))}
+                {/* 工具路由 — ToolGuard 拦截已禁用的工具 */}
+                <Route element={<ToolGuard />}>
+                  {toolsConfig.map((tool) => (
+                    <Route
+                      key={tool.id}
+                      path={tool.path.replace(/^\//, '')}
+                      element={
+                        <Suspense fallback={<SuspendFallback />}>
+                          <tool.component />
+                        </Suspense>
+                      }
+                    />
+                  ))}
+                </Route>
               </Route>
             </Route>
 
