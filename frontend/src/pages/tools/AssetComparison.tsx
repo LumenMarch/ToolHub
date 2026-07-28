@@ -83,7 +83,6 @@ const AssetComparison: React.FC = () => {
   });
 
   const [folderPath, setFolderPath] = useState('');
-  const [selectedFileCount, setSelectedFileCount] = useState(0);
   // 用普通数组存储文件，避免 FileList 引用随 input 重置而失效
   const selectedFilesRef = useRef<File[]>([]);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -134,7 +133,6 @@ const AssetComparison: React.FC = () => {
     if (!files || files.length === 0) return;
     // 关键修复：用 Array.from 复制一份，避免 FileList 引用在 input reset 后失效
     selectedFilesRef.current = Array.from(files);
-    setSelectedFileCount(files.length);
     const firstPath = files[0].webkitRelativePath;
     const folderName = firstPath.split('/')[0];
     setFolderPath(folderName);
@@ -164,7 +162,7 @@ const AssetComparison: React.FC = () => {
         });
         if (res.data.status === 'success') {
           const data = res.data.data;
-          const filledCount = Object.values(data).filter((v: string) => v !== '').length;
+          const filledCount = Object.values(data).filter((v) => v !== '').length;
           const totalCount = Object.keys(data).length;
           setPaths(data);
           if (filledCount > 0) {
@@ -206,7 +204,7 @@ const AssetComparison: React.FC = () => {
       });
       if (res.data.status === 'success') {
         const data = res.data.data;
-        const filledCount = Object.values(data).filter((v: string) => v !== '').length;
+        const filledCount = Object.values(data).filter((v) => v !== '').length;
         const totalCount = Object.keys(data).length;
         setPaths(data);
         if (filledCount > 0) {

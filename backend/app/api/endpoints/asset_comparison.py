@@ -1,12 +1,10 @@
 import os
-import shutil
 import tempfile
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import List
 
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, File, UploadFile
@@ -71,8 +69,19 @@ async def resolve_folder(name: str = ""):
             continue
         try:
             result = subprocess.run(
-                ["find", search_dir, "-maxdepth", "3", "-type", "d", "-name", name.strip()],
-                capture_output=True, text=True, timeout=5
+                [
+                    "find",
+                    search_dir,
+                    "-maxdepth",
+                    "3",
+                    "-type",
+                    "d",
+                    "-name",
+                    name.strip(),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             for line in result.stdout.strip().split("\n"):
                 line = line.strip()
@@ -87,15 +96,29 @@ async def resolve_folder(name: str = ""):
         best_count = 0
         for p in found_paths:
             try:
-                cnt = len([f for f in os.listdir(p) if os.path.isfile(os.path.join(p, f)) and not f.startswith("~")])
+                cnt = len(
+                    [
+                        f
+                        for f in os.listdir(p)
+                        if os.path.isfile(os.path.join(p, f)) and not f.startswith("~")
+                    ]
+                )
             except Exception:
                 cnt = 0
             if cnt > best_count:
                 best_count = cnt
                 best_path = p
-        return {"status": "success", "path": best_path, "file_count": best_count, "candidates": found_paths}
+        return {
+            "status": "success",
+            "path": best_path,
+            "file_count": best_count,
+            "candidates": found_paths,
+        }
     else:
-        return {"status": "not_found", "message": f"未在 Desktop/Downloads/Documents 下找到名为 '{name}' 的文件夹"}
+        return {
+            "status": "not_found",
+            "message": f"未在 Desktop/Downloads/Documents 下找到名为 '{name}' 的文件夹",
+        }
 
 
 def _build_match_rules(this_month_str: str, last_month_str: str) -> dict:
@@ -144,7 +167,7 @@ def _scan_and_match(folder: Path, match_rules: dict) -> tuple:
 
 
 @router.post("/upload-and-scan")
-async def upload_and_scan(files: List[UploadFile] = File(...)):
+async def upload_and_scan(files: list[UploadFile] = File(...)):
     """接收前端上传的数据文件，存入服务器临时目录，扫描匹配后返回路径"""
     session_id = uuid.uuid4().hex[:8]
     temp_dir = Path(tempfile.gettempdir()) / "asset-compare" / session_id
