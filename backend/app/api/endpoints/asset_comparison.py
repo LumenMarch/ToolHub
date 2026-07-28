@@ -1,18 +1,18 @@
 import os
+import tempfile
 import traceback
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 from dateutil.relativedelta import relativedelta
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, UploadFile
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from app.api import deps
 from app.core.auth import require_permission, require_tool_enabled
 from app.models.user import User
 from app.services.asset_engine.Customer_Customer import Customer_Customer
@@ -22,7 +22,6 @@ from app.services.asset_engine.Finance_Notes import Finance_Notes
 from app.services.asset_engine.Notes_Notes import Notes_Notes
 from app.services.asset_engine.Notes_SFC import Notes_SFC
 from app.services.asset_engine.SFC_SFC import SFC_SFC
-from app.services.audit import log_action
 
 try:
     from app.services.asset_engine.mod import create_excel_template
@@ -52,39 +51,197 @@ class ComparisonRequest(BaseModel):
     reviews: dict = {}
 
 
+@router.get("/resolve-folder")
+async def resolve_folder(
+    name: str = "",
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    """前端选文件夹后只能拿到文件夹名，用 find 搜索定位绝对路径"""
+    import subprocess
+
+    if not name or not name.strip():
+        return {"status": "error", "message": "请提供文件夹名"}
+
+    search_dirs = [
+        str(Path.home() / "Desktop"),
+        str(Path.home() / "Downloads"),
+        str(Path.home() / "Documents"),
+    ]
+    found_paths = []
+
+    for search_dir in search_dirs:
+        if not os.path.isdir(search_dir):
+            continue
+        try:
+            result = subprocess.run(
+                [
+                    "find",
+                    search_dir,
+                    "-maxdepth",
+                    "3",
+                    "-type",
+                    "d",
+                    "-name",
+                    name.strip(),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            for line in result.stdout.strip().split("\n"):
+                line = line.strip()
+                if line:
+                    found_paths.append(line)
+        except Exception:
+            continue
+
+    if found_paths:
+        # 如果有多个匹配，优先选文件数量最多的那个
+        best_path = ""
+        best_count = 0
+        for p in found_paths:
+            try:
+                cnt = len(
+                    [
+                        f
+                        for f in os.listdir(p)
+                        if os.path.isfile(os.path.join(p, f)) and not f.startswith("~")
+                    ]
+                )
+            except Exception:
+                cnt = 0
+            if cnt > best_count:
+                best_count = cnt
+                best_path = p
+        return {
+            "status": "success",
+            "path": best_path,
+            "file_count": best_count,
+            "candidates": found_paths,
+        }
+    else:
+        return {
+            "status": "not_found",
+            "message": f"未在 Desktop/Downloads/Documents 下找到名为 '{name}' 的文件夹",
+        }
+
+
+def _build_match_rules(this_month_str: str, last_month_str: str) -> dict:
+    """构建文件名匹配规则"""
+    return {
+        "thisFinance": ("财务资产", "monthly", this_month_str),
+        "lastFinance": ("财务资产", "monthly", last_month_str),
+        "thisSFC": ("SFC资产", "monthly", this_month_str),
+        "lastSFC": ("SFC资产", "monthly", last_month_str),
+        "thisNotes": ("Notes资产", "monthly", this_month_str),
+        "lastNotes": ("Notes资产", "monthly", last_month_str),
+        "thisCustomer": ("客户资产", "monthly", this_month_str),
+        "lastCustomer": ("客户资产", "monthly", last_month_str),
+        "custodianData": ("财务保管人", "fixed", ""),
+        "departmentData": ("财务保管部门", "fixed", ""),
+        "driData": ("客户系统DRI", "fixed", ""),
+    }
+
+
+def _scan_and_match(folder: Path, match_rules: dict) -> tuple:
+    """扫描文件夹中的文件并匹配，返回 (result_dict, found_files, matched_log)"""
+    result = {k: "" for k in match_rules}
+    found_files = []
+    matched_log = []
+
+    if folder.exists() and folder.is_dir():
+        for f in folder.iterdir():
+            if f.is_file() and not f.name.startswith("~"):
+                found_files.append(f.name)
+                stem = f.stem
+                stem_clean = stem.replace(" ", "").replace("_", "").replace("-", "")
+                for k, (keyword, rule_type, expected_date) in match_rules.items():
+                    kw_clean = keyword.replace(" ", "")
+                    if rule_type == "fixed":
+                        if stem_clean == kw_clean:
+                            result[k] = str(f)
+                            matched_log.append(f"✓ {f.name} → {k}")
+                    elif rule_type == "monthly":
+                        if kw_clean in stem_clean and expected_date in stem_clean:
+                            result[k] = str(f)
+                            matched_log.append(f"✓ {f.name} → {k}")
+    else:
+        found_files.append("⚠️ 文件夹不存在或不是目录")
+
+    return result, found_files, matched_log
+
+
+@router.post("/upload-and-scan")
+async def upload_and_scan(
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    """接收前端上传的数据文件，存入服务器临时目录，扫描匹配后返回路径"""
+    session_id = uuid.uuid4().hex[:8]
+    temp_dir = Path(tempfile.gettempdir()) / "asset-compare" / session_id
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_files = []
+    for file in files:
+        safe_name = Path(file.filename).name  # 去除路径，只保留文件名
+        if not safe_name or safe_name.startswith("~"):
+            continue
+        file_path = temp_dir / safe_name
+        content = await file.read()
+        file_path.write_bytes(content)
+        saved_files.append(safe_name)
+
+    current_date = datetime.now()
+    this_month_str = current_date.strftime("%Y%m")
+    last_month_date = current_date - relativedelta(months=1)
+    last_month_str = last_month_date.strftime("%Y%m")
+
+    match_rules = _build_match_rules(this_month_str, last_month_str)
+    result, found_files, matched_log = _scan_and_match(temp_dir, match_rules)
+
+    return {
+        "status": "success",
+        "data": result,
+        "session_id": session_id,
+        "temp_dir": str(temp_dir),
+        "debug": {
+            "folder": str(temp_dir),
+            "found_files": found_files,
+            "matched": matched_log,
+        },
+    }
+
+
 @router.get("/auto-paths")
 async def get_auto_paths(
-    _: User = Depends(require_permission("tool:use")),
-    __: None = Depends(require_tool_enabled("asset-comparison")),
+    folder: str = "",
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     current_date = datetime.now()
     this_month_str = current_date.strftime("%Y%m")
     last_month_date = current_date - relativedelta(months=1)
     last_month_str = last_month_date.strftime("%Y%m")
 
-    all_data_path = Path.home() / "Desktop" / "对比数据"
-    expected_stems = {
-        "thisFinance": f"{this_month_str}财务资产",
-        "lastFinance": f"{last_month_str}财务资产",
-        "thisSFC": f"{this_month_str}SFC资产",
-        "lastSFC": f"{last_month_str}SFC资产",
-        "thisNotes": f"{this_month_str}Notes资产",
-        "lastNotes": f"{last_month_str}Notes资产",
-        "thisCustomer": f"{this_month_str}客户资产",
-        "lastCustomer": f"{last_month_str}客户资产",
-        "custodianData": "财务保管人",
-        "departmentData": "财务保管部门",
-        "driData": "客户系统DRI",
-    }
-    result = {k: "" for k in expected_stems}
+    if folder:
+        all_data_path = Path(folder)
+    else:
+        all_data_path = Path.home() / "Desktop" / "对比数据"
 
-    if all_data_path.exists() and all_data_path.is_dir():
-        for f in all_data_path.iterdir():
-            if f.is_file() and not f.name.startswith("~"):
-                for k, stem in expected_stems.items():
-                    if f.stem == stem:
-                        result[k] = str(f)
-    return {"status": "success", "data": result}
+    match_rules = _build_match_rules(this_month_str, last_month_str)
+    result, found_files, matched_log = _scan_and_match(all_data_path, match_rules)
+
+    return {
+        "status": "success",
+        "data": result,
+        "debug": {
+            "folder": str(all_data_path),
+            "found_files": found_files,
+            "matched": matched_log,
+        },
+    }
 
 
 def _safe_len(d):
@@ -118,11 +275,34 @@ def task_ff(req: ComparisonRequest):
                 + _safe_len(ff.new_Department_assets)
                 + _safe_len(ff.removed_Department_assets)
             )
+            # 依保管人 & 依部门 子维度明细
+            cust_new = _safe_len(ff.new_Custodian_assets)
+            cust_rm = _safe_len(ff.removed_Custodian_assets)
+            cust_anomaly = _safe_len(ff.check_Custodian)
+            dept_new = _safe_len(ff.new_Department_assets)
+            dept_rm = _safe_len(ff.removed_Department_assets)
+            dept_anomaly = _safe_len(ff.check_Department)
             info = {
                 "key": "ff",
                 "label": "【财务-财务】",
                 "has_diff": diff_count > 0,
-                "msg": f"保管人异常 {_safe_len(ff.check_Custodian)} | 部门异常 {_safe_len(ff.check_Department)}",
+                "msg": f"保管人异常 {cust_anomaly} | 部门异常 {dept_anomaly}",
+                "sub_groups": [
+                    {
+                        "label": "依保管人差异",
+                        "new_count": cust_new,
+                        "removed_count": cust_rm,
+                        "anomaly_count": cust_anomaly,
+                        "has_diff": (cust_new + cust_rm + cust_anomaly) > 0,
+                    },
+                    {
+                        "label": "依部门差异",
+                        "new_count": dept_new,
+                        "removed_count": dept_rm,
+                        "anomaly_count": dept_anomaly,
+                        "has_diff": (dept_new + dept_rm + dept_anomaly) > 0,
+                    },
+                ],
             }
         except Exception as e:
             info = {
@@ -385,8 +565,8 @@ def apply_review_colors(ws, req_reviews):
 @router.post("/check")
 async def check_data(
     req: ComparisonRequest,
-    _: User = Depends(require_permission("tool:use")),
-    __: None = Depends(require_tool_enabled("asset-comparison")),
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     try:
         summary = run_comparisons(req)
@@ -581,21 +761,11 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
 @router.post("/save")
 async def save_results(
     req: ComparisonRequest,
-    request: Request,
-    db: Session = Depends(deps.get_db),
     current_user: User = Depends(require_permission("tool:use")),
-    __: None = Depends(require_tool_enabled("asset-comparison")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     try:
         summary = run_comparisons(req)
-        log_action(
-            db,
-            request=request,
-            user=current_user,
-            action="tool.asset.save",
-            target_type="tool",
-            target_id="asset_comparison",
-        )
         ff = summary.get("ff")
         nn = summary.get("nn")
         sfc = summary.get("sfc")
@@ -931,22 +1101,11 @@ async def save_results(
 async def export_single_module(
     module: str,
     req: ComparisonRequest,
-    request: Request,
-    db: Session = Depends(deps.get_db),
     current_user: User = Depends(require_permission("tool:use")),
-    __: None = Depends(require_tool_enabled("asset-comparison")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     try:
         summary = run_comparisons(req)
-        log_action(
-            db,
-            request=request,
-            user=current_user,
-            action="tool.asset.export",
-            target_type="tool",
-            target_id="asset_comparison",
-            detail={"module": module},
-        )
         from app.services.asset_engine.const import (
             CUSTOMER_CUSTOMER_SAVE_PATH,
             CUSTOMER_NOTES_SAVE_PATH,
