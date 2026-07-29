@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import traceback
 import uuid
@@ -183,12 +184,26 @@ async def create_upload_session(
 ):
     """创建上传会话，返回 session_id 用于后续逐文件上传"""
     session_id = uuid.uuid4().hex[:8]
-    temp_dir = Path(tempfile.gettempdir()) / "asset-compare" / session_id
+    temp_dir = ASSET_COMPARE_ROOT / session_id
     temp_dir.mkdir(parents=True, exist_ok=True)
     logger.info(
         f"[session] 创建会话 session={session_id} | dir={temp_dir} | user={current_user.username}"
     )
     return {"status": "success", "session_id": session_id, "temp_dir": str(temp_dir)}
+
+
+ASSET_COMPARE_ROOT = Path(tempfile.gettempdir()) / "asset-compare"
+SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}$")
+
+
+def _resolve_session_dir(session_id: str) -> Path:
+    """校验 session_id 格式并返回安全的会话目录，防止路径穿越"""
+    if not SESSION_ID_RE.match(session_id):
+        raise HTTPException(status_code=400, detail="无效的 session_id 格式")
+    resolved = (ASSET_COMPARE_ROOT / session_id).resolve()
+    if not str(resolved).startswith(str(ASSET_COMPARE_ROOT.resolve())):
+        raise HTTPException(status_code=400, detail="非法的会话路径")
+    return resolved
 
 
 @router.post("/upload-session/{session_id}/file")
@@ -199,7 +214,7 @@ async def upload_file_to_session(
     _: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     """流式接收单个文件写入会话临时目录"""
-    temp_dir = Path(tempfile.gettempdir()) / "asset-compare" / session_id
+    temp_dir = _resolve_session_dir(session_id)
     if not temp_dir.exists():
         raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在或已过期")
 
@@ -247,7 +262,7 @@ async def scan_uploaded_files(
     _: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     """扫描会话临时目录中的文件，按规则匹配"""
-    temp_dir = Path(tempfile.gettempdir()) / "asset-compare" / session_id
+    temp_dir = _resolve_session_dir(session_id)
     if not temp_dir.exists():
         raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在或已过期")
 
@@ -294,7 +309,7 @@ async def upload_and_scan(
     )
 
     session_id = uuid.uuid4().hex[:8]
-    temp_dir = Path(tempfile.gettempdir()) / "asset-compare" / session_id
+    temp_dir = ASSET_COMPARE_ROOT / session_id
     temp_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"[upload-and-scan] session={session_id} | temp_dir={temp_dir}")
 

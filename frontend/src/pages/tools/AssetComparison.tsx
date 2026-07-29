@@ -164,6 +164,7 @@ const AssetComparison: React.FC = () => {
       const startStallWatch = () => {
         abortController = new AbortController();
         stallLoaded = 0;
+        uploadRef.loaded = 0;
         stallActivity = Date.now();
         const timer = setInterval(() => {
           if (uploadRef.loaded > stallLoaded) {
@@ -269,17 +270,26 @@ const AssetComparison: React.FC = () => {
           const filledCount = Object.values(data).filter((v) => v !== '').length;
           const totalCount = Object.keys(data).length;
           setPaths(data);
-          setStatusMsg(
-            <span>
-              <Badge variant="ok">完成</Badge> 已匹配 {filledCount}/{totalCount} 个数据表
-              {failCount > 0 ? `（上传 ${okCount}/${fileArr.length}）` : ''}，请确认后点击「开始核对」。
-            </span>
-          );
+          if (filledCount > 0) {
+            setStatusMsg(
+              <span>
+                <Badge variant="ok">完成</Badge> 已匹配 {filledCount}/{totalCount} 个数据表
+                {failCount > 0 ? `（上传 ${okCount}/${fileArr.length}）` : ''}，请确认后点击「开始核对」。
+              </span>
+            );
+          } else {
+            setStatusMsg(
+              <span>
+                <Badge variant="warn">警告</Badge> 未匹配到任何数据表，请确认文件名包含正确关键词和年月。
+              </span>
+            );
+          }
         } else {
           setStatusMsg(<span><Badge variant="err">失败</Badge> {scanRes.data.message}</span>);
         }
       } catch (err: any) {
-        setStatusMsg(<span><Badge variant="err">错误</Badge> {err.message}</span>);
+        const detail = err.response?.data?.detail || err.response?.data?.message || err.message;
+        setStatusMsg(<span><Badge variant="err">错误</Badge> {detail}</span>);
       } finally {
         setIsProcessing(false);
         setUploadProgress(null);
