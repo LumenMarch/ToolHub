@@ -1,11 +1,11 @@
 import React, { useState, useContext, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AuthContext } from '../context/auth-context';
+import { AuthContext } from '../context/AuthContext';
 import api from '../api/axios';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { LoadingSignal } from '../components/LoadingSignal';
 import { gsap } from 'gsap';
-import { useHitokoto, splitIntoLines } from '../hooks/useHitokoto';
+import { useHitokoto, splitIntoLines } from '../hooks/use-hitokoto';
 
 const Login: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);

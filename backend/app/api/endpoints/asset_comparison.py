@@ -17,20 +17,20 @@ from pydantic import BaseModel
 
 from app.core.auth import require_permission, require_tool_enabled
 from app.models.user import User
-from app.services.asset_engine.Customer_Customer import Customer_Customer
-from app.services.asset_engine.Customer_Notes import Customer_Notes
-from app.services.asset_engine.Finance_Finance import Finance_Finance
-from app.services.asset_engine.Finance_Notes import Finance_Notes
-from app.services.asset_engine.Notes_Notes import Notes_Notes
-from app.services.asset_engine.Notes_SFC import Notes_SFC
-from app.services.asset_engine.SFC_SFC import SFC_SFC
+from app.services.asset_comparison.Customer_Customer import Customer_Customer
+from app.services.asset_comparison.Customer_Notes import Customer_Notes
+from app.services.asset_comparison.Finance_Finance import Finance_Finance
+from app.services.asset_comparison.Finance_Notes import Finance_Notes
+from app.services.asset_comparison.Notes_Notes import Notes_Notes
+from app.services.asset_comparison.Notes_SFC import Notes_SFC
+from app.services.asset_comparison.SFC_SFC import SFC_SFC
 
 try:
-    from app.services.asset_engine.mod import create_excel_template
+    from app.services.asset_comparison.mod import create_excel_template
 except ImportError:
     pass
 try:
-    from app.services.asset_engine.pdf_generator import excel_sheet_to_pdf
+    from app.services.asset_comparison.pdf_generator import excel_sheet_to_pdf
 except ImportError:
     pass
 
@@ -955,7 +955,7 @@ async def save_results(
         ns = summary.get("ns")
         cn = summary.get("cn")
 
-        from app.services.asset_engine.const import SAVE_CHECK_PATH
+        from app.services.asset_comparison.const import SAVE_CHECK_PATH
 
         if not os.path.exists(SAVE_CHECK_PATH):
             os.makedirs(SAVE_CHECK_PATH, exist_ok=True)
@@ -1287,7 +1287,7 @@ async def export_single_module(
 ):
     try:
         summary = run_comparisons(req)
-        from app.services.asset_engine.const import (
+        from app.services.asset_comparison.const import (
             CUSTOMER_CUSTOMER_SAVE_PATH,
             CUSTOMER_NOTES_SAVE_PATH,
             FINANCE_FINANCE_SAVE_PATH,

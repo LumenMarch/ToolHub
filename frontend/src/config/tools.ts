@@ -18,11 +18,11 @@ export interface ToolDefinition {
 }
 
 // Lazy loaded components for automatic code splitting
-const PwdGenerator = React.lazy(() => import('../pages/tools/PwdGenerator'));
-const StringAnalyzer = React.lazy(() => import('../pages/tools/StringAnalyzer'));
-const AssetComparison = React.lazy(() => import('../pages/tools/AssetComparison'));
+const PwdGenerator = React.lazy(() => import('../pages/tools/pwd-generator/index'));
+const StringAnalyzer = React.lazy(() => import('../pages/tools/string-analyzer/index'));
+const AssetComparison = React.lazy(() => import('../pages/tools/asset-comparison/index'));
 const AttendanceOrganizer = React.lazy(
-  () => import('../pages/tools/AttendanceOrganizer')
+  () => import('../pages/tools/attendance-organizer/index')
 );
 
 export const toolsConfig: ToolDefinition[] = [
