@@ -34,6 +34,7 @@ from datetime import datetime  # noqa: E402, I001, UP015, F401
 import openpyxl  # noqa: E402, I001, UP015, F401
 import pandas as pd  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
+import xlrd  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.const import NOTES_SFC_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from loguru import logger  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.TableParser import (  # noqa: E402
@@ -170,13 +171,54 @@ class Notes_SFC(QThread):
             raise ValueError(f"未在文件 {os.path.basename(path)} 中找到完整表頭")
 
         except Exception as e:
+            # 嘗試用 xlrd 讀取 .xls 文件（calamine 對舊格式 .xls 支援不佳）
+            if os.path.splitext(path)[1].lower() == ".xls":
+                logger.info(f".xls 文件嘗試使用 xlrd 讀取: {os.path.basename(path)}")
+                try:
+                    wb = xlrd.open_workbook(path)
+                    sheet = wb.sheet_by_index(0)
+                    headers = [sheet.cell_value(0, c) for c in range(sheet.ncols)]
+                    data_rows = []
+                    for r in range(1, sheet.nrows):
+                        row = [sheet.cell_value(r, c) for c in range(sheet.ncols)]
+                        data_rows.append(row)
+                    df_pd = pd.DataFrame(data_rows, columns=headers)
+                    df_polars = pl.from_pandas(df_pd)
+                    # 自动去除资产编号列末尾的点号
+                    if "资产编号" in df_polars.columns:
+                        df_polars = df_polars.with_columns(
+                            [
+                                pl.col("资产编号")
+                                .str.strip_chars_end(".")
+                                .alias("资产编号")
+                            ]
+                        )
+                    if "資產編號" in df_polars.columns:
+                        df_polars = df_polars.with_columns(
+                            [
+                                pl.col("資產編號")
+                                .str.strip_chars_end(".")
+                                .alias("資產編號")
+                            ]
+                        )
+                    # 移除全空列
+                    non_null_cols = [
+                        col
+                        for col in df_polars.columns
+                        if not df_polars[col].is_null().all()
+                    ]
+                    logger.info(f"xlrd 讀取 .xls 成功，行數: {len(df_polars)}")
+                    return df_polars.select(non_null_cols)
+                except Exception as xlrd_error:
+                    logger.error(f"xlrd 讀取 .xls 也失敗: {xlrd_error}")
+
             logger.error(
                 f"Polars Excel讀取失敗: {e}，嘗試使用HTML方式讀取: {os.path.basename(path)}"
             )
 
             # 嘗試按 HTML 表格方式讀取（應對偽裝的 .xls 文件）
             try:
-                with open(path, encoding="utf-8", errors="ignore") as f:
+                with open(path, encoding="utf-8-sig", errors="ignore") as f:
                     html_content = f.read()
 
                 # 使用自定義的 TableParser 解析 HTML

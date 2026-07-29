@@ -1,18 +1,23 @@
+import io
 import os
 import shutil
 import tempfile
 import traceback
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from dateutil.relativedelta import relativedelta
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from loguru import logger
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field
+from PyPDF2 import PdfMerger
 
 from app.core.auth import require_permission, require_tool_enabled
 from app.models.user import User
@@ -30,7 +35,14 @@ try:
 except ImportError:
     pass
 try:
-    from app.services.asset_comparison.pdf_generator import excel_sheet_to_pdf
+    from app.services.asset_comparison.pdf_generator import (
+        create_pdf_from_sheets,
+        excel_sheet_to_pdf,
+    )
+except ImportError:
+    pass
+try:
+    from PyPDF2 import PdfMerger
 except ImportError:
     pass
 
@@ -591,7 +603,7 @@ def apply_review_colors(ws, req_reviews):
 
 
 @router.post("/check")
-async def check_data(
+def check_data(
     req: ComparisonRequest,
     current_user: User = Depends(require_permission("tool:use")),
     _: None = Depends(require_tool_enabled("asset-comparison")),
@@ -621,6 +633,53 @@ def _safe_to_pandas(df):
     if hasattr(df, "to_pandas"):
         return df.to_pandas()
     return df
+
+
+def _convert_diff_dict_to_dataframe(diff_dict, comment: str = "", sheet_name: str = ""):
+    """将 diff_dict 转换为 DataFrame 格式，用于 PDF 生成"""
+    try:
+        import pandas as pd
+
+        all_data = []
+        for category, df in diff_dict.items():
+            if df is None:
+                continue
+
+            df = _safe_to_pandas(df)
+
+            if df is None or getattr(df, "empty", True):
+                continue
+
+            # 添加分类列
+            df_copy = df.copy()
+            df_copy.insert(0, "分类", category)
+
+            # 检查是否为"7-Notes客户资产 VS 客户系统资产"模块，如果是则去掉"Model Number"和"资产编号"列
+            if (
+                "Notes客户资产" in category
+                or "7-Notes客户资产" in sheet_name
+                or "Notes客户资产" in sheet_name
+            ):
+                for col in ["Model Number", "资产编号", "資產編號"]:
+                    if col in df_copy.columns:
+                        df_copy = df_copy.drop(columns=[col])
+
+            all_data.append(df_copy)
+
+        if all_data:
+            combined_df = pd.concat(all_data, ignore_index=True)
+            if hasattr(combined_df, "attrs"):
+                combined_df.attrs["comment"] = comment
+            else:
+                combined_df.attrs = {"comment": comment}
+            return combined_df, comment
+        else:
+            logger.warning(f"没有任何有效数据可以合并: {sheet_name}")
+            return None, comment
+
+    except Exception as e:
+        logger.error(f"转换 diff_dict 到 DataFrame 失败 ({sheet_name}): {e}")
+        return None, comment
 
 
 def estimate_width_by_font(value, font_size=12):
@@ -786,13 +845,90 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
         ws.column_dimensions[col_letter].width = adjusted_width
 
 
+def _df_to_pandas(df):
+    """将 polars DataFrame/LazyFrame 转为 pandas DataFrame，失败返回 None"""
+    if df is None:
+        return None
+    try:
+        if hasattr(df, "collect"):  # LazyFrame
+            return df.collect().to_pandas()
+        elif hasattr(df, "to_pandas"):  # polars DataFrame
+            return df.to_pandas()
+        elif hasattr(df, "iterrows"):  # 已经是 pandas DataFrame
+            return df
+    except Exception:
+        return None
+
+
+def _build_raw_data_xlsx(
+    summary: dict, this_month_str: str, last_month_str: str
+) -> io.BytesIO | None:
+    """从比对结果中提取原始数据，生成原始数据.xlsx 到 BytesIO 缓冲"""
+    import pandas as pd
+
+    data_sheets = {}
+
+    # 财务数据
+    ff = summary.get("ff")
+    if ff:
+        df_this = _df_to_pandas(getattr(ff, "this_Finance_data", None))
+        df_last = _df_to_pandas(getattr(ff, "last_Finance_data", None))
+        if df_this is not None and not df_this.empty:
+            data_sheets[f"{this_month_str}-财务"] = df_this
+        if df_last is not None and not df_last.empty:
+            data_sheets[f"{last_month_str}-财务"] = df_last
+
+    # Notes数据
+    nn = summary.get("nn")
+    if nn:
+        df_this = _df_to_pandas(getattr(nn, "this_Notes_data", None))
+        df_last = _df_to_pandas(getattr(nn, "last_Notes_data", None))
+        if df_this is not None and not df_this.empty:
+            data_sheets[f"{this_month_str}-Notes"] = df_this
+        if df_last is not None and not df_last.empty:
+            data_sheets[f"{last_month_str}-Notes"] = df_last
+
+    # SFC数据
+    sfc = summary.get("sfc")
+    if sfc:
+        df_this = _df_to_pandas(getattr(sfc, "this_SFC_data", None))
+        df_last = _df_to_pandas(getattr(sfc, "last_SFC_data", None))
+        if df_this is not None and not df_this.empty:
+            data_sheets[f"{this_month_str}-SFC"] = df_this
+        if df_last is not None and not df_last.empty:
+            data_sheets[f"{last_month_str}-SFC"] = df_last
+
+    # 客户数据
+    cc = summary.get("cc")
+    if cc:
+        df_this = _df_to_pandas(getattr(cc, "this_Customer_data", None))
+        df_last = _df_to_pandas(getattr(cc, "last_Customer_data", None))
+        if df_this is not None and not df_this.empty:
+            data_sheets[f"{this_month_str}-客户"] = df_this
+        if df_last is not None and not df_last.empty:
+            data_sheets[f"{last_month_str}-客户"] = df_last
+
+    if not data_sheets:
+        return None
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        for sheet_name, df in data_sheets.items():
+            # openpyxl sheet名最长31字符
+            safe_name = sheet_name[:31]
+            df.to_excel(writer, sheet_name=safe_name, index=False)
+    buf.seek(0)
+    return buf
+
+
 @router.post("/save")
-async def save_results(
+def save_results(
     req: ComparisonRequest,
     current_user: User = Depends(require_permission("tool:use")),
     _: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     try:
+        logger.info("save: run_comparisons 开始")
         summary = run_comparisons(req)
         ff = summary.get("ff")
         nn = summary.get("nn")
@@ -802,6 +938,8 @@ async def save_results(
         ns = summary.get("ns")
         cn = summary.get("cn")
 
+        logger.info("save: run_comparisons 完成，开始准备模板")
+
         from app.services.asset_comparison.const import SAVE_CHECK_PATH
 
         if not os.path.exists(SAVE_CHECK_PATH):
@@ -809,6 +947,8 @@ async def save_results(
 
         current_date = datetime.now()
         this_month_str = current_date.strftime("%Y%m")
+        last_month_date = current_date - relativedelta(months=1)
+        last_month_str = last_month_date.strftime("%Y%m")
         save_all_path = os.path.join(
             SAVE_CHECK_PATH, f"TE&PE资产对比_{this_month_str}对比总结.xlsx"
         )
@@ -819,13 +959,16 @@ async def save_results(
         if os.path.exists(save_all_path):
             os.remove(save_all_path)
 
+        logger.info("save: create_excel_template 开始")
         try:
             create_excel_template(save_all_path)
         except Exception as err:
-            print("Template creation err: ", err)
+            logger.warning(f"Template creation err: {err}")
+        logger.info("save: create_excel_template 完成，开始 load_workbook")
 
         wb = load_workbook(save_all_path)
         ws = wb["差异总结"]
+        logger.info("save: 工作簿加载完成，开始填充数据行")
 
         this_Finance_Custodian_assets = _safe_len(
             getattr(ff, "this_Custodian_assets", [])
@@ -921,6 +1064,7 @@ async def save_results(
             )
 
         wb.save(save_all_path)
+        logger.info("save: 差异总结 Sheet 填充并保存完成，开始构建比对明细")
 
         comparisons = []
 
@@ -1088,6 +1232,9 @@ async def save_results(
                     )
                 )
 
+        logger.info("save: 比对明细构建完成，开始写入工作表")
+
+        sheet_data_dict = {}
         wb = load_workbook(save_all_path)
         for sheet_name, diff_dict, comment in comparisons:
             if sheet_name not in wb.sheetnames:
@@ -1104,29 +1251,116 @@ async def save_results(
             else:
                 write_comparison_to_sheet(diff_dict, comment, ws_comp)
 
+            # 收集 sheet 数据用于 PDF 生成
+            if diff_dict:
+                merged_df, comment_text = _convert_diff_dict_to_dataframe(
+                    diff_dict, comment, sheet_name
+                )
+                if merged_df is not None and not getattr(merged_df, "empty", True):
+                    sheet_data_dict[sheet_name] = merged_df
+
         wb.save(save_all_path)
+        logger.info("save: 比对明细工作表写入完成，开始生成 PDF")
+
+        # 生成 PDF
+        pdf_ok = False
+        summary_pdf_path = os.path.join(
+            SAVE_CHECK_PATH, f"TE&PE资产对比_{this_month_str}对比总结_summary.pdf"
+        )
+        detail_pdf_path = os.path.join(
+            SAVE_CHECK_PATH, f"TE&PE资产对比_{this_month_str}对比总结_detail.pdf"
+        )
 
         try:
-            excel_sheet_to_pdf(save_all_path, "差异总结", save_pdf_path)
-            msg_appendix = f"\n📄 PDF已生成: {save_pdf_path}"
-        except Exception as pdf_e:
-            msg_appendix = f"\n⚠️ PDF生成失败: {pdf_e}"
+            summary_ok = False
+            try:
+                summary_ok = excel_sheet_to_pdf(
+                    save_all_path, "差异总结", summary_pdf_path
+                )
+            except Exception as sum_e:
+                logger.warning(f"总结PDF生成失败: {sum_e}")
 
-        return {
-            "status": "success",
-            "message": f"核对结果已成功保存到:\n{save_all_path}{msg_appendix}",
-        }
+            detail_ok = False
+            if sheet_data_dict:
+                try:
+                    detail_ok = create_pdf_from_sheets(
+                        sheet_data_dict,
+                        detail_pdf_path,
+                        f"TE&PE资产对比_{this_month_str}详细差异",
+                    )
+                except Exception as det_e:
+                    logger.warning(f"明细PDF生成失败: {det_e}")
+
+            if (
+                summary_ok
+                and detail_ok
+                and os.path.exists(summary_pdf_path)
+                and os.path.exists(detail_pdf_path)
+            ):
+                try:
+                    merger = PdfMerger()
+                    merger.append(summary_pdf_path)  # 差异总结
+                    merger.append(detail_pdf_path)  # 详细差异
+                    merger.write(save_pdf_path)
+                    merger.close()
+                    pdf_ok = True
+                except Exception as merge_e:
+                    logger.warning(f"PDF合并失败: {merge_e}")
+
+            if not pdf_ok and summary_ok and os.path.exists(summary_pdf_path):
+                import shutil
+
+                shutil.copy2(summary_pdf_path, save_pdf_path)
+                pdf_ok = True
+
+        except Exception as pdf_e:
+            logger.warning(f"PDF生成处理出错: {pdf_e}")
+
+        finally:
+            for tmp in [summary_pdf_path, detail_pdf_path]:
+                if os.path.exists(tmp):
+                    try:
+                        os.remove(tmp)
+                    except Exception as clean_e:
+                        logger.warning(f"清理临时文件失败 ({tmp}): {clean_e}")
+
+        logger.info(f"save: PDF 生成完成 (ok={pdf_ok})")
+
+        # 生成原始数据 XLSX
+        logger.info("save: _build_raw_data_xlsx 开始")
+        raw_buf = _build_raw_data_xlsx(summary, this_month_str, last_month_str)
+        logger.info("save: _build_raw_data_xlsx 完成")
+
+        # 打包 ZIP
+        logger.info("save: 开始打包 ZIP")
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            # 对比总结 XLSX
+            zf.write(save_all_path, f"TE&PE资产对比_{this_month_str}对比总结.xlsx")
+            # PDF（如有）
+            if pdf_ok:
+                zf.write(save_pdf_path, f"TE&PE资产对比_{this_month_str}对比总结.pdf")
+            # 原始数据 XLSX
+            if raw_buf:
+                zf.writestr("原始数据.xlsx", raw_buf.getvalue())
+        zip_buf.seek(0)
+
+        zip_filename = f"TE&PE资产对比_{this_month_str}.zip"
+        return StreamingResponse(
+            zip_buf,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_filename)}"
+            },
+        )
 
     except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e),
-            "errors": [traceback.format_exc()],
-        }
+        logger.error(f"save: 失败 — {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/export/{module}")
-async def export_single_module(
+def export_single_module(
     module: str,
     req: ComparisonRequest,
     current_user: User = Depends(require_permission("tool:use")),

@@ -33,6 +33,7 @@ from datetime import datetime  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
 import pandas as pd  # noqa: E402, I001, UP015, F401
+import xlrd  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.const import SFC_SFC_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from loguru import logger  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.TableParser import (  # noqa: E402
@@ -55,6 +56,8 @@ class SFC_SFC(QThread):
         self.new_count = None
         self.removed_assets = None
         self.new_assets = None
+        self.this_SFC_assets = None
+        self.last_SFC_assets = None
         self.this_SFC_data = None
         self.last_SFC_data = None
 
@@ -90,13 +93,14 @@ class SFC_SFC(QThread):
         def is_html_file(file_path):
             """檢測文件是否為HTML格式"""
             try:
-                with open(file_path, encoding="utf-8", errors="ignore") as f:
-                    first_line = f.readline().strip().lower()
-                    return (
-                        first_line.startswith("<")
-                        or "html" in first_line
-                        or "table" in first_line
-                    )
+                with open(file_path, encoding="utf-8-sig", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue  # skip blank lines (including bare BOM)
+                        line = line.lower()
+                        return line.startswith("<") or "html" in line or "table" in line
+                return False
             except Exception:
                 return False
 
@@ -105,7 +109,7 @@ class SFC_SFC(QThread):
             logger.info(f"檢測到HTML格式文件，使用HTML解析: {os.path.basename(path)}")
             # 使用 HTML 解析方式
             try:
-                with open(path, encoding="utf-8", errors="ignore") as f:
+                with open(path, encoding="utf-8-sig", errors="ignore") as f:
                     html_content = f.read()
 
                 # 使用自定義的 TableParser 解析 HTML
@@ -207,19 +211,113 @@ class SFC_SFC(QThread):
                 return None
 
         else:
-            logger.info(
-                f"檢測到Excel格式文件，使用pandas讀取: {os.path.basename(path)}"
-            )
-            # 使用 pandas 讀取真正的 Excel 文件
+            logger.info(f"檢測到Excel格式文件，嘗試讀取: {os.path.basename(path)}")
+            # 策略：.xls 文件使用 xlrd（openpyxl 不支援 .xls），.xlsx 用 openpyxl
             try:
-                df_pandas = pd.read_excel(path, engine="openpyxl")
+                if os.path.splitext(path)[1].lower() == ".xls":
+                    logger.info(f".xls 文件使用 xlrd 讀取: {os.path.basename(path)}")
+                    wb = xlrd.open_workbook(path)
+                    sheet = wb.sheet_by_index(0)
+                    headers = [sheet.cell_value(0, c) for c in range(sheet.ncols)]
+                    data_rows = []
+                    for r in range(1, sheet.nrows):
+                        row = [sheet.cell_value(r, c) for c in range(sheet.ncols)]
+                        data_rows.append(row)
+                    df_pandas = pd.DataFrame(data_rows, columns=headers)
+                else:
+                    df_pandas = pd.read_excel(path, engine="openpyxl")
                 logger.info(f"Excel文件讀取成功，原始数据行数: {len(df_pandas)}")
 
             except Exception as excel_error:
-                logger.exception(f"pandas讀取Excel失敗: {excel_error}")
-                self._unlock_signal.emit()
-                self._Error_signal.emit()
-                return None
+                logger.exception(f"Excel讀取失敗: {excel_error}，嘗試 HTML 回退解析")
+                # is_html_file 可能因 BOM / 空行漏检，回退到 HTML 解析路徑
+                try:
+                    with open(path, encoding="utf-8-sig", errors="ignore") as f:
+                        html_content = f.read()
+
+                    parser = TableParser()
+                    parser.feed(html_content)
+
+                    if not parser.tables:
+                        raise ValueError(
+                            f"未在 HTML 文件中找到表格: {os.path.basename(path)}"
+                        )
+
+                    table_data = parser.tables[0]
+                    if not table_data:
+                        raise ValueError(f"表格為空: {os.path.basename(path)}")
+
+                    # 查找表頭行
+                    header_row = None
+                    for idx, row in enumerate(table_data):
+                        clean_columns = {
+                            str(col).strip() for col in row if col and str(col).strip()
+                        }
+                        if required_columns.intersection(clean_columns):
+                            header_row = idx
+                            break
+
+                    if header_row is not None:
+                        headers = table_data[header_row]
+                        data_rows = table_data[header_row + 1 :]
+                    else:
+                        logger.warning(
+                            f"HTML中未找到完整表頭，默認使用第一行: {os.path.basename(path)}"
+                        )
+                        headers = table_data[0] if table_data else []
+                        data_rows = table_data[1:] if len(table_data) > 1 else []
+
+                    max_cols = len(headers) if headers else 0
+                    if max_cols == 0:
+                        raise ValueError(f"無法確定表格結構: {os.path.basename(path)}")
+
+                    normalized_data = []
+                    for row in data_rows:
+                        cleaned_row = [
+                            str(cell).strip() if cell is not None else ""
+                            for cell in row
+                        ]
+                        cleaned_row + [""] * (max_cols - len(cleaned_row))
+                        normalized_data.append(cleaned_row[:max_cols])
+
+                    if normalized_data:
+                        df_dict = {}
+                        for i, header in enumerate(headers):
+                            column_name = (
+                                str(header).strip()
+                                if header is not None and str(header).strip()
+                                else f"col_{i}"
+                            )
+                            column_data = []
+                            for row in normalized_data:
+                                if i < len(row):
+                                    cell_value = row[i]
+                                    column_data.append(
+                                        cell_value
+                                        if cell_value and str(cell_value).strip()
+                                        else ""
+                                    )
+                                else:
+                                    column_data.append("")
+                            df_dict[column_name] = column_data
+                        df_pandas = pd.DataFrame(df_dict)
+                    else:
+                        df_dict = {}
+                        for i, header in enumerate(headers):
+                            column_name = (
+                                str(header).strip()
+                                if header is not None and str(header).strip()
+                                else f"col_{i}"
+                            )
+                            df_dict[column_name] = []
+                        df_pandas = pd.DataFrame(df_dict)
+
+                    logger.info(f"HTML回退解析成功，原始数据行数: {len(df_pandas)}")
+                except Exception as html_error:
+                    logger.exception(f"HTML回退解析也失敗: {html_error}")
+                    self._unlock_signal.emit()
+                    self._Error_signal.emit()
+                    return None
 
         # 統一的数据清理和过滤逻辑
         try:
@@ -339,6 +437,8 @@ class SFC_SFC(QThread):
         """SFC數據比較（使用 pandas DataFrame）"""
         self.new_assets = None
         self.removed_assets = None
+        self.this_SFC_assets = None
+        self.last_SFC_assets = None
         if self.last_SFC_data is None or self.this_SFC_data is None:
             return
         else:
@@ -349,6 +449,8 @@ class SFC_SFC(QThread):
                 )
                 last_keys, _, _ = self._get_comparison_keys(self.last_SFC_data)
 
+                self.this_SFC_assets = list(this_keys)
+                self.last_SFC_assets = list(last_keys)
                 logger.info(f"本月有效资产数量: {len(this_keys)}")
                 logger.info(f"上月有效资产数量: {len(last_keys)}")
                 if this_keys:
