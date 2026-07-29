@@ -4,7 +4,7 @@ import { FileArrowUp, CheckSquareOffset, FloppyDisk, DownloadSimple, Plus, Minus
 import api from '../../../api/axios';
 import { useTusUpload } from '../../../hooks/useTusUpload';
 
-const UnboxedFileInput: React.FC<{ label: string, value: string, onChange: (val: string) => void; displayValue?: string }> = ({ label, value, onChange, displayValue }) => {
+const UnboxedFileInput: React.FC<{ label: string; value: string; onChange: (val: string) => void; displayValue?: string }> = ({ label, value, onChange, displayValue }) => {
   const [isFocused, setIsFocused] = useState(false);
   const shown = displayValue ?? (value.includes('/') ? value.split('/').pop()! : value.includes('\\') ? value.split('\\').pop()! : value);
 
@@ -51,6 +51,20 @@ interface CheckResult {
 }
 
 const REVIEW_OPTIONS = ["差異確認OK", "待跟进", "異常"];
+
+/** 提取错误消息，兼容 axios error / string / unknown */
+function getErrorMessage(err: unknown): string {
+  if (err !== null && typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+    const detail = typeof e.response === 'object' && e.response !== null
+      ? (e.response as Record<string, unknown>)?.data as Record<string, unknown> | undefined
+      : undefined;
+    if (detail && typeof detail.detail === 'string') return detail.detail;
+    if (detail && typeof detail.message === 'string') return detail.message;
+    if (typeof e.message === 'string') return e.message;
+  }
+  return String(err);
+}
 
 // 状态徽章小组件，替代 emoji
 const Badge: React.FC<{ variant: 'ok' | 'warn' | 'err' | 'info'; children: React.ReactNode }> = ({ variant, children }) => {
@@ -176,7 +190,7 @@ const AssetComparison: React.FC = () => {
             const uploadId = await upload({ file: f, metadata: { filename: f.name } });
             uploadIds.push(uploadId);
           } catch (upErr: unknown) {
-            const msg = upErr instanceof Error ? upErr.message : String(upErr);
+            const msg = getErrorMessage(upErr);
             setStatusMsg(
               <span>
                 <Badge variant="err">失败</Badge>
@@ -219,19 +233,7 @@ const AssetComparison: React.FC = () => {
           setStatusMsg(<span><Badge variant="err">失败</Badge> {scanRes.data.message}</span>);
         }
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        let detail = message;
-        if (err && typeof err === 'object' && 'response' in err) {
-          const response = (err as Record<string, unknown>).response;
-          if (response && typeof response === 'object' && 'data' in response) {
-            const data = (response as Record<string, unknown>).data;
-            if (data && typeof data === 'object') {
-              const d = data as Record<string, unknown>;
-              detail = String(d.detail || d.message || message);
-            }
-          }
-        }
-        setStatusMsg(<span><Badge variant="err">错误</Badge> {detail}</span>);
+        setStatusMsg(<span><Badge variant="err">错误</Badge> {getErrorMessage(err)}</span>);
       } finally {
         setIsProcessing(false);
         setUploadProgress(null);
@@ -273,8 +275,7 @@ const AssetComparison: React.FC = () => {
         setStatusMsg(<span><Badge variant="err">失败</Badge> {res.data.message}</span>);
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {message}</span>);
+      setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {getErrorMessage(err)}</span>);
     } finally {
       setIsProcessing(false);
     }
@@ -306,8 +307,7 @@ const AssetComparison: React.FC = () => {
         );
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {message}</span>);
+      setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {getErrorMessage(err)}</span>);
     } finally {
       setIsProcessing(false);
     }
@@ -321,22 +321,55 @@ const AssetComparison: React.FC = () => {
     }
 
     setIsProcessing(true);
-    setStatusMsg('正在生成完整对比总结及PDF...');
+    setStatusMsg('正在生成完整对比总结、PDF及原始数据...');
     try {
-      const res = await api.post('/tools/asset/save', { ...paths, remarks, reviews });
-      if (res.data.status === 'error') {
-        setStatusMsg(<span><Badge variant="err">失败</Badge> {res.data.message}</span>);
-      } else {
-        setStatusMsg(
-          <div className="whitespace-pre-line">
-            <Badge variant="ok">导出成功</Badge><br/>
-            {res.data.message.replace(/.*成功:\n/, '')}
-          </div>
-        );
+      // 使用 fetch 替代 axios 处理 ZIP 流式下载
+      const res = await fetch('/api/v1/tools/asset/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ ...paths, remarks, reviews }),
+      });
+
+      if (!res.ok) {
+        let errMsg = `请求失败 (${res.status})`;
+        try {
+          const errData = await res.json();
+          errMsg = errData.detail || errData.message || errMsg;
+        } catch { /* ignore parse error */ }
+        setStatusMsg(<span><Badge variant="err">失败</Badge> {errMsg}</span>);
+        return;
       }
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const errData = await res.json();
+        setStatusMsg(<span><Badge variant="err">失败</Badge> {errData.message || errData.detail || '未知错误'}</span>);
+        return;
+      }
+
+      // 读取完整的 ZIP blob
+      const blob = await res.blob();
+
+      // 触发浏览器下载
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const disposition = res.headers.get('content-disposition');
+      const match = disposition?.match(/filename="?(.+?)"?$/);
+      a.download = match?.[1] ?? '资产对比结果.zip';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      setStatusMsg(
+        <div>
+          <Badge variant="ok">导出成功</Badge> ZIP 文件已开始下载，包含对比总结 XLSX、PDF 及原始数据。
+        </div>
+      );
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setStatusMsg(<span><Badge variant="err">失败</Badge> {message}</span>);
+      setStatusMsg(<span><Badge variant="err">失败</Badge> {getErrorMessage(err)}</span>);
     } finally {
       setIsProcessing(false);
     }
@@ -358,8 +391,7 @@ const AssetComparison: React.FC = () => {
         );
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setStatusMsg(<span><Badge variant="err">失败</Badge> {message}</span>);
+      setStatusMsg(<span><Badge variant="err">失败</Badge> {getErrorMessage(err)}</span>);
     } finally {
       setIsProcessing(false);
     }
