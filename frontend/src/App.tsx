@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider } from './components/AuthProvider';
 import { ThemeProvider } from './components/ThemeProvider';
 import ProtectedRoute from './components/guards/ProtectedRoute';
 import AdminRoute from './components/guards/AdminRoute';
