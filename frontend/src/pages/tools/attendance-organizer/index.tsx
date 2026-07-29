@@ -6,7 +6,7 @@ import {
   ChartBar,
   CheckCircle,
   DownloadSimple,
-  FileArrowUp,
+
   MagnifyingGlass,
   Warning,
 } from '@phosphor-icons/react';
@@ -22,9 +22,12 @@ import React, {
 import api from '../../../api/axios';
 import { LoadingSignal } from '../../../components/LoadingSignal';
 import { cn } from '../../../lib/cn';
+import FileDropZone from '../../../components/FileDropZone';
+import { useTusUpload } from '../../../hooks/useTusUpload';
 
 type FileKind = 'attendance' | 'shift';
 type Phase = 'upload' | 'analyzing' | 'ready';
+type AnalyzeStep = 'uploading' | 'processing';
 type ResultTone = 'default' | 'success' | 'danger' | 'warning';
 type ResultFilter = 'all' | 'attention' | 'overtime' | 'anomaly';
 
@@ -65,14 +68,6 @@ interface AttendanceAnalysis {
   sheets: AttendanceResultSheet[];
 }
 
-interface FileDropZoneProps {
-  accept: string;
-  description: string;
-  file: File | null;
-  id: string;
-  label: string;
-  onSelect: (file: File) => void;
-}
 
 interface AttendanceDataBrowserProps {
   analysis: AttendanceAnalysis;
@@ -88,135 +83,113 @@ const FILTER_OPTIONS: { id: ResultFilter; label: string }[] = [
 
 const NUMBER_FORMATTER = new Intl.NumberFormat('zh-CN');
 
-const FileDropZone: React.FC<FileDropZoneProps> = ({
-  accept,
-  description,
-  file,
-  id,
-  label,
-  onSelect,
-}) => {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
-
-  const handleDrop = (event: React.DragEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    setIsDragging(false);
-    const droppedFile = event.dataTransfer.files[0];
-    if (droppedFile) {
-      onSelect(droppedFile);
-    }
-  };
-
-  return (
-    <div className="min-w-0">
-      <input
-        ref={inputRef}
-        id={id}
-        type="file"
-        accept={accept}
-        aria-label={`选择${label}`}
-        className="sr-only"
-        onChange={(event) => {
-          const selectedFile = event.target.files?.[0];
-          if (selectedFile) {
-            onSelect(selectedFile);
-          }
-          event.target.value = '';
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        onDragEnter={(event) => {
-          event.preventDefault();
-          setIsDragging(true);
-        }}
-        onDragOver={(event) => event.preventDefault()}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
-        aria-describedby={`${id}-description`}
-        className={cn(
-          'group flex min-h-64 w-full flex-col justify-between border-2 p-6 text-left transition-colors md:p-8',
-          isDragging
-            ? 'border-primary bg-primary/10'
-            : 'border-border bg-card hover:border-primary',
-        )}
-      >
-        <div className="flex w-full items-start justify-between gap-4">
-          <span className="font-mono text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground md:text-sm">
-            {label}
-          </span>
-          <FileArrowUp
-            weight="bold"
-            className="size-7 shrink-0 text-primary transition-transform group-hover:-translate-y-1"
-          />
-        </div>
-
-        <div className="min-w-0">
-          <p className="break-words text-2xl font-bold tracking-tight md:text-3xl">
-            {file ? file.name : '拖放或选择文件'}
-          </p>
-          <p
-            id={`${id}-description`}
-            className="mt-3 font-mono text-xs leading-relaxed text-muted-foreground"
-          >
-            {file
-              ? `${(file.size / 1024 / 1024).toFixed(2)} MB`
-              : description}
-          </p>
-        </div>
-      </button>
-    </div>
-  );
-};
-
 const AnalysisInProgress: React.FC<{
   attendanceFile: File;
   shiftFile: File;
-}> = ({ attendanceFile, shiftFile }) => (
-  <section
-    className="flex min-h-96 flex-col justify-between border-2 border-border p-6 md:p-10"
-  >
-    <div className="flex items-start justify-between gap-6">
-      <div>
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">
-          [ 分析中 ]
-        </p>
-        <h2 className="mt-4 text-3xl font-bold tracking-tight md:text-5xl">
-          正在核对通行记录
-        </h2>
-      </div>
-      <ChartBar weight="bold" className="size-10 shrink-0 text-primary" />
-    </div>
+  attendanceProgress: number;
+  shiftProgress: number;
+  step: AnalyzeStep;
+}> = ({ attendanceFile, shiftFile, attendanceProgress, shiftProgress, step }) => {
+  const totalProgress = Math.round((attendanceProgress + shiftProgress) / 2);
 
-    <div>
-      <LoadingSignal
-        ariaLabel="正在分析出勤资料"
-        meta="Attendance / Verify"
-        label="[ 出勤资料 · 核对中 ]"
-        detail="解析通行记录与班别明细"
-        className="mb-8"
-      />
-      <dl className="grid gap-5 border-t border-border pt-6 font-mono text-xs md:grid-cols-2">
-        <div className="min-w-0">
-          <dt className="uppercase tracking-[0.16em] text-muted-foreground">
-            通行记录
-          </dt>
-          <dd className="mt-2 break-words text-foreground">
-            {attendanceFile.name}
-          </dd>
+  return (
+    <section className="flex min-h-96 flex-col justify-start gap-8 border-2 border-border p-6 md:p-10">
+      <div className="flex items-start justify-between gap-6">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">
+            [ {step === 'uploading' ? '上传中' : '分析中'} ]
+          </p>
+          <h2 className="mt-4 text-3xl font-bold tracking-tight md:text-5xl">
+            {step === 'uploading' ? '正在上传文件' : '正在核对通行记录'}
+          </h2>
         </div>
-        <div className="min-w-0">
-          <dt className="uppercase tracking-[0.16em] text-muted-foreground">
-            班别明细
-          </dt>
-          <dd className="mt-2 break-words text-foreground">{shiftFile.name}</dd>
-        </div>
-      </dl>
-    </div>
-  </section>
-);
+        <ChartBar weight="bold" className="size-10 shrink-0 text-primary" />
+      </div>
+
+      <div>
+        {step === 'uploading' ? (
+          <div className="mb-12 space-y-6">
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                  通行记录
+                </span>
+                <span className="font-mono text-xs tabular-nums text-foreground">
+                  {attendanceProgress}%
+                </span>
+              </div>
+              <div className="h-1 w-full overflow-hidden rounded-full bg-border">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+                  style={{ width: `${attendanceProgress}%` }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                  班别明细
+                </span>
+                <span className="font-mono text-xs tabular-nums text-foreground">
+                  {shiftProgress}%
+                </span>
+              </div>
+              <div className="h-1 w-full overflow-hidden rounded-full bg-border">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+                  style={{ width: `${shiftProgress}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="border-t border-border pt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                  总体进度
+                </span>
+                <span className="font-mono text-xs tabular-nums text-foreground">
+                  {totalProgress}%
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+                  style={{ width: `${totalProgress}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <LoadingSignal
+            ariaLabel="正在分析出勤资料"
+            meta="Attendance / Verify"
+            label="[ 出勤资料 · 核对中 ]"
+            detail="解析通行记录与班别明细"
+            className="mb-8"
+          />
+        )}
+
+        <dl className="grid gap-5 border-t border-border pt-6 font-mono text-xs md:grid-cols-2">
+          <div className="min-w-0">
+            <dt className="uppercase tracking-[0.16em] text-muted-foreground">
+              通行记录
+            </dt>
+            <dd className="mt-2 break-words text-foreground">
+              {attendanceFile.name}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="uppercase tracking-[0.16em] text-muted-foreground">
+              班别明细
+            </dt>
+            <dd className="mt-2 break-words text-foreground">{shiftFile.name}</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+  );
+};
 
 const Metric: React.FC<{ label: string; value: number }> = ({
   label,
@@ -585,6 +558,11 @@ const AttendanceOrganizer: React.FC = () => {
   const [downloadError, setDownloadError] = useState('');
   const [isExpired, setIsExpired] = useState(false);
 
+  const [analyzeStep, setAnalyzeStep] = useState<AnalyzeStep>('uploading');
+
+  const attUpload = useTusUpload();
+  const shiftUpload = useTusUpload();
+
   useEffect(() => {
     if (
       !phaseRef.current ||
@@ -666,20 +644,28 @@ const AttendanceOrganizer: React.FC = () => {
       return;
     }
 
-    const formData = new FormData();
-    formData.append('attendance_file', attendanceFile);
-    formData.append('shift_file', shiftFile);
-
     setError('');
     setAnalysis(null);
     setIsDetailsVisible(false);
     setPhase('analyzing');
+    setAnalyzeStep('uploading');
     isAnalyzingRef.current = true;
 
     try {
+      // 并行上传两个文件，各自追踪进度
+      const [attId, shiftId] = await Promise.all([
+        attUpload.upload({ file: attendanceFile, metadata: { filename: attendanceFile.name } }),
+        shiftUpload.upload({ file: shiftFile, metadata: { filename: shiftFile.name } }),
+      ]);
+
+      setAnalyzeStep('processing');
+
       const response = await api.post<AttendanceAnalysis>(
         '/tools/attendance/analyze',
-        formData,
+        {
+          attendance_upload_id: attId,
+          shift_upload_id: shiftId,
+        },
       );
       setAnalysis(response.data);
       setPhase('ready');
@@ -792,6 +778,9 @@ const AttendanceOrganizer: React.FC = () => {
           <AnalysisInProgress
             attendanceFile={attendanceFile}
             shiftFile={shiftFile}
+            attendanceProgress={attUpload.progress}
+            shiftProgress={shiftUpload.progress}
+            step={analyzeStep}
           />
         )}
 

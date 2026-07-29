@@ -12,6 +12,7 @@ from app.api.endpoints import (
     sixty_seconds,
     string_tools,
     tools_meta,
+    upload,
     users,
 )
 
@@ -54,3 +55,6 @@ api_router.include_router(
     admin_stats.router, prefix="/admin/stats", tags=["admin_stats"]
 )
 api_router.include_router(admin_roles.router, prefix="/admin", tags=["admin_roles"])
+
+# 上传端点（tus 协议 — 基础设施）
+api_router.include_router(upload.router, prefix="/upload", tags=["upload"])
