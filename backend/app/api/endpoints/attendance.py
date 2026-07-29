@@ -90,6 +90,9 @@ def process_attendance(
         target_type="tool",
         target_id="attendance",
     )
+    # 处理完成后删除源上传，避免磁盘泄漏
+    store.delete(req.attendance_upload_id)
+    store.delete(req.shift_upload_id)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"出勤整理_完整_{timestamp}.xlsx"
@@ -140,6 +143,9 @@ def analyze_attendance(
         target_id="attendance",
         detail={"result_id": cached_result.result_id},
     )
+    # 处理完成后删除源上传，避免磁盘泄漏
+    store.delete(req.attendance_upload_id)
+    store.delete(req.shift_upload_id)
 
     return AttendanceAnalyzeResponse(
         result_id=cached_result.result_id,

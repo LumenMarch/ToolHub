@@ -193,8 +193,8 @@ async def scan_uploaded_files_by_ids(
     store = UploadStore()
 
     # 创建临时工作目录
-    work_dir = Path(tempfile.mkdtemp(prefix="scan-", dir=ASSET_COMPARE_ROOT))
     ASSET_COMPARE_ROOT.mkdir(parents=True, exist_ok=True)
+    work_dir = Path(tempfile.mkdtemp(prefix="scan-", dir=ASSET_COMPARE_ROOT))
 
     logger.info(
         f"[scan] upload_ids={req.upload_ids} | work_dir={work_dir} | "
@@ -205,9 +205,16 @@ async def scan_uploaded_files_by_ids(
     for upload_id in req.upload_ids:
         info = store.get_info(upload_id)
         src = store.get_file_path(upload_id)
-        dst = work_dir / info["filename"]
+        safe_name = Path(info["filename"]).name
+        if not safe_name:
+            logger.warning(f"[scan] 跳过空文件名: upload_id={upload_id}")
+            continue
+        dst = work_dir / safe_name
         shutil.copy2(src, dst)
         logger.info(f"[scan] 复制 {info['filename']} -> {dst}")
+    # 文件已复制到工作目录，删除源上传避免磁盘泄漏
+    for upload_id in req.upload_ids:
+        store.delete(upload_id)
 
     # 扫描匹配
     current_date = datetime.now()

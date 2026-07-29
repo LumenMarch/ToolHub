@@ -50,6 +50,13 @@ def _parse_metadata(raw: str | None) -> dict[str, str]:
     return result
 
 
+def _check_ownership(info: dict, current_user: User) -> None:
+    """校验当前用户是上传的创建者。"""
+    owner_id = info.get("user_id")
+    if owner_id is not None and owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权访问此上传")
+
+
 # ------------------------------------------------------------ tus 标准端点
 
 
@@ -118,6 +125,7 @@ async def tus_create(
     content_type = parsed.get("content_type", "")
     if content_type:
         meta["content_type"] = content_type
+    meta["user_id"] = current_user.id
 
     upload_id = store.create(upload_length, metadata=meta)
 
@@ -137,6 +145,7 @@ async def tus_head(
     try:
         offset = store.get_offset(upload_id)
         info = store.get_info(upload_id)
+        _check_ownership(info, current_user)
     except UploadNotFoundError:
         raise HTTPException(status_code=404, detail="上传不存在") from None
 
@@ -192,6 +201,7 @@ async def tus_patch(
 
     try:
         info = store.get_info(upload_id)
+        _check_ownership(info, current_user)
     except UploadNotFoundError:
         raise HTTPException(status_code=404, detail="上传不存在") from None
 
@@ -235,6 +245,11 @@ async def tus_delete(
     current_user: User = Depends(require_permission("tool:use")),
 ) -> Response:
     """取消上传（termination 扩展）。"""
+    try:
+        info = store.get_info(upload_id)
+    except UploadNotFoundError:
+        raise HTTPException(status_code=404, detail="上传不存在") from None
+    _check_ownership(info, current_user)
     store.delete(upload_id)
     headers = {"Tus-Resumable": "1.0.0"}
     return Response(status_code=204, headers=headers)
@@ -250,6 +265,8 @@ async def get_upload_info(
 ) -> dict:
     """获取上传信息（非 tus 便利端点）。"""
     try:
-        return store.get_info(upload_id)
+        info = store.get_info(upload_id)
+        _check_ownership(info, current_user)
+        return info
     except UploadNotFoundError:
         raise HTTPException(status_code=404, detail="上传不存在") from None

@@ -150,6 +150,7 @@ class UploadStore:
             "file_path": str(data_path),
             "completed": meta.get("completed", False),
             "created_at": meta.get("created_at"),
+            "user_id": meta.get("user_id"),
         }
 
     def read_bytes(self, upload_id: str) -> bytes:
@@ -175,20 +176,25 @@ class UploadStore:
         except OSError:
             pass
 
+    def _list_upload_ids(self) -> list[str]:
+        """列出所有上传 ID（基于 .meta 文件）。"""
+        return [p.stem for p in self.root.glob("*.meta")]
+
     def cleanup_expired(self, max_age_hours: int = 24) -> None:
-        """删除超过 max_age_hours 的未完成上传。"""
-        cutoff = time.time() - max_age_hours * 3600
-        for meta_path in self.root.glob("*.meta"):
+        """删除过期上传。未完成 >max_age_hours 删除；已完成保留 3 倍时间。"""
+        now = time.time()
+        incomplete_max_age = max_age_hours * 3600
+        complete_max_age = max_age_hours * 3 * 3600
+
+        for upload_id in self._list_upload_ids():
             try:
-                with open(meta_path, encoding="utf-8") as f:
-                    meta = json.load(f)
-            except (json.JSONDecodeError, OSError):
+                meta = self._read_meta(upload_id)
+            except UploadNotFoundError:
                 continue
 
-            if meta.get("completed"):
-                continue
-            if meta.get("created_at", 0) >= cutoff:
-                continue
+            age = now - meta.get("created_at", 0)
+            is_completed = meta.get("completed", False)
+            max_age = complete_max_age if is_completed else incomplete_max_age
 
-            upload_id = meta_path.stem  # 去掉 .meta 后缀
-            self.delete(upload_id)
+            if age > max_age:
+                self.delete(upload_id)
