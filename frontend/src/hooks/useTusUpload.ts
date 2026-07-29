@@ -8,16 +8,34 @@ interface UseTusUploadOptions {
   chunkSize?: number;
   /** 上传进度回调 */
   onProgress?: (bytesUploaded: number, bytesTotal: number) => void;
+  /** 分块被服务端确认回调 */
+  onChunkComplete?: (
+    chunkSize: number,
+    bytesAccepted: number,
+    bytesTotal: number,
+  ) => void;
   /** 上传成功回调 */
   onSuccess?: (uploadId: string) => void;
   /** 上传失败回调 */
   onError?: (error: Error) => void;
 }
 
-interface UploadState {
-  status: 'idle' | 'uploading' | 'completed' | 'error' | 'aborted';
+export type UploadStatus =
+  | 'idle'
+  | 'uploading'
+  | 'confirming'
+  | 'completed'
+  | 'error'
+  | 'aborted';
+
+export interface UploadState {
+  status: UploadStatus;
   uploadId: string | null;
   progress: number; // 0-100
+  acceptedProgress: number; // 0-100
+  bytesSent: number;
+  bytesAccepted: number;
+  bytesTotal: number;
   error: string | null;
 }
 
@@ -25,10 +43,29 @@ interface UploadFileOptions {
   file: File;
   /** 附加元数据，会随 tus 请求提交 */
   metadata?: Record<string, string>;
+  /** 当前文件上传进度回调 */
+  onProgress?: (bytesUploaded: number, bytesTotal: number) => void;
+  /** 当前文件分块被服务端确认回调 */
+  onChunkComplete?: (
+    chunkSize: number,
+    bytesAccepted: number,
+    bytesTotal: number,
+  ) => void;
 }
 
 const DEFAULT_ENDPOINT = '/api/v1/upload/tus';
 const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+
+const createInitialState = (): UploadState => ({
+  status: 'idle',
+  uploadId: null,
+  progress: 0,
+  acceptedProgress: 0,
+  bytesSent: 0,
+  bytesAccepted: 0,
+  bytesTotal: 0,
+  error: null,
+});
 
 /**
  * 共享 tus 上传 hook。
@@ -39,24 +76,29 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
     endpoint = DEFAULT_ENDPOINT,
     chunkSize = DEFAULT_CHUNK_SIZE,
     onProgress,
+    onChunkComplete,
     onSuccess,
     onError,
   } = options;
 
-  const [state, setState] = useState<UploadState>({
-    status: 'idle',
-    uploadId: null,
-    progress: 0,
-    error: null,
-  });
+  const [state, setState] = useState<UploadState>(createInitialState);
 
   const uploadRef = useRef<tus.Upload | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const upload = useCallback(
-    ({ file, metadata }: UploadFileOptions): Promise<string> => {
+    ({
+      file,
+      metadata,
+      onProgress: onFileProgress,
+      onChunkComplete: onFileChunkComplete,
+    }: UploadFileOptions): Promise<string> => {
       return new Promise<string>((resolve, reject) => {
-        setState({ status: 'uploading', uploadId: null, progress: 0, error: null });
+        setState({
+          ...createInitialState(),
+          status: 'uploading',
+          bytesTotal: file.size,
+        });
 
         const uploadInstance = new tus.Upload(file, {
           endpoint,
@@ -64,9 +106,42 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
           metadata: metadata ?? {},
           onProgress(bytesUploaded, bytesTotal) {
             const pct =
-              bytesTotal > 0 ? Math.round((bytesUploaded / bytesTotal) * 100) : 0;
-            setState((prev) => ({ ...prev, progress: pct }));
+              bytesTotal > 0
+                ? Math.min(100, Math.floor((bytesUploaded / bytesTotal) * 100))
+                : 0;
+            setState((prev) => ({
+              ...prev,
+              status:
+                bytesTotal > 0 && bytesUploaded >= bytesTotal
+                  ? 'confirming'
+                  : 'uploading',
+              progress: pct,
+              bytesSent: bytesUploaded,
+              bytesTotal,
+            }));
             onProgress?.(bytesUploaded, bytesTotal);
+            onFileProgress?.(bytesUploaded, bytesTotal);
+          },
+          onChunkComplete(chunkBytes, bytesAccepted, bytesTotal) {
+            const acceptedPct =
+              bytesTotal > 0
+                ? Math.min(
+                    100,
+                    Math.floor((bytesAccepted / bytesTotal) * 100),
+                  )
+                : 0;
+            setState((prev) => ({
+              ...prev,
+              status:
+                bytesTotal > 0 && bytesAccepted >= bytesTotal
+                  ? 'confirming'
+                  : prev.status,
+              acceptedProgress: acceptedPct,
+              bytesAccepted,
+              bytesTotal,
+            }));
+            onChunkComplete?.(chunkBytes, bytesAccepted, bytesTotal);
+            onFileChunkComplete?.(chunkBytes, bytesAccepted, bytesTotal);
           },
           onSuccess(payload) {
             const url =
@@ -79,6 +154,10 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
               status: 'completed',
               uploadId,
               progress: 100,
+              acceptedProgress: 100,
+              bytesSent: file.size,
+              bytesAccepted: file.size,
+              bytesTotal: file.size,
               error: null,
             });
             onSuccess?.(uploadId);
@@ -86,12 +165,12 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
           },
           onError(err) {
             const message = err instanceof Error ? err.message : String(err);
-            setState({
+            setState((prev) => ({
+              ...prev,
               status: 'error',
               uploadId: null,
-              progress: state.progress,
               error: message,
-            });
+            }));
             onError?.(err instanceof Error ? err : new Error(message));
             reject(err);
           },
@@ -109,7 +188,14 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
         uploadInstance.start();
       });
     },
-    [endpoint, chunkSize, onProgress, onSuccess, onError, state.progress],
+    [
+      endpoint,
+      chunkSize,
+      onProgress,
+      onChunkComplete,
+      onSuccess,
+      onError,
+    ],
   );
 
   const abort = useCallback(() => {
@@ -118,12 +204,12 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
       uploadRef.current = null;
     }
     abortRef.current?.abort();
-    setState({ status: 'aborted', uploadId: null, progress: 0, error: null });
+    setState({ ...createInitialState(), status: 'aborted' });
   }, []);
 
   const reset = useCallback(() => {
     uploadRef.current = null;
-    setState({ status: 'idle', uploadId: null, progress: 0, error: null });
+    setState(createInitialState());
   }, []);
 
   return { ...state, upload, abort, reset };

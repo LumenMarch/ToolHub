@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { gsap } from 'gsap';
 import { FileArrowUp, CheckSquareOffset, FloppyDisk, DownloadSimple, Plus, Minus, Warning, FolderOpen } from '@phosphor-icons/react';
 import api from '../../../api/axios';
+import { LoadingSignal } from '../../../components/LoadingSignal';
 import { useTusUpload } from '../../../hooks/useTusUpload';
 
 const UnboxedFileInput: React.FC<{ label: string; value: string; onChange: (val: string) => void; displayValue?: string }> = ({ label, value, onChange, displayValue }) => {
@@ -52,6 +53,7 @@ interface CheckResult {
 
 interface ModuleProgress {
   loaded: number;
+  accepted: number;
   total: number;
   fileCount: number;
   okCount: number;
@@ -109,9 +111,11 @@ const Badge: React.FC<{ variant: 'ok' | 'warn' | 'err' | 'info'; children: React
 
 const ModuleProgressBar: React.FC<{ label: string; progress: ModuleProgress }> = ({ label, progress }) => {
   if (progress.fileCount === 0 && progress.total === 0) return null;
-  const pct = progress.total > 0 ? Math.min((progress.loaded / progress.total) * 100, 100) : 0;
+  const sentPct = progress.total > 0 ? Math.min((progress.loaded / progress.total) * 100, 100) : 0;
+  const acceptedPct = progress.total > 0 ? Math.min((progress.accepted / progress.total) * 100, 100) : 0;
   const done = progress.okCount + progress.failCount >= progress.fileCount;
   const color = done ? (progress.failCount > 0 ? 'bg-amber-400' : 'bg-green-400') : 'bg-primary';
+  const isConfirming = !done && sentPct >= 100 && acceptedPct < 100;
   return (
     <div className="mt-3 pt-3 border-t border-border/50">
       <div className="flex items-center justify-between text-xs font-mono mb-1">
@@ -121,9 +125,29 @@ const ModuleProgressBar: React.FC<{ label: string; progress: ModuleProgress }> =
           {progress.failCount > 0 && <span className="text-amber-400 ml-1">({progress.failCount}失败)</span>}
         </span>
       </div>
-      <div className="h-1.5 bg-border/50 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full transition-all duration-300 ${color}`} style={{ width: `${pct}%` }} />
+      <div className="relative h-1.5 bg-border/50 rounded-full overflow-hidden">
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-primary/30 transition-all duration-300"
+          style={{ width: `${sentPct}%` }}
+        />
+        <div
+          className={`absolute inset-y-0 left-0 rounded-full transition-all duration-300 ${color}`}
+          style={{ width: `${done ? 100 : acceptedPct}%` }}
+        />
       </div>
+      {isConfirming ? (
+        <LoadingSignal
+          compact
+          className="mt-3"
+          ariaLabel={`${label}正在完成上传`}
+          label="[ 正在完成上传 ]"
+          detail={`已确认 ${(progress.accepted / 1024 / 1024).toFixed(1)} / ${(progress.total / 1024 / 1024).toFixed(1)} MB`}
+        />
+      ) : progress.accepted > 0 && !done ? (
+        <p className="mt-2 text-[0.625rem] tabular-nums text-muted-foreground">
+          已确认 {(progress.accepted / 1024 / 1024).toFixed(1)} / {(progress.total / 1024 / 1024).toFixed(1)} MB
+        </p>
+      ) : null}
     </div>
   );
 };
@@ -155,10 +179,10 @@ const AssetComparison: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [moduleProgress, setModuleProgress] = useState<Record<ModuleKey, ModuleProgress>>({
-    finance: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-    sfc: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-    notes: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-    customer: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+    finance: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+    sfc: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+    notes: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+    customer: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
   });
 
   const { upload } = useTusUpload();
@@ -229,12 +253,11 @@ const AssetComparison: React.FC = () => {
 
     if (fileArr.length > 0) {
       setIsProcessing(true);
-
       const initProgress: Record<ModuleKey, ModuleProgress> = {
-        finance: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-        sfc: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-        notes: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-        customer: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+        finance: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+        sfc: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+        notes: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+        customer: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
       };
 
       for (const f of fileArr) {
@@ -254,14 +277,45 @@ const AssetComparison: React.FC = () => {
 
         const uploadTasks = fileArr.map((f) => {
           const mod = classifyFile(f.name);
-          return upload({ file: f, metadata: { filename: f.name } })
+          let sentForFile = 0;
+          let acceptedForFile = 0;
+
+          const updateModuleBytes = (sentDelta: number, acceptedDelta: number) => {
+            if (!isModuleKey(mod)) {
+              return;
+            }
+            setModuleProgress(prev => {
+              const cur = { ...prev[mod] };
+              cur.loaded = Math.min(cur.loaded + sentDelta, cur.total);
+              cur.accepted = Math.min(cur.accepted + acceptedDelta, cur.total);
+              return { ...prev, [mod]: cur };
+            });
+          };
+
+          return upload({
+            file: f,
+            metadata: { filename: f.name },
+            onProgress: (bytesSent) => {
+              const sentDelta = Math.max(0, bytesSent - sentForFile);
+              sentForFile = bytesSent;
+              updateModuleBytes(sentDelta, 0);
+            },
+            onChunkComplete: (_chunkSize, bytesAccepted) => {
+              const acceptedDelta = Math.max(0, bytesAccepted - acceptedForFile);
+              acceptedForFile = bytesAccepted;
+              updateModuleBytes(0, acceptedDelta);
+            },
+          })
             .then((uploadId) => {
               uploadIds.push(uploadId);
+              updateModuleBytes(
+                Math.max(0, f.size - sentForFile),
+                Math.max(0, f.size - acceptedForFile),
+              );
               if (isModuleKey(mod)) {
                 setModuleProgress(prev => {
                   const cur = { ...prev[mod] };
                   cur.okCount++;
-                  cur.loaded = Math.min(cur.loaded + f.size, cur.total);
                   return { ...prev, [mod]: cur };
                 });
               }
@@ -269,11 +323,11 @@ const AssetComparison: React.FC = () => {
             .catch((upErr: unknown) => {
               const msg = getErrorMessage(upErr);
               failMsgs.push(`${f.name}: ${msg}`);
+              updateModuleBytes(Math.max(0, f.size - sentForFile), 0);
               if (isModuleKey(mod)) {
                 setModuleProgress(prev => {
                   const cur = { ...prev[mod] };
                   cur.failCount++;
-                  cur.loaded = Math.min(cur.loaded + f.size, cur.total);
                   return { ...prev, [mod]: cur };
                 });
               }
@@ -293,7 +347,6 @@ const AssetComparison: React.FC = () => {
           );
           return;
         }
-
         setStatusMsg(
           <span>已上传 {okCount}/{fileArr.length} 个文件，正在匹配...</span>
         );
