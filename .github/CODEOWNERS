@@ -1,0 +1,10 @@
+# Default owner for all repository changes.
+* @LumenMarch
+
+# Repository policy and automation require owner review.
+/.github/ @LumenMarch
+/AGENTS.md @LumenMarch
+
+# Authentication, authorization, and deployment-sensitive code.
+/backend/app/api/ @LumenMarch
+/backend/app/core/ @LumenMarch
