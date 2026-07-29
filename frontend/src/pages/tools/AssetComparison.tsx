@@ -83,6 +83,7 @@ const AssetComparison: React.FC = () => {
     driData: ''
   });
 
+  const [uploadProgress, setUploadProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [folderPath, setFolderPath] = useState('');
   // 用普通数组存储文件，避免 FileList 引用随 input 重置而失效
   const selectedFilesRef = useRef<File[]>([]);
@@ -145,36 +146,138 @@ const AssetComparison: React.FC = () => {
     e.target.value = '';
   };
 
-  // 扫描匹配：优先上传已选文件到服务器临时目录；否则用文本路径
+  // 扫描匹配：流式上传（建会话 → 逐个文件上传 → 扫描匹配）
   const handleScanFolder = async () => {
     const fileArr = selectedFilesRef.current;
 
     if (fileArr.length > 0) {
-      // 上传模式：把文件发到服务器临时目录再匹配
       setIsProcessing(true);
-      setStatusMsg(<span>正在上传 {fileArr.length} 个文件到服务器并解析...</span>);
+      setUploadProgress(null);
+
+      // 流量监控 — 30 秒无数据 → 断开
+      const STALL_MS = 30000;
+      const POLL_MS = 3000;
+      let stallLoaded = 0;
+      let stallActivity = Date.now();
+      let abortController: AbortController | null = null;
+
+      const startStallWatch = () => {
+        abortController = new AbortController();
+        stallLoaded = 0;
+        uploadRef.loaded = 0;
+        stallActivity = Date.now();
+        const timer = setInterval(() => {
+          if (uploadRef.loaded > stallLoaded) {
+            stallLoaded = uploadRef.loaded;
+            stallActivity = Date.now();
+          } else if (Date.now() - stallActivity > STALL_MS) {
+            abortController?.abort();
+            clearInterval(timer);
+          }
+        }, POLL_MS);
+        return { timer, controller: abortController };
+      };
+
+      const uploadRef = { loaded: 0 };
+
       try {
-        const formData = new FormData();
-        for (const f of fileArr) {
-          formData.append('files', f);
+        // 阶段 1: 创建会话
+        setStatusMsg(<span>正在创建上传会话...</span>);
+        const sRes = await api.post('/tools/asset/upload-session');
+        const sessionId: string = sRes.data.session_id;
+
+        // 阶段 2: 逐个文件流式上传
+        const uploadedFiles: string[] = [];
+        let okCount = 0;
+        let failCount = 0;
+        const failMessages: string[] = [];
+
+        for (let i = 0; i < fileArr.length; i++) {
+          const f = fileArr[i];
+          const idx = i + 1;
+          const fileMB = (f.size / 1024 / 1024).toFixed(1);
+          setStatusMsg(
+            <span>上传中 <span className="font-bold">{idx}/{fileArr.length}</span>：{f.name}（{fileMB} MB）</span>
+          );
+
+          // 单文件进度归零
+          setUploadProgress({ loaded: 0, total: f.size });
+
+          const { timer, controller } = startStallWatch();
+          try {
+            const fd = new FormData();
+            fd.append('file', f);
+            const upRes = await api.post(
+              `/tools/asset/upload-session/${sessionId}/file`,
+              fd,
+              {
+                headers: { 'Content-Type': 'multipart/form-data' },
+                signal: controller.signal,
+                onUploadProgress: (evt) => {
+                  uploadRef.loaded = evt.loaded || 0;
+                  setUploadProgress({ loaded: evt.loaded || 0, total: evt.total || f.size });
+                },
+              }
+            );
+            clearInterval(timer);
+            if (upRes.data.status === 'ok') {
+              uploadedFiles.push(upRes.data.filename);
+              okCount++;
+              setUploadProgress({ loaded: f.size, total: f.size }); // 100%
+            } else {
+              failCount++;
+              failMessages.push(`${f.name}: ${upRes.data.reason || 'skipped'}`);
+            }
+          } catch (upErr: any) {
+            clearInterval(timer);
+            failCount++;
+            if (upErr?.code === 'ERR_CANCELED' || upErr?.name === 'AbortError' || upErr?.name === 'CanceledError') {
+              const elapsed = ((Date.now() - stallActivity) / 1000).toFixed(0);
+              setStatusMsg(
+                <span>
+                  <Badge variant="err">超时</Badge>
+                  {f.name}：{elapsed}s 无数据流入，已跳过；继续下一文件...
+                </span>
+              );
+              await new Promise(r => setTimeout(r, 500)); // 短暂等待
+              continue; // 跳过当前文件继续下一个
+            }
+            failMessages.push(`${f.name}: ${upErr.message}`);
+          }
         }
-        const res = await api.post('/tools/asset/upload-and-scan', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 120000,  // 120秒超时，大文件 + 局域网传输可能较慢
-        });
-        if (res.data.status === 'success') {
-          const data = res.data.data;
+
+        setUploadProgress(null);
+        if (okCount === 0) {
+          setStatusMsg(
+            <span>
+              <Badge variant="err">失败</Badge> 全部 {fileArr.length} 个文件上传失败：{failMessages.join('；')}
+            </span>
+          );
+          return;
+        }
+
+        // 阶段 3: 扫描匹配
+        const failNote = failCount > 0 ? `（${failCount} 个失败）` : '';
+        setStatusMsg(
+          <span>
+            已上传 {okCount}/{fileArr.length} 个文件 {failNote}，正在匹配...
+          </span>
+        );
+        const scanRes = await api.post(`/tools/asset/upload-session/${sessionId}/scan`);
+
+        if (scanRes.data.status === 'success') {
+          const data = scanRes.data.data;
           const filledCount = Object.values(data).filter((v) => v !== '').length;
           const totalCount = Object.keys(data).length;
           setPaths(data);
           if (filledCount > 0) {
             setStatusMsg(
               <span>
-                <Badge variant="ok">完成</Badge> 已匹配 {filledCount}/{totalCount} 个数据表，请确认后点击「开始核对」。
+                <Badge variant="ok">完成</Badge> 已匹配 {filledCount}/{totalCount} 个数据表
+                {failCount > 0 ? `（上传 ${okCount}/${fileArr.length}）` : ''}，请确认后点击「开始核对」。
               </span>
             );
           } else {
-            setPaths(data);
             setStatusMsg(
               <span>
                 <Badge variant="warn">警告</Badge> 未匹配到任何数据表，请确认文件名包含正确关键词和年月。
@@ -182,14 +285,14 @@ const AssetComparison: React.FC = () => {
             );
           }
         } else {
-          setStatusMsg(<span><Badge variant="err">失败</Badge> {res.data.message}</span>);
+          setStatusMsg(<span><Badge variant="err">失败</Badge> {scanRes.data.message}</span>);
         }
       } catch (err: any) {
-        const detail = err.response?.data?.message || err.response?.data?.detail || err.response?.statusText || err.message;
-        const status = err.response?.status ? ` [HTTP ${err.response.status}]` : '';
-        setStatusMsg(<span><Badge variant="err">错误{status}</Badge> {detail}</span>);
+        const detail = err.response?.data?.detail || err.response?.data?.message || err.message;
+        setStatusMsg(<span><Badge variant="err">错误</Badge> {detail}</span>);
       } finally {
         setIsProcessing(false);
+        setUploadProgress(null);
         selectedFilesRef.current = [];
       }
       return;
@@ -413,8 +516,21 @@ const AssetComparison: React.FC = () => {
           开始核对
         </button>
         {statusMsg && (
-          <div className="flex-1 p-4 bg-primary/10 text-primary font-mono text-sm max-w-2xl flex items-center">
-            {statusMsg}
+          <div className="flex-1 p-4 bg-primary/10 text-primary font-mono text-sm max-w-2xl flex flex-col gap-2">
+            <div>{statusMsg}</div>
+            {uploadProgress && uploadProgress.total > 0 && (
+              <div className="flex items-center gap-2 text-xs">
+                <div className="flex-1 h-2 bg-border rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-300"
+                    style={{ width: `${Math.min((uploadProgress.loaded / uploadProgress.total) * 100, 100)}%` }}
+                  />
+                </div>
+                <span className="text-muted-foreground shrink-0">
+                  {(uploadProgress.loaded / 1024 / 1024).toFixed(1)} / {(uploadProgress.total / 1024 / 1024).toFixed(1)} MB
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
