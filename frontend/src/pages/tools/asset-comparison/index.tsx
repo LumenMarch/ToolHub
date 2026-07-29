@@ -50,6 +50,16 @@ interface CheckResult {
   sub_groups?: SubGroup[];
 }
 
+interface ModuleProgress {
+  loaded: number;
+  total: number;
+  fileCount: number;
+  okCount: number;
+  failCount: number;
+}
+
+type ModuleKey = 'finance' | 'sfc' | 'notes' | 'customer';
+
 const REVIEW_OPTIONS = ["差異確認OK", "待跟进", "異常"];
 
 /** 提取错误消息，兼容 axios error / string / unknown */
@@ -66,18 +76,55 @@ function getErrorMessage(err: unknown): string {
   return String(err);
 }
 
-// 状态徽章小组件，替代 emoji
+/** 是否为 ModuleKey */
+function isModuleKey(s: string): s is ModuleKey {
+  return s === 'finance' || s === 'sfc' || s === 'notes' || s === 'customer';
+}
+
+/** 根据文件名关键词分类到模块 */
+function classifyFile(name: string): ModuleKey | 'config' | 'other' {
+  const n = name.replace(/[\s_\-（）()]/g, '');
+  if (n.includes('保管人') || n.includes('保管部门') || n.includes('DRI') || n.includes('dri')) return 'config';
+  if (n.includes('财务')) return 'finance';
+  if (n.includes('SFC') || n.includes('sfc')) return 'sfc';
+  if (n.includes('Notes') || n.includes('notes')) return 'notes';
+  if (n.includes('客户') || n.includes('Customer') || n.includes('customer')) return 'customer';
+  return 'other';
+}
+
+// 状态徽章小组件
 const Badge: React.FC<{ variant: 'ok' | 'warn' | 'err' | 'info'; children: React.ReactNode }> = ({ variant, children }) => {
   const colors: Record<string, string> = {
-    ok: 'text-green-600 bg-green-50 border-green-300',
-    warn: 'text-amber-600 bg-amber-50 border-amber-300',
-    err: 'text-red-600 bg-red-50 border-red-300',
-    info: 'text-blue-600 bg-blue-50 border-blue-300',
+    ok: 'border-green-500/40 text-green-400 bg-green-500/10',
+    warn: 'border-amber-500/40 text-amber-400 bg-amber-500/10',
+    err: 'border-red-500/40 text-red-400 bg-red-500/10',
+    info: 'border-blue-500/40 text-blue-400 bg-blue-500/10',
   };
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[0.65rem] font-mono font-bold uppercase tracking-wider ${colors[variant]}`}>
       {children}
     </span>
+  );
+};
+
+const ModuleProgressBar: React.FC<{ label: string; progress: ModuleProgress }> = ({ label, progress }) => {
+  if (progress.fileCount === 0 && progress.total === 0) return null;
+  const pct = progress.total > 0 ? Math.min((progress.loaded / progress.total) * 100, 100) : 0;
+  const done = progress.okCount + progress.failCount >= progress.fileCount;
+  const color = done ? (progress.failCount > 0 ? 'bg-amber-400' : 'bg-green-400') : 'bg-primary';
+  return (
+    <div className="mt-3 pt-3 border-t border-border/50">
+      <div className="flex items-center justify-between text-xs font-mono mb-1">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="text-muted-foreground">
+          {progress.okCount}/{progress.fileCount}
+          {progress.failCount > 0 && <span className="text-amber-400 ml-1">({progress.failCount}失败)</span>}
+        </span>
+      </div>
+      <div className="h-1.5 bg-border/50 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-300 ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
   );
 };
 
@@ -98,9 +145,7 @@ const AssetComparison: React.FC = () => {
     driData: ''
   });
 
-  const [uploadProgress, setUploadProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [folderPath, setFolderPath] = useState('');
-  // 用普通数组存储文件，避免 FileList 引用随 input 重置而失效
   const selectedFilesRef = useRef<File[]>([]);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
@@ -109,11 +154,14 @@ const AssetComparison: React.FC = () => {
   const [statusMsg, setStatusMsg] = useState<React.ReactNode>('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const { upload } = useTusUpload({
-    onProgress: (loaded, total) => {
-      setUploadProgress({ loaded, total });
-    },
+  const [moduleProgress, setModuleProgress] = useState<Record<ModuleKey, ModuleProgress>>({
+    finance: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+    sfc: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+    notes: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+    customer: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
   });
+
+  const { upload } = useTusUpload();
 
   const handlePathChange = (key: keyof typeof paths, value: string) => {
     setPaths(prev => ({ ...prev, [key]: value }));
@@ -145,69 +193,109 @@ const AssetComparison: React.FC = () => {
     return () => ctx.revert();
   }, []);
 
-  // 触发系统原生文件夹选择器
   const handleSelectFolder = () => {
     folderInputRef.current?.click();
   };
 
-  // 文件夹选择后：克隆文件数组并显示摘要
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    // 关键修复：用 Array.from 复制一份，避免 FileList 引用在 input reset 后失效
     selectedFilesRef.current = Array.from(files);
     const firstPath = files[0].webkitRelativePath;
     const folderName = firstPath.split('/')[0];
     setFolderPath(folderName);
+
+    const counts: Record<string, number> = {};
+    for (const f of Array.from(files)) {
+      const mod = classifyFile(f.name);
+      counts[mod] = (counts[mod] || 0) + 1;
+    }
+    const summary = Object.entries(counts)
+      .filter(([k]) => k !== 'other' && k !== 'config')
+      .map(([k, v]) => `${k}(${v}个)`)
+      .join('、');
+
     setStatusMsg(
       <div className="text-xs leading-relaxed">
-        <Badge variant="info">已选择</Badge> 文件夹 <span className="font-bold">{folderName}</span>，共 {files.length} 个文件。点击「扫描解析」上传并匹配。
+        <Badge variant="info">已选择</Badge> 文件夹 <span className="font-bold">{folderName}</span>，共 {files.length} 个文件
+        {summary ? `（${summary}）` : ''}。点击「扫描解析」上传并匹配。
       </div>
     );
     e.target.value = '';
   };
 
-  // 扫描匹配：tus 上传 → 服务端扫描
   const handleScanFolder = async () => {
     const fileArr = selectedFilesRef.current;
 
     if (fileArr.length > 0) {
       setIsProcessing(true);
-      setUploadProgress(null);
+
+      const initProgress: Record<ModuleKey, ModuleProgress> = {
+        finance: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+        sfc: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+        notes: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+        customer: { loaded: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+      };
+
+      for (const f of fileArr) {
+        const mod = classifyFile(f.name);
+        if (isModuleKey(mod)) {
+          initProgress[mod].fileCount++;
+          initProgress[mod].total += f.size;
+        }
+      }
+      setModuleProgress(initProgress);
 
       try {
         const uploadIds: string[] = [];
+        const failMsgs: string[] = [];
 
-        for (let i = 0; i < fileArr.length; i++) {
-          const f = fileArr[i];
-          const idx = i + 1;
-          const fileMB = (f.size / 1024 / 1024).toFixed(1);
+        setStatusMsg(<span>正在上传文件（并发模式）...</span>);
+
+        const uploadTasks = fileArr.map((f) => {
+          const mod = classifyFile(f.name);
+          return upload({ file: f, metadata: { filename: f.name } })
+            .then((uploadId) => {
+              uploadIds.push(uploadId);
+              if (isModuleKey(mod)) {
+                setModuleProgress(prev => {
+                  const cur = { ...prev[mod] };
+                  cur.okCount++;
+                  cur.loaded = Math.min(cur.loaded + f.size, cur.total);
+                  return { ...prev, [mod]: cur };
+                });
+              }
+            })
+            .catch((upErr: unknown) => {
+              const msg = getErrorMessage(upErr);
+              failMsgs.push(`${f.name}: ${msg}`);
+              if (isModuleKey(mod)) {
+                setModuleProgress(prev => {
+                  const cur = { ...prev[mod] };
+                  cur.failCount++;
+                  cur.loaded = Math.min(cur.loaded + f.size, cur.total);
+                  return { ...prev, [mod]: cur };
+                });
+              }
+            });
+        });
+
+        await Promise.all(uploadTasks);
+
+        const okCount = uploadIds.length;
+        const failCount = failMsgs.length;
+
+        if (okCount === 0) {
           setStatusMsg(
-            <span>上传中 <span className="font-bold">{idx}/{fileArr.length}</span>：{f.name}（{fileMB} MB）</span>
+            <span>
+              <Badge variant="err">失败</Badge> 全部 {fileArr.length} 个文件上传失败：{failMsgs.join('；')}
+            </span>
           );
-
-          try {
-            const uploadId = await upload({ file: f, metadata: { filename: f.name } });
-            uploadIds.push(uploadId);
-          } catch (upErr: unknown) {
-            const msg = getErrorMessage(upErr);
-            setStatusMsg(
-              <span>
-                <Badge variant="err">失败</Badge>
-                {f.name}：{msg}
-              </span>
-            );
-            setIsProcessing(false);
-            setUploadProgress(null);
-            return;
-          }
+          return;
         }
 
-        setUploadProgress(null);
-
-        // 扫描匹配
         setStatusMsg(
-          <span>已上传 {uploadIds.length}/{fileArr.length} 个文件，正在匹配...</span>
+          <span>已上传 {okCount}/{fileArr.length} 个文件，正在匹配...</span>
         );
         const scanRes = await api.post('/tools/asset/scan', { upload_ids: uploadIds });
 
@@ -219,7 +307,8 @@ const AssetComparison: React.FC = () => {
           if (filledCount > 0) {
             setStatusMsg(
               <span>
-                <Badge variant="ok">完成</Badge> 已匹配 {filledCount}/{totalCount} 个数据表，请确认后点击「开始核对」。
+                <Badge variant="ok">完成</Badge> 已匹配 {filledCount}/{totalCount} 个数据表
+                {failCount > 0 ? `（上传 ${okCount}/${fileArr.length}）` : ''}，请确认后点击「开始核对」。
               </span>
             );
           } else {
@@ -232,17 +321,24 @@ const AssetComparison: React.FC = () => {
         } else {
           setStatusMsg(<span><Badge variant="err">失败</Badge> {scanRes.data.message}</span>);
         }
+
+        if (failMsgs.length > 0 && okCount > 0) {
+          setStatusMsg(prev => (
+            <div className="flex flex-col gap-1">
+              {prev}
+              <span className="text-amber-400 text-xs">⚠ {failMsgs.length} 个文件上传失败</span>
+            </div>
+          ));
+        }
       } catch (err: unknown) {
         setStatusMsg(<span><Badge variant="err">错误</Badge> {getErrorMessage(err)}</span>);
       } finally {
         setIsProcessing(false);
-        setUploadProgress(null);
         selectedFilesRef.current = [];
       }
       return;
     }
 
-    // 文本路径模式：服务器本地扫描
     if (!folderPath.trim()) {
       setStatusMsg(<span><Badge variant="warn">提示</Badge> 请先选择文件夹或输入服务器上的文件夹路径</span>);
       return;
@@ -323,7 +419,6 @@ const AssetComparison: React.FC = () => {
     setIsProcessing(true);
     setStatusMsg('正在生成完整对比总结、PDF及原始数据...');
     try {
-      // 使用 fetch 替代 axios 处理 ZIP 流式下载
       const res = await fetch('/api/v1/tools/asset/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -348,10 +443,8 @@ const AssetComparison: React.FC = () => {
         return;
       }
 
-      // 读取完整的 ZIP blob
       const blob = await res.blob();
 
-      // 触发浏览器下载
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -404,7 +497,6 @@ const AssetComparison: React.FC = () => {
           [ ASSET COMPARISON V1.2.7 INTERFACE ]
         </p>
 
-        {/* 隐藏的原生文件夹选择器 */}
         <input
           ref={folderInputRef}
           type="file"
@@ -445,35 +537,39 @@ const AssetComparison: React.FC = () => {
       <div className="w-full max-w-6xl relative z-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-6">
 
         {/* Finance */}
-        <div className="gsap-reveal bg-card p-6 border border-border">
+        <div className="gsap-reveal bg-card p-6 border border-border transition-colors transition-shadow hover:border-primary/30 hover:shadow-[0_2px_16px_rgba(var(--primary-rgb),0.06)]">
           <h2 className="text-xl font-bold uppercase tracking-tight mb-8 text-primary">财务 (Finance)</h2>
           <UnboxedFileInput label="本期财务数据" value={paths.thisFinance} onChange={(val) => handlePathChange('thisFinance', val)} />
           <UnboxedFileInput label="上期财务数据" value={paths.lastFinance} onChange={(val) => handlePathChange('lastFinance', val)} />
+          <ModuleProgressBar label="财务上传" progress={moduleProgress.finance} />
         </div>
 
         {/* SFC */}
-        <div className="gsap-reveal bg-card p-6 border border-border">
+        <div className="gsap-reveal bg-card p-6 border border-border transition-colors transition-shadow hover:border-primary/30 hover:shadow-[0_2px_16px_rgba(var(--primary-rgb),0.06)]">
           <h2 className="text-xl font-bold uppercase tracking-tight mb-8 text-primary">SFC (System)</h2>
           <UnboxedFileInput label="本期SFC数据" value={paths.thisSFC} onChange={(val) => handlePathChange('thisSFC', val)} />
           <UnboxedFileInput label="上期SFC数据" value={paths.lastSFC} onChange={(val) => handlePathChange('lastSFC', val)} />
+          <ModuleProgressBar label="SFC上传" progress={moduleProgress.sfc} />
         </div>
 
         {/* Notes */}
-        <div className="gsap-reveal bg-card p-6 border border-border">
+        <div className="gsap-reveal bg-card p-6 border border-border transition-colors transition-shadow hover:border-primary/30 hover:shadow-[0_2px_16px_rgba(var(--primary-rgb),0.06)]">
           <h2 className="text-xl font-bold uppercase tracking-tight mb-8 text-primary">Notes (IT)</h2>
           <UnboxedFileInput label="本期Notes数据" value={paths.thisNotes} onChange={(val) => handlePathChange('thisNotes', val)} />
           <UnboxedFileInput label="上期Notes数据" value={paths.lastNotes} onChange={(val) => handlePathChange('lastNotes', val)} />
+          <ModuleProgressBar label="Notes上传" progress={moduleProgress.notes} />
         </div>
 
         {/* Customer */}
-        <div className="gsap-reveal bg-card p-6 border border-border">
+        <div className="gsap-reveal bg-card p-6 border border-border transition-colors transition-shadow hover:border-primary/30 hover:shadow-[0_2px_16px_rgba(var(--primary-rgb),0.06)]">
           <h2 className="text-xl font-bold uppercase tracking-tight mb-8 text-primary">客户 (Customer)</h2>
           <UnboxedFileInput label="本期客户数据" value={paths.thisCustomer} onChange={(val) => handlePathChange('thisCustomer', val)} />
           <UnboxedFileInput label="上期客户数据" value={paths.lastCustomer} onChange={(val) => handlePathChange('lastCustomer', val)} />
+          <ModuleProgressBar label="客户上传" progress={moduleProgress.customer} />
         </div>
 
         {/* Config / TXT */}
-        <div className="gsap-reveal bg-card p-6 border border-border lg:col-span-2">
+        <div className="gsap-reveal bg-card p-6 border border-border lg:col-span-2 transition-colors transition-shadow hover:border-primary/30 hover:shadow-[0_2px_16px_rgba(var(--primary-rgb),0.06)]">
           <h2 className="text-xl font-bold uppercase tracking-tight mb-8 text-primary">配置项 (Config TXT)</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8">
             <UnboxedFileInput label="保管部门配置" value={paths.departmentData} onChange={(val) => handlePathChange('departmentData', val)} />
@@ -496,19 +592,6 @@ const AssetComparison: React.FC = () => {
         {statusMsg && (
           <div className="flex-1 p-4 bg-primary/10 text-primary font-mono text-sm max-w-2xl flex flex-col gap-2">
             <div>{statusMsg}</div>
-            {uploadProgress && uploadProgress.total > 0 && (
-              <div className="flex items-center gap-2 text-xs">
-                <div className="flex-1 h-2 bg-border rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{ width: `${Math.min((uploadProgress.loaded / uploadProgress.total) * 100, 100)}%` }}
-                  />
-                </div>
-                <span className="text-muted-foreground shrink-0">
-                  {(uploadProgress.loaded / 1024 / 1024).toFixed(1)} / {(uploadProgress.total / 1024 / 1024).toFixed(1)} MB
-                </span>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -538,7 +621,6 @@ const AssetComparison: React.FC = () => {
                       </select>
                     </div>
                     <p className={`font-mono mt-1 ${res.has_diff ? 'text-primary' : 'text-muted-foreground'}`}>{res.msg}</p>
-                    {/* 财务-财务：按保管人/部门分组展示本月新增、减少、异常 */}
                     {res.sub_groups && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                         {res.sub_groups.map((sg) => (
