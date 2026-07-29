@@ -34,11 +34,24 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
+    expose_headers=[
+        "Content-Disposition",
+        "Location",
+        "Tus-Resumable",
+        "Upload-Offset",
+    ],
 )
 
 # Mount all API routes from the single API aggregator
 app.include_router(api_router, prefix="/api/v1")
+
+
+@app.on_event("startup")
+async def cleanup_expired_uploads() -> None:
+    """启动时清理超过 24 小时的未完成上传。"""
+    from app.services.upload.store import UploadStore
+
+    UploadStore().cleanup_expired(max_age_hours=24)
 
 
 @app.get("/")

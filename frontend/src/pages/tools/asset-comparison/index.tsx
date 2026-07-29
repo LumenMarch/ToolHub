@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { gsap } from 'gsap';
 import { FileArrowUp, CheckSquareOffset, FloppyDisk, DownloadSimple, Plus, Minus, Warning, FolderOpen } from '@phosphor-icons/react';
 import api from '../../../api/axios';
+import { useTusUpload } from '../../../hooks/useTusUpload';
 
 const UnboxedFileInput: React.FC<{ label: string, value: string, onChange: (val: string) => void; displayValue?: string }> = ({ label, value, onChange, displayValue }) => {
   const [isFocused, setIsFocused] = useState(false);
@@ -94,6 +95,12 @@ const AssetComparison: React.FC = () => {
   const [statusMsg, setStatusMsg] = useState<React.ReactNode>('');
   const [isProcessing, setIsProcessing] = useState(false);
 
+  const { upload } = useTusUpload({
+    onProgress: (loaded, total) => {
+      setUploadProgress({ loaded, total });
+    },
+  });
+
   const handlePathChange = (key: keyof typeof paths, value: string) => {
     setPaths(prev => ({ ...prev, [key]: value }));
   };
@@ -146,7 +153,7 @@ const AssetComparison: React.FC = () => {
     e.target.value = '';
   };
 
-  // 扫描匹配：流式上传（建会话 → 逐个文件上传 → 扫描匹配）
+  // 扫描匹配：tus 上传 → 服务端扫描
   const handleScanFolder = async () => {
     const fileArr = selectedFilesRef.current;
 
@@ -154,43 +161,8 @@ const AssetComparison: React.FC = () => {
       setIsProcessing(true);
       setUploadProgress(null);
 
-      // 流量监控 — 30 秒无数据 → 断开
-      const STALL_MS = 30000;
-      const POLL_MS = 3000;
-      let stallLoaded = 0;
-      let stallActivity = Date.now();
-      let abortController: AbortController | null = null;
-
-      const startStallWatch = () => {
-        abortController = new AbortController();
-        stallLoaded = 0;
-        uploadRef.loaded = 0;
-        stallActivity = Date.now();
-        const timer = setInterval(() => {
-          if (uploadRef.loaded > stallLoaded) {
-            stallLoaded = uploadRef.loaded;
-            stallActivity = Date.now();
-          } else if (Date.now() - stallActivity > STALL_MS) {
-            abortController?.abort();
-            clearInterval(timer);
-          }
-        }, POLL_MS);
-        return { timer, controller: abortController };
-      };
-
-      const uploadRef = { loaded: 0 };
-
       try {
-        // 阶段 1: 创建会话
-        setStatusMsg(<span>正在创建上传会话...</span>);
-        const sRes = await api.post('/tools/asset/upload-session');
-        const sessionId: string = sRes.data.session_id;
-
-        // 阶段 2: 逐个文件流式上传
-        const uploadedFiles: string[] = [];
-        let okCount = 0;
-        let failCount = 0;
-        const failMessages: string[] = [];
+        const uploadIds: string[] = [];
 
         for (let i = 0; i < fileArr.length; i++) {
           const f = fileArr[i];
@@ -200,70 +172,30 @@ const AssetComparison: React.FC = () => {
             <span>上传中 <span className="font-bold">{idx}/{fileArr.length}</span>：{f.name}（{fileMB} MB）</span>
           );
 
-          // 单文件进度归零
-          setUploadProgress({ loaded: 0, total: f.size });
-
-          const { timer, controller } = startStallWatch();
           try {
-            const fd = new FormData();
-            fd.append('file', f);
-            const upRes = await api.post(
-              `/tools/asset/upload-session/${sessionId}/file`,
-              fd,
-              {
-                headers: { 'Content-Type': 'multipart/form-data' },
-                signal: controller.signal,
-                onUploadProgress: (evt) => {
-                  uploadRef.loaded = evt.loaded || 0;
-                  setUploadProgress({ loaded: evt.loaded || 0, total: evt.total || f.size });
-                },
-              }
+            const uploadId = await upload({ file: f, metadata: { filename: f.name } });
+            uploadIds.push(uploadId);
+          } catch (upErr: unknown) {
+            const msg = upErr instanceof Error ? upErr.message : String(upErr);
+            setStatusMsg(
+              <span>
+                <Badge variant="err">失败</Badge>
+                {f.name}：{msg}
+              </span>
             );
-            clearInterval(timer);
-            if (upRes.data.status === 'ok') {
-              uploadedFiles.push(upRes.data.filename);
-              okCount++;
-              setUploadProgress({ loaded: f.size, total: f.size }); // 100%
-            } else {
-              failCount++;
-              failMessages.push(`${f.name}: ${upRes.data.reason || 'skipped'}`);
-            }
-          } catch (upErr: any) {
-            clearInterval(timer);
-            failCount++;
-            if (upErr?.code === 'ERR_CANCELED' || upErr?.name === 'AbortError' || upErr?.name === 'CanceledError') {
-              const elapsed = ((Date.now() - stallActivity) / 1000).toFixed(0);
-              setStatusMsg(
-                <span>
-                  <Badge variant="err">超时</Badge>
-                  {f.name}：{elapsed}s 无数据流入，已跳过；继续下一文件...
-                </span>
-              );
-              await new Promise(r => setTimeout(r, 500)); // 短暂等待
-              continue; // 跳过当前文件继续下一个
-            }
-            failMessages.push(`${f.name}: ${upErr.message}`);
+            setIsProcessing(false);
+            setUploadProgress(null);
+            return;
           }
         }
 
         setUploadProgress(null);
-        if (okCount === 0) {
-          setStatusMsg(
-            <span>
-              <Badge variant="err">失败</Badge> 全部 {fileArr.length} 个文件上传失败：{failMessages.join('；')}
-            </span>
-          );
-          return;
-        }
 
-        // 阶段 3: 扫描匹配
-        const failNote = failCount > 0 ? `（${failCount} 个失败）` : '';
+        // 扫描匹配
         setStatusMsg(
-          <span>
-            已上传 {okCount}/{fileArr.length} 个文件 {failNote}，正在匹配...
-          </span>
+          <span>已上传 {uploadIds.length}/{fileArr.length} 个文件，正在匹配...</span>
         );
-        const scanRes = await api.post(`/tools/asset/upload-session/${sessionId}/scan`);
+        const scanRes = await api.post('/tools/asset/scan', { upload_ids: uploadIds });
 
         if (scanRes.data.status === 'success') {
           const data = scanRes.data.data;
@@ -273,8 +205,7 @@ const AssetComparison: React.FC = () => {
           if (filledCount > 0) {
             setStatusMsg(
               <span>
-                <Badge variant="ok">完成</Badge> 已匹配 {filledCount}/{totalCount} 个数据表
-                {failCount > 0 ? `（上传 ${okCount}/${fileArr.length}）` : ''}，请确认后点击「开始核对」。
+                <Badge variant="ok">完成</Badge> 已匹配 {filledCount}/{totalCount} 个数据表，请确认后点击「开始核对」。
               </span>
             );
           } else {
@@ -287,8 +218,19 @@ const AssetComparison: React.FC = () => {
         } else {
           setStatusMsg(<span><Badge variant="err">失败</Badge> {scanRes.data.message}</span>);
         }
-      } catch (err: any) {
-        const detail = err.response?.data?.detail || err.response?.data?.message || err.message;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        let detail = message;
+        if (err && typeof err === 'object' && 'response' in err) {
+          const response = (err as Record<string, unknown>).response;
+          if (response && typeof response === 'object' && 'data' in response) {
+            const data = (response as Record<string, unknown>).data;
+            if (data && typeof data === 'object') {
+              const d = data as Record<string, unknown>;
+              detail = String(d.detail || d.message || message);
+            }
+          }
+        }
         setStatusMsg(<span><Badge variant="err">错误</Badge> {detail}</span>);
       } finally {
         setIsProcessing(false);
@@ -330,8 +272,9 @@ const AssetComparison: React.FC = () => {
       } else {
         setStatusMsg(<span><Badge variant="err">失败</Badge> {res.data.message}</span>);
       }
-    } catch (err: any) {
-      setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {err.message}</span>);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {message}</span>);
     } finally {
       setIsProcessing(false);
     }
@@ -362,8 +305,9 @@ const AssetComparison: React.FC = () => {
           </div>
         );
       }
-    } catch (err: any) {
-      setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {err.message}</span>);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {message}</span>);
     } finally {
       setIsProcessing(false);
     }
@@ -390,8 +334,9 @@ const AssetComparison: React.FC = () => {
           </div>
         );
       }
-    } catch (err: any) {
-      setStatusMsg(<span><Badge variant="err">失败</Badge> {err.message}</span>);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setStatusMsg(<span><Badge variant="err">失败</Badge> {message}</span>);
     } finally {
       setIsProcessing(false);
     }
@@ -412,8 +357,9 @@ const AssetComparison: React.FC = () => {
           </div>
         );
       }
-    } catch (err: any) {
-      setStatusMsg(<span><Badge variant="err">失败</Badge> {err.message}</span>);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setStatusMsg(<span><Badge variant="err">失败</Badge> {message}</span>);
     } finally {
       setIsProcessing(false);
     }

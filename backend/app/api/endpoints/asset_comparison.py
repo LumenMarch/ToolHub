@@ -1,19 +1,18 @@
 import os
-import re
+import shutil
 import tempfile
 import traceback
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 from dateutil.relativedelta import relativedelta
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends
 from loguru import logger
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.auth import require_permission, require_tool_enabled
 from app.models.user import User
@@ -24,6 +23,7 @@ from app.services.asset_comparison.Finance_Notes import Finance_Notes
 from app.services.asset_comparison.Notes_Notes import Notes_Notes
 from app.services.asset_comparison.Notes_SFC import Notes_SFC
 from app.services.asset_comparison.SFC_SFC import SFC_SFC
+from app.services.upload.store import UploadStore
 
 try:
     from app.services.asset_comparison.mod import create_excel_template
@@ -174,223 +174,63 @@ def _scan_and_match(folder: Path, match_rules: dict) -> tuple:
     return result, found_files, matched_log
 
 
-# ==================== 流式上传三阶段 API ====================
-
-
-@router.post("/upload-session")
-async def create_upload_session(
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
-):
-    """创建上传会话，返回 session_id 用于后续逐文件上传"""
-    session_id = uuid.uuid4().hex[:8]
-    temp_dir = ASSET_COMPARE_ROOT / session_id
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(
-        f"[session] 创建会话 session={session_id} | dir={temp_dir} | user={current_user.username}"
-    )
-    return {"status": "success", "session_id": session_id, "temp_dir": str(temp_dir)}
-
-
 ASSET_COMPARE_ROOT = Path(tempfile.gettempdir()) / "asset-compare"
-SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}$")
 
 
-def _resolve_session_dir(session_id: str) -> Path:
-    """校验 session_id 格式并返回安全的会话目录，防止路径穿越"""
-    if not SESSION_ID_RE.match(session_id):
-        raise HTTPException(status_code=400, detail="无效的 session_id 格式")
-    resolved = (ASSET_COMPARE_ROOT / session_id).resolve()
-    if not str(resolved).startswith(str(ASSET_COMPARE_ROOT.resolve())):
-        raise HTTPException(status_code=400, detail="非法的会话路径")
-    return resolved
+class ScanByIdsRequest(BaseModel):
+    """基于已上传文件 ID 的扫描请求。"""
+
+    upload_ids: list[str] = Field(..., min_length=1, description="已上传文件 ID 列表")
 
 
-@router.post("/upload-session/{session_id}/file")
-async def upload_file_to_session(
-    session_id: str,
-    file: UploadFile = File(...),
+@router.post("/scan")
+async def scan_uploaded_files_by_ids(
+    req: ScanByIdsRequest,
     current_user: User = Depends(require_permission("tool:use")),
     _: None = Depends(require_tool_enabled("asset-comparison")),
 ):
-    """流式接收单个文件写入会话临时目录"""
-    temp_dir = _resolve_session_dir(session_id)
-    if not temp_dir.exists():
-        raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在或已过期")
+    """使用 upload_id 获取已上传文件，扫描匹配后返回路径。"""
+    store = UploadStore()
 
-    safe_name = Path(file.filename).name if file.filename else "unknown"
-    content_type = file.content_type or "unknown"
+    # 创建临时工作目录
+    work_dir = Path(tempfile.mkdtemp(prefix="scan-", dir=ASSET_COMPARE_ROOT))
+    ASSET_COMPARE_ROOT.mkdir(parents=True, exist_ok=True)
+
     logger.info(
-        f"[stream] session={session_id} | 开始接收: {safe_name} | type={content_type}"
+        f"[scan] upload_ids={req.upload_ids} | work_dir={work_dir} | "
+        f"user={current_user.username}"
     )
 
-    if not safe_name or safe_name.startswith("~"):
-        logger.debug(f"[stream] 跳过临时文件: {safe_name}")
-        return {"status": "skipped", "filename": safe_name, "reason": "临时文件"}
+    # 将上传文件复制到工作目录
+    for upload_id in req.upload_ids:
+        info = store.get_info(upload_id)
+        src = store.get_file_path(upload_id)
+        dst = work_dir / info["filename"]
+        shutil.copy2(src, dst)
+        logger.info(f"[scan] 复制 {info['filename']} -> {dst}")
 
-    # 流式写入 — 分块读，边读边写，OOM 安全
-    file_path = temp_dir / safe_name
-    total_bytes = 0
-    try:
-        with open(file_path, "wb") as f:
-            while chunk := await file.read(256 * 1024):  # 每块 256KB
-                f.write(chunk)
-                total_bytes += len(chunk)
-        logger.info(
-            f"[stream] OK session={session_id} | {safe_name} | size={total_bytes}B ({total_bytes / 1024:.1f}KB)"
-        )
-        return {
-            "status": "ok",
-            "filename": safe_name,
-            "size": total_bytes,
-            "size_kb": round(total_bytes / 1024, 1),
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[stream] FAIL session={session_id} | {safe_name}: {e}")
-        # 删除不完整的文件
-        if file_path.exists():
-            file_path.unlink()
-        raise HTTPException(status_code=500, detail=f"写入失败: {e}")
-
-
-@router.post("/upload-session/{session_id}/scan")
-async def scan_uploaded_files(
-    session_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
-):
-    """扫描会话临时目录中的文件，按规则匹配"""
-    temp_dir = _resolve_session_dir(session_id)
-    if not temp_dir.exists():
-        raise HTTPException(status_code=404, detail=f"会话 {session_id} 不存在或已过期")
-
-    logger.info(f"[scan] session={session_id} | dir={temp_dir}")
-
+    # 扫描匹配
     current_date = datetime.now()
     this_month_str = current_date.strftime("%Y%m")
     last_month_date = current_date - relativedelta(months=1)
     last_month_str = last_month_date.strftime("%Y%m")
 
     match_rules = _build_match_rules(this_month_str, last_month_str)
-    result, found_files, matched_log = _scan_and_match(temp_dir, match_rules)
+    result, found_files, matched_log = _scan_and_match(work_dir, match_rules)
 
     matched_count = sum(1 for v in result.values() if v)
-    logger.info(
-        f"[scan] session={session_id} | 匹配 {matched_count}/{len(result)} 个数据表"
-    )
+    logger.info(f"[scan] 匹配 {matched_count}/{len(result)} 个数据表")
     for entry in matched_log:
         logger.info(f"[scan]   {entry}")
 
     return {
         "status": "success",
         "data": result,
-        "session_id": session_id,
+        "scan_id": work_dir.name,
         "debug": {
-            "folder": str(temp_dir),
+            "folder": str(work_dir),
             "found_files": found_files,
             "matched": matched_log,
-        },
-    }
-
-
-# 保留旧批量端点兼容（内部重定向到流式逻辑）
-@router.post("/upload-and-scan")
-async def upload_and_scan(
-    files: list[UploadFile] = File(...),
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
-):
-    """接收前端上传的数据文件，存入服务器临时目录，扫描匹配后返回路径"""
-    logger.info(
-        f"[upload-and-scan] 收到上传请求 | user={current_user.username} | "
-        f"file_count={len(files)}"
-    )
-
-    session_id = uuid.uuid4().hex[:8]
-    temp_dir = ASSET_COMPARE_ROOT / session_id
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"[upload-and-scan] session={session_id} | temp_dir={temp_dir}")
-
-    saved_files = []
-    failed_files = []
-    total_bytes = 0
-    for i, file in enumerate(files):
-        raw_name = file.filename or "(no name)"
-        safe_name = Path(raw_name).name
-        content_type = file.content_type or "unknown"
-        logger.debug(
-            f"[upload-and-scan] [{i + 1}/{len(files)}] "
-            f"filename={raw_name} | safe_name={safe_name} | content_type={content_type}"
-        )
-
-        if not safe_name or safe_name.startswith("~"):
-            logger.debug(f"[upload-and-scan] 跳过文件: {safe_name} (临时文件或空名)")
-            continue
-
-        try:
-            content = await file.read()
-            file_size = len(content)
-            total_bytes += file_size
-            logger.debug(
-                f"[upload-and-scan] [{i + 1}/{len(files)}] "
-                f"读取完成: {safe_name} | size={file_size}B ({file_size / 1024:.1f}KB)"
-            )
-
-            file_path = temp_dir / safe_name
-            file_path.write_bytes(content)
-            saved_files.append(safe_name)
-            logger.info(
-                f"[upload-and-scan] OK [{i + 1}/{len(files)}] "
-                f"{safe_name} ({file_size}B)"
-            )
-        except Exception as write_err:
-            logger.error(
-                f"[upload-and-scan] FAIL [{i + 1}/{len(files)}] "
-                f"{safe_name}: {write_err}"
-            )
-            failed_files.append(f"{safe_name}: {write_err}")
-
-    logger.info(
-        f"[upload-and-scan] 上传完成 | saved={len(saved_files)} | "
-        f"failed={len(failed_files)} | total_bytes={total_bytes} "
-        f"({total_bytes / 1024 / 1024:.2f}MB)"
-    )
-
-    if not saved_files:
-        logger.error("[upload-and-scan] 无有效文件，终止匹配")
-        return {
-            "status": "error",
-            "message": f"所有文件保存失败: {failed_files}",
-        }
-
-    current_date = datetime.now()
-    this_month_str = current_date.strftime("%Y%m")
-    last_month_date = current_date - relativedelta(months=1)
-    last_month_str = last_month_date.strftime("%Y%m")
-
-    match_rules = _build_match_rules(this_month_str, last_month_str)
-    result, found_files, matched_log = _scan_and_match(temp_dir, match_rules)
-
-    logger.info(
-        f"[upload-and-scan] 匹配完成 | "
-        f"matched={sum(1 for v in result.values() if v)}/{len(result)}"
-    )
-    for entry in matched_log:
-        logger.info(f"[upload-and-scan]   {entry}")
-
-    return {
-        "status": "success",
-        "data": result,
-        "session_id": session_id,
-        "temp_dir": str(temp_dir),
-        "debug": {
-            "folder": str(temp_dir),
-            "found_files": found_files,
-            "matched": matched_log,
-            "total_bytes": total_bytes,
-            "failed_files": failed_files,
         },
     }
 

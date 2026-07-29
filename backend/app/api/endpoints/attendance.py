@@ -2,8 +2,9 @@ from dataclasses import asdict
 from datetime import datetime
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -25,29 +26,21 @@ from app.services.attendance import (
     validate_upload_extensions,
 )
 from app.services.audit import log_action
+from app.services.upload.store import UploadStore
 
 router = APIRouter()
 
 EXCEL_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-def _read_uploads(
-    attendance_file: UploadFile,
-    shift_file: UploadFile,
-) -> tuple[bytes, str, bytes]:
-    attendance_filename = attendance_file.filename or ""
-    shift_filename = shift_file.filename or ""
-    attendance_suffix = validate_upload_extensions(
-        attendance_filename,
-        shift_filename,
-    )
-    attendance_content = attendance_file.file.read()
-    shift_content = shift_file.file.read()
-    if not attendance_content:
-        raise AttendanceValidationError("通行记录文件为空")
-    if not shift_content:
-        raise AttendanceValidationError("班别文件为空")
-    return attendance_content, attendance_suffix, shift_content
+store = UploadStore()
+
+
+class AttendanceUploadRequest(BaseModel):
+    """出勤分析上传请求，引用已完成的 tus 上传。"""
+
+    attendance_upload_id: str = Field(..., min_length=1, description="通行记录上传 ID")
+    shift_upload_id: str = Field(..., min_length=1, description="班别文件上传 ID")
 
 
 def _build_download_response(content: bytes, filename: str) -> Response:
@@ -67,17 +60,20 @@ def _build_download_response(content: bytes, filename: str) -> Response:
 @router.post("/process")
 def process_attendance(
     request: Request,
+    req: AttendanceUploadRequest,
     db: Session = Depends(deps.get_db),
-    attendance_file: UploadFile = File(...),
-    shift_file: UploadFile = File(...),
     current_user: User = Depends(require_permission("tool:use")),
     __: None = Depends(require_tool_enabled("attendance-organizer")),
 ) -> Response:
     try:
-        attendance_content, attendance_suffix, shift_content = _read_uploads(
-            attendance_file,
-            shift_file,
+        attendance_info = store.get_info(req.attendance_upload_id)
+        shift_info = store.get_info(req.shift_upload_id)
+        attendance_suffix = validate_upload_extensions(
+            attendance_info["filename"],
+            shift_info["filename"],
         )
+        attendance_content = store.read_bytes(req.attendance_upload_id)
+        shift_content = store.read_bytes(req.shift_upload_id)
         output = AttendanceService().process(
             attendance_content,
             attendance_suffix,
@@ -85,9 +81,6 @@ def process_attendance(
         )
     except AttendanceValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    finally:
-        attendance_file.file.close()
-        shift_file.file.close()
 
     log_action(
         db,
@@ -106,17 +99,20 @@ def process_attendance(
 @router.post("/analyze", response_model=AttendanceAnalyzeResponse)
 def analyze_attendance(
     request: Request,
+    req: AttendanceUploadRequest,
     db: Session = Depends(deps.get_db),
-    attendance_file: UploadFile = File(...),
-    shift_file: UploadFile = File(...),
     current_user: User = Depends(require_permission("tool:use")),
     __: None = Depends(require_tool_enabled("attendance-organizer")),
 ) -> AttendanceAnalyzeResponse:
     try:
-        attendance_content, attendance_suffix, shift_content = _read_uploads(
-            attendance_file,
-            shift_file,
+        attendance_info = store.get_info(req.attendance_upload_id)
+        shift_info = store.get_info(req.shift_upload_id)
+        attendance_suffix = validate_upload_extensions(
+            attendance_info["filename"],
+            shift_info["filename"],
         )
+        attendance_content = store.read_bytes(req.attendance_upload_id)
+        shift_content = store.read_bytes(req.shift_upload_id)
         service = AttendanceService()
         analysis = service.analyze(
             attendance_content,
@@ -126,9 +122,6 @@ def analyze_attendance(
         output = service.export(analysis)
     except AttendanceValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    finally:
-        attendance_file.file.close()
-        shift_file.file.close()
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"出勤整理_完整_{timestamp}.xlsx"
