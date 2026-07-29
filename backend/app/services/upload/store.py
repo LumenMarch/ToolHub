@@ -11,6 +11,7 @@ import os
 import tempfile
 import time
 import uuid
+from collections.abc import AsyncIterable
 from pathlib import Path
 
 UPLOAD_ROOT = Path(tempfile.gettempdir()) / "toolhub-uploads"
@@ -24,6 +25,24 @@ class UploadNotFoundError(Exception):
 
 class UploadNotCompleteError(Exception):
     """上传尚未完成，不能读取。"""
+
+    pass
+
+
+class UploadOffsetMismatchError(ValueError):
+    """上传偏移量与当前文件大小不一致。"""
+
+    pass
+
+
+class UploadLengthExceededError(ValueError):
+    """上传数据超过声明的文件长度。"""
+
+    pass
+
+
+class UploadWriteConflictError(ValueError):
+    """同一上传资源已有写入请求正在进行。"""
 
     pass
 
@@ -58,7 +77,9 @@ class UploadStore:
         """获取 POSIX 排他锁（写锁）。"""
         try:
             Lockable = getattr(fp, "buffer", None) or fp  # noqa: B009
-            fcntl.flock(Lockable, fcntl.LOCK_EX)
+            fcntl.flock(Lockable, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise UploadWriteConflictError("上传资源正在写入，请稍后重试") from exc
         except OSError:
             # 部分平台不支持 flock，退化为无锁（风险可接受）
             pass
@@ -91,34 +112,43 @@ class UploadStore:
         self._data_path(upload_id).touch()
         return upload_id
 
-    def write_chunk(self, upload_id: str, offset: int, data: bytes) -> int:
-        """在指定 offset 写入数据分片。校验 offset 必须等于当前文件大小。返回新 offset。"""
+    async def write_stream(
+        self,
+        upload_id: str,
+        offset: int,
+        chunks: AsyncIterable[bytes],
+    ) -> int:
+        """从异步数据流增量写入上传文件，返回服务端已接受的最新 offset。"""
         meta = self._read_meta(upload_id)
         upload_length = meta["upload_length"]
 
         data_path = self._data_path(upload_id)
-        current_size = data_path.stat().st_size
-
-        if offset != current_size:
-            raise ValueError(f"Offset 不匹配: 期望 {current_size}，收到 {offset}")
-
-        if offset + len(data) > upload_length:
-            raise ValueError(
-                f"写入超出 upload_length: "
-                f"offset={offset} + {len(data)} > {upload_length}"
-            )
 
         with open(data_path, "ab") as f:
             self._lock_file(f)
             try:
-                # 加锁后再次确认 offset（防止竞态）
                 f.seek(0, os.SEEK_END)
                 pos = f.tell()
                 if pos != offset:
-                    raise ValueError(
-                        f"并发冲突: 文件已增长到 {pos}，请求 offset={offset}"
+                    raise UploadOffsetMismatchError(
+                        f"Offset 不匹配: 期望 {pos}，收到 {offset}"
                     )
-                f.write(data)
+
+                async for data in chunks:
+                    if not data:
+                        continue
+                    if pos + len(data) > upload_length:
+                        raise UploadLengthExceededError(
+                            f"写入超出 upload_length: "
+                            f"offset={pos} + {len(data)} > {upload_length}"
+                        )
+                    written = f.write(data)
+                    if written != len(data):
+                        raise OSError(
+                            f"文件写入不完整: 期望 {len(data)} 字节，实际 {written} 字节"
+                        )
+                    pos += written
+
                 new_offset = f.tell()
             finally:
                 self._unlock_file(f)

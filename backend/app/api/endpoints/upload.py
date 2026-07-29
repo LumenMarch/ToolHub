@@ -13,8 +13,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from app.core.auth import require_permission
 from app.models.user import User
 from app.services.upload.store import (
+    UploadLengthExceededError,
     UploadNotFoundError,
+    UploadOffsetMismatchError,
     UploadStore,
+    UploadWriteConflictError,
 )
 
 router = APIRouter()
@@ -196,9 +199,6 @@ async def tus_patch(
             detail="Upload-Offset 必须是数值",
         ) from None
 
-    # 流式读取请求体
-    data = await request.body()
-
     try:
         info = store.get_info(upload_id)
         _check_ownership(info, current_user)
@@ -212,25 +212,15 @@ async def tus_patch(
             detail="上传已完成，不可继续写入",
         )
 
-    # 检查 offset
-    current_offset = store.get_offset(upload_id)
-    if offset != current_offset:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Offset 不匹配: 期望 {current_offset}，收到 {offset}",
-        )
-
-    # 检查不会超长
-    if offset + len(data) > info["upload_length"]:
+    try:
+        new_offset = await store.write_stream(upload_id, offset, request.stream())
+    except (UploadOffsetMismatchError, UploadWriteConflictError) as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
+    except UploadLengthExceededError:
         raise HTTPException(
             status_code=413,
             detail="写入超出 Upload-Length",
-        )
-
-    try:
-        new_offset = store.write_chunk(upload_id, offset, data)
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
+        ) from None
 
     headers = {
         "Upload-Offset": str(new_offset),

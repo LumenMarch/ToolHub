@@ -23,7 +23,10 @@ import api from '../../../api/axios';
 import { LoadingSignal } from '../../../components/LoadingSignal';
 import { cn } from '../../../lib/cn';
 import FileDropZone from '../../../components/FileDropZone';
-import { useTusUpload } from '../../../hooks/useTusUpload';
+import {
+  type UploadState,
+  useTusUpload,
+} from '../../../hooks/useTusUpload';
 
 type FileKind = 'attendance' | 'shift';
 type Phase = 'upload' | 'analyzing' | 'ready';
@@ -83,24 +86,125 @@ const FILTER_OPTIONS: { id: ResultFilter; label: string }[] = [
 
 const NUMBER_FORMATTER = new Intl.NumberFormat('zh-CN');
 
+type UploadProgressState = Pick<
+  UploadState,
+  | 'status'
+  | 'progress'
+  | 'acceptedProgress'
+  | 'bytesSent'
+  | 'bytesAccepted'
+  | 'bytesTotal'
+>;
+
+const formatMegabytes = (bytes: number) =>
+  `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+const UploadProgressRow: React.FC<{
+  label: string;
+  upload: UploadProgressState;
+}> = ({ label, upload }) => {
+  const isCompleting = upload.status === 'confirming';
+  const isCompleted = upload.status === 'completed';
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-4">
+        <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
+          {label}
+        </span>
+        <span className="inline-flex items-center gap-2 font-mono text-xs tabular-nums text-foreground">
+          {isCompleted ? (
+            <>
+              <CheckCircle weight="fill" className="size-4 text-primary" />
+              已完成
+            </>
+          ) : isCompleting ? (
+            <>
+              <span
+                aria-hidden="true"
+                className="size-2 bg-primary motion-safe:animate-pulse"
+              />
+              完成中
+            </>
+          ) : (
+            `${upload.progress}%`
+          )}
+        </span>
+      </div>
+      <div className="h-1 w-full overflow-hidden rounded-full bg-border">
+        <div
+          className={cn(
+            'h-full rounded-full bg-primary transition-all duration-300 ease-out',
+            isCompleting && 'motion-safe:animate-pulse',
+          )}
+          style={{ width: `${upload.progress}%` }}
+        />
+      </div>
+      {upload.bytesTotal > 0 && upload.bytesAccepted > 0 && !isCompleted && (
+        <p className="mt-2 font-mono text-[0.625rem] tabular-nums text-muted-foreground">
+          已确认 {formatMegabytes(upload.bytesAccepted)} /{' '}
+          {formatMegabytes(upload.bytesTotal)}
+        </p>
+      )}
+    </div>
+  );
+};
+
 const AnalysisInProgress: React.FC<{
   attendanceFile: File;
   shiftFile: File;
-  attendanceProgress: number;
-  shiftProgress: number;
+  attendanceUpload: UploadProgressState;
+  shiftUpload: UploadProgressState;
   step: AnalyzeStep;
-}> = ({ attendanceFile, shiftFile, attendanceProgress, shiftProgress, step }) => {
-  const totalProgress = Math.round((attendanceProgress + shiftProgress) / 2);
+}> = ({
+  attendanceFile,
+  shiftFile,
+  attendanceUpload,
+  shiftUpload,
+  step,
+}) => {
+  const uploads = [attendanceUpload, shiftUpload];
+  const totalBytes = uploads.reduce(
+    (total, upload) => total + upload.bytesTotal,
+    0,
+  );
+  const sentBytes = uploads.reduce(
+    (total, upload) => total + upload.bytesSent,
+    0,
+  );
+  const acceptedBytes = uploads.reduce(
+    (total, upload) => total + upload.bytesAccepted,
+    0,
+  );
+  const totalProgress =
+    totalBytes > 0
+      ? Math.min(100, Math.floor((sentBytes / totalBytes) * 100))
+      : 0;
+  const isCompletingUpload =
+    step === 'uploading' &&
+    totalBytes > 0 &&
+    sentBytes >= totalBytes &&
+    uploads.some((upload) => upload.status !== 'completed');
 
   return (
     <section className="flex min-h-96 flex-col justify-start gap-8 border-2 border-border p-6 md:p-10">
       <div className="flex items-start justify-between gap-6">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">
-            [ {step === 'uploading' ? '上传中' : '分析中'} ]
+            [{` ${
+              step === 'processing'
+                ? '分析中'
+                : isCompletingUpload
+                  ? '完成中'
+                  : '上传中'
+            } `}]
           </p>
           <h2 className="mt-4 text-3xl font-bold tracking-tight md:text-5xl">
-            {step === 'uploading' ? '正在上传文件' : '正在核对通行记录'}
+            {step === 'processing'
+              ? '正在核对通行记录'
+              : isCompletingUpload
+                ? '正在完成上传'
+                : '正在上传文件'}
           </h2>
         </div>
         <ChartBar weight="bold" className="size-10 shrink-0 text-primary" />
@@ -109,39 +213,11 @@ const AnalysisInProgress: React.FC<{
       <div>
         {step === 'uploading' ? (
           <div className="mb-12 space-y-6">
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  通行记录
-                </span>
-                <span className="font-mono text-xs tabular-nums text-foreground">
-                  {attendanceProgress}%
-                </span>
-              </div>
-              <div className="h-1 w-full overflow-hidden rounded-full bg-border">
-                <div
-                  className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
-                  style={{ width: `${attendanceProgress}%` }}
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  班别明细
-                </span>
-                <span className="font-mono text-xs tabular-nums text-foreground">
-                  {shiftProgress}%
-                </span>
-              </div>
-              <div className="h-1 w-full overflow-hidden rounded-full bg-border">
-                <div
-                  className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
-                  style={{ width: `${shiftProgress}%` }}
-                />
-              </div>
-            </div>
+            <UploadProgressRow
+              label="通行记录"
+              upload={attendanceUpload}
+            />
+            <UploadProgressRow label="班别明细" upload={shiftUpload} />
 
             <div className="border-t border-border pt-4">
               <div className="mb-2 flex items-center justify-between">
@@ -159,6 +235,15 @@ const AnalysisInProgress: React.FC<{
                 />
               </div>
             </div>
+
+            {isCompletingUpload && (
+              <LoadingSignal
+                compact
+                ariaLabel="文件正在完成上传"
+                label="[ 正在完成上传 ]"
+                detail={`已确认 ${formatMegabytes(acceptedBytes)} / ${formatMegabytes(totalBytes)}`}
+              />
+            )}
           </div>
         ) : (
           <LoadingSignal
@@ -778,8 +863,8 @@ const AttendanceOrganizer: React.FC = () => {
           <AnalysisInProgress
             attendanceFile={attendanceFile}
             shiftFile={shiftFile}
-            attendanceProgress={attUpload.progress}
-            shiftProgress={shiftUpload.progress}
+            attendanceUpload={attUpload}
+            shiftUpload={shiftUpload}
             step={analyzeStep}
           />
         )}
