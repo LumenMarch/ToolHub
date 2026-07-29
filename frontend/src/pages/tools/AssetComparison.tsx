@@ -160,7 +160,7 @@ const AssetComparison: React.FC = () => {
         }
         const res = await api.post('/tools/asset/upload-and-scan', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 120000,  // 120秒超时，大文件 + 局域网传输可能较慢
+          timeout: 600000,  // 10分钟超时，公网穿透场景上传较慢
         });
         if (res.data.status === 'success') {
           const data = res.data.data;
