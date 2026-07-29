@@ -1,9 +1,28 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import api from '../api/axios';
-import { AuthContext } from './auth-context';
-import type { User } from './auth-context';
 
+export interface User {
+  id: number;
+  username: string;
+  is_active: boolean;
+  roles: string[];
+  permissions: string[];
+}
+
+export interface AuthContextValue {
+  user: User | null;
+  login: (user: User) => void;
+  logout: () => Promise<void>;
+  isLoading: boolean;
+}
+
+export const AuthContext = createContext<AuthContextValue>({
+  user: null,
+  login: () => {},
+  logout: async () => {},
+  isLoading: true,
+});
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);

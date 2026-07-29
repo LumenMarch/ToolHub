@@ -1,6 +1,25 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ThemeProviderContext } from './theme-context';
-import type { Theme } from './theme-context';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+
+export type Theme = 'dark' | 'light' | 'system';
+
+export interface ThemeContextValue {
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+}
+
+export const ThemeProviderContext = createContext<
+  ThemeContextValue | undefined
+>(undefined);
+
+export const useTheme = () => {
+  const context = useContext(ThemeProviderContext);
+
+  if (context === undefined) {
+    throw new Error('useTheme must be used within a ThemeProvider');
+  }
+
+  return context;
+};
 
 type ThemeProviderProps = {
   children: React.ReactNode;

@@ -12,6 +12,11 @@ env/
 *.db
 *.sqlite3
 toolhub.db
+# Ruff cache
+.ruff_cache/
+
+# Frontend artifacts (should not exist here)
+frontend/toolhub.db
 
 # Node
 node_modules/

@@ -1,5 +1,5 @@
 import { Moon, Sun } from '@phosphor-icons/react';
-import { useTheme } from './theme-context';
+import { useTheme } from './ThemeProvider';
 interface ThemeToggleProps {
   // "default" 主站大尺寸带边框；"ghost" admin 状态栏无框紧凑样式。
   variant?: 'default' | 'ghost';

@@ -2,11 +2,11 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './components/ThemeProvider';
-import ProtectedRoute from './components/ProtectedRoute';
-import AdminRoute from './components/AdminRoute';
-import ToolGuard from './components/ToolGuard';
+import ProtectedRoute from './components/guards/ProtectedRoute';
+import AdminRoute from './components/guards/AdminRoute';
+import ToolGuard from './components/guards/ToolGuard';
 import Layout from './components/Layout';
-import AdminLayout from './components/admin/AdminLayout';
+import AdminLayout from './pages/admin/components/AdminLayout';
 import { LoadingSignal } from './components/LoadingSignal';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -26,11 +26,11 @@ const SuspendFallback = () => (
 );
 
 // Admin 页面懒加载，保持代码分割。
-const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
-const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'));
-const AdminAudit = lazy(() => import('./pages/admin/AdminAudit'));
-const AdminTools = lazy(() => import('./pages/admin/AdminTools'));
-const AdminRoles = lazy(() => import('./pages/admin/AdminRoles'));
+const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
+const AdminUsers = lazy(() => import('./pages/admin/Users'));
+const AdminAudit = lazy(() => import('./pages/admin/Audit'));
+const AdminTools = lazy(() => import('./pages/admin/Tools'));
+const AdminRoles = lazy(() => import('./pages/admin/Roles'));
 
 function App() {
   return (

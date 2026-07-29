@@ -1,10 +1,13 @@
-import base64
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.auth import require_permission, require_tool_enabled
 from app.models.user import User
+from app.services.string_tools.service import (
+    analyze_string,
+    decode_base64,
+    encode_base64,
+)
 
 router = APIRouter()
 
@@ -25,23 +28,13 @@ def process_string(
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
     if request.action == "encode_base64":
-        encoded_bytes = base64.b64encode(request.text.encode("utf-8"))
-        return {"result": encoded_bytes.decode("utf-8")}
-
+        return {"result": encode_base64(request.text)}
     elif request.action == "decode_base64":
         try:
-            decoded_bytes = base64.b64decode(request.text.encode("utf-8"))
-            return {"result": decoded_bytes.decode("utf-8")}
+            return {"result": decode_base64(request.text)}
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid Base64 string")
-
     elif request.action == "analyze":
-        return {
-            "result": {
-                "length": len(request.text),
-                "words": len(request.text.split()),
-                "lines": len(request.text.splitlines()),
-            }
-        }
+        return {"result": analyze_string(request.text)}
     else:
         raise HTTPException(status_code=400, detail="Unknown action")
