@@ -1,9 +1,9 @@
 import io
 import os
 import shutil
-import tempfile
 import threading
 import traceback
+import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from PyPDF2 import PdfMerger
 
 from app.core.auth import require_permission, require_tool_enabled
+from app.core.config import settings
 from app.models.user import User
 from app.schemas.asset_comparison import (
     AssetComparisonAnnotationsUpdate,
@@ -47,6 +48,7 @@ from app.services.excel_safety import (
     XLSXWRITER_SAFE_OPTIONS,
     safe_openpyxl_value,
 )
+from app.services.task_artifacts import task_artifact_store
 from app.services.upload.store import (
     UploadNotCompleteError,
     UploadNotFoundError,
@@ -210,9 +212,6 @@ def _scan_and_match(folder: Path, match_rules: dict) -> tuple:
     return result, found_files, matched_log
 
 
-ASSET_COMPARE_ROOT = Path(tempfile.gettempdir()) / "asset-compare"
-
-
 class ScanByIdsRequest(BaseModel):
     """基于已上传文件 ID 的扫描请求。"""
 
@@ -228,9 +227,18 @@ async def scan_uploaded_files_by_ids(
     """使用 upload_id 获取已上传文件，扫描匹配后返回路径。"""
     store = UploadStore()
 
-    # 创建临时工作目录
-    ASSET_COMPARE_ROOT.mkdir(parents=True, exist_ok=True)
-    work_dir = Path(tempfile.mkdtemp(prefix="scan-", dir=ASSET_COMPARE_ROOT))
+    scan_id = uuid.uuid4().hex
+    scan_dir = task_artifact_store.ensure_task(
+        user_id=current_user.id,
+        tool="asset-comparison-scan",
+        task_id=scan_id,
+        expires_at=(
+            datetime.now().timestamp() + settings.ASSET_COMPARISON_JOB_TTL_HOURS * 3600
+        ),
+        metadata={"upload_count": len(req.upload_ids)},
+    )
+    work_dir = scan_dir / "inputs"
+    work_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(
         f"[scan] upload_ids={req.upload_ids} | work_dir={work_dir} | "
@@ -254,24 +262,45 @@ async def scan_uploaded_files_by_ids(
             if not safe_name:
                 logger.warning(f"[scan] 跳过空文件名: upload_id={upload_id}")
                 continue
-            dst = work_dir / safe_name
-            shutil.copy2(src, dst)
+            dst = task_artifact_store.materialize_input(
+                user_id=current_user.id,
+                tool="asset-comparison-scan",
+                task_id=scan_id,
+                filename=safe_name,
+                source_path=src,
+            )
             logger.info(f"[scan] 复制 {info['filename']} -> {dst}")
 
         # 文件已复制到工作目录，删除源上传避免磁盘泄漏
         for upload_id in upload_ids:
             store.delete_owned(upload_id, current_user.id)
     except UploadOwnershipError as exc:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        task_artifact_store.delete_task(
+            user_id=current_user.id,
+            tool="asset-comparison-scan",
+            task_id=scan_id,
+        )
         raise HTTPException(status_code=403, detail="无权访问此上传") from exc
     except UploadNotFoundError as exc:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        task_artifact_store.delete_task(
+            user_id=current_user.id,
+            tool="asset-comparison-scan",
+            task_id=scan_id,
+        )
         raise HTTPException(status_code=404, detail="上传不存在") from exc
     except UploadNotCompleteError as exc:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        task_artifact_store.delete_task(
+            user_id=current_user.id,
+            tool="asset-comparison-scan",
+            task_id=scan_id,
+        )
         raise HTTPException(status_code=409, detail="上传尚未完成") from exc
     except Exception:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        task_artifact_store.delete_task(
+            user_id=current_user.id,
+            tool="asset-comparison-scan",
+            task_id=scan_id,
+        )
         raise
 
     # 扫描匹配
@@ -291,9 +320,9 @@ async def scan_uploaded_files_by_ids(
     return {
         "status": "success",
         "data": result,
-        "scan_id": work_dir.name,
+        "scan_id": scan_id,
         "debug": {
-            "folder": str(work_dir),
+            "folder": scan_id,
             "found_files": found_files,
             "matched": matched_log,
         },
@@ -997,11 +1026,14 @@ def create_asset_comparison_job(
 ):
     payload = req.model_dump()
     client_request_id = payload.pop("clientRequestId")
-    job, reused = asset_comparison_job_manager.create_job(
-        user_id=current_user.id,
-        client_request_id=client_request_id,
-        inputs=payload,
-    )
+    try:
+        job, reused = asset_comparison_job_manager.create_job(
+            user_id=current_user.id,
+            client_request_id=client_request_id,
+            inputs=payload,
+        )
+    except Exception as exc:
+        _raise_job_http_error(exc)
     return {
         **job,
         "reused": reused,

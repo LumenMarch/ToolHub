@@ -48,10 +48,16 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.on_event("startup")
 async def cleanup_expired_uploads() -> None:
-    """启动时清理超过 24 小时的未完成上传。"""
+    """启动时清理过期上传句柄、任务产物和内容缓存。"""
+    from app.core.config import settings
+    from app.services.task_artifacts import task_artifact_store
     from app.services.upload.store import UploadStore
 
     UploadStore().cleanup_expired(max_age_hours=24)
+    task_artifact_store.cleanup_expired_tasks()
+    task_artifact_store.cleanup_expired_blobs(
+        max_age_hours=settings.TASK_ARTIFACT_BLOB_TTL_HOURS
+    )
 
 
 @app.on_event("startup")

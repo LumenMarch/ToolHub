@@ -9,10 +9,13 @@ tus v1.0.0 — IETF 断点续传上传协议。
 import base64
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, Field
 
 from app.core.auth import require_permission
 from app.models.user import User
+from app.services.task_artifacts import ContentDigest
 from app.services.upload.store import (
+    UploadChecksumMismatchError,
     UploadLengthExceededError,
     UploadNotFoundError,
     UploadOffsetMismatchError,
@@ -24,6 +27,17 @@ router = APIRouter()
 store = UploadStore()
 
 MAX_SIZE = 100 * 1024 * 1024  # 100 MB
+
+
+class UploadCacheResolveRequest(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    content_type: str = Field(
+        default="application/octet-stream",
+        max_length=255,
+    )
+    size: int = Field(..., gt=0, le=MAX_SIZE)
+    md5: str = Field(..., pattern=r"^[A-Fa-f0-9]{32}$")
+    sha256: str = Field(..., pattern=r"^[A-Fa-f0-9]{64}$")
 
 
 # ------------------------------------------------------------------ helpers
@@ -128,6 +142,15 @@ async def tus_create(
     content_type = parsed.get("content_type", "")
     if content_type:
         meta["content_type"] = content_type
+    md5 = parsed.get("md5", "")
+    sha256 = parsed.get("sha256", "")
+    if md5 or sha256:
+        try:
+            digest = ContentDigest(md5=md5, sha256=sha256, size=upload_length)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        meta["md5"] = digest.md5
+        meta["sha256"] = digest.sha256
     meta["user_id"] = current_user.id
 
     upload_id = store.create(upload_length, metadata=meta)
@@ -221,6 +244,8 @@ async def tus_patch(
             status_code=413,
             detail="写入超出 Upload-Length",
         ) from None
+    except UploadChecksumMismatchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     headers = {
         "Upload-Offset": str(new_offset),
@@ -246,6 +271,32 @@ async def tus_delete(
 
 
 # ------------------------------------------------------------ 便利端点
+
+
+@router.post("/cache/resolve")
+async def resolve_upload_cache(
+    req: UploadCacheResolveRequest,
+    current_user: User = Depends(require_permission("tool:use")),
+) -> dict:
+    """用用户级内容摘要解析缓存，命中时返回新的上传句柄。"""
+    digest = ContentDigest(md5=req.md5, sha256=req.sha256, size=req.size)
+    blob = store.find_cached_blob(user_id=current_user.id, digest=digest)
+    if blob is None:
+        return {"cache_hit": False, "upload_id": None}
+
+    upload_id = store.create_cached_reference(
+        user_id=current_user.id,
+        filename=req.filename,
+        content_type=req.content_type,
+        blob=blob,
+    )
+    return {
+        "cache_hit": True,
+        "upload_id": upload_id,
+        "md5": digest.md5,
+        "sha256": digest.sha256,
+        "size": digest.size,
+    }
 
 
 @router.get("/{upload_id}/info")

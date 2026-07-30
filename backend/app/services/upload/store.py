@@ -1,20 +1,24 @@
 """tus 协议上传的本地文件存储。
 
-每个上传在磁盘上对应两个文件：
-  - {root}/{upload_id}       纯二进制数据
-  - {root}/{upload_id}.meta  JSON 元数据
+每个上传使用一个 JSON 句柄。未完成的数据存放在 ``.part`` 文件中，
+完成后发布到用户级内容缓存，上传句柄只保留摘要引用。
 """
 
 import fcntl
+import hashlib
 import json
 import os
-import tempfile
 import time
 import uuid
 from collections.abc import AsyncIterable
 from pathlib import Path
 
-UPLOAD_ROOT = Path(tempfile.gettempdir()) / "toolhub-uploads"
+from app.services.task_artifacts import (
+    CachedBlob,
+    ContentDigest,
+    TaskArtifactStore,
+    task_artifact_store,
+)
 
 
 class UploadNotFoundError(Exception):
@@ -53,17 +57,29 @@ class UploadOwnershipError(PermissionError):
     pass
 
 
+class UploadChecksumMismatchError(ValueError):
+    """上传内容与客户端声明的摘要不一致。"""
+
+    pass
+
+
 class UploadStore:
     """tus 上传的本地文件存储。"""
 
-    def __init__(self, root: Path | None = None) -> None:
-        self.root = root or UPLOAD_ROOT
+    def __init__(
+        self,
+        root: Path | None = None,
+        *,
+        artifact_store: TaskArtifactStore | None = None,
+    ) -> None:
+        self.artifact_store = artifact_store or task_artifact_store
+        self.root = root or self.artifact_store.upload_root
         self.root.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ helpers
 
     def _data_path(self, upload_id: str) -> Path:
-        return self.root / upload_id
+        return self.root / f"{upload_id}.part"
 
     def _meta_path(self, upload_id: str) -> Path:
         return self.root / f"{upload_id}.meta"
@@ -76,8 +92,11 @@ class UploadStore:
             return json.load(f)
 
     def _write_meta(self, upload_id: str, meta: dict) -> None:
-        with open(self._meta_path(upload_id), "w", encoding="utf-8") as f:
+        path = self._meta_path(upload_id)
+        temporary_path = self.root / f".{upload_id}.{uuid.uuid4().hex}.meta.tmp"
+        with open(temporary_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False)
+        os.replace(temporary_path, path)
 
     def _lock_file(self, fp) -> None:
         """获取 POSIX 排他锁（写锁）。"""
@@ -110,6 +129,11 @@ class UploadStore:
             "content_type": metadata.get("content_type", "application/octet-stream"),
             "created_at": time.time(),
             "user_id": metadata.get("user_id"),
+            "expected_md5": metadata.get("md5"),
+            "expected_sha256": metadata.get("sha256"),
+            "md5": None,
+            "sha256": None,
+            "cache_hit": False,
             "completed": False,
         }
 
@@ -117,6 +141,44 @@ class UploadStore:
         # 创建空数据文件
         self._data_path(upload_id).touch()
         return upload_id
+
+    def create_cached_reference(
+        self,
+        *,
+        user_id: int,
+        filename: str,
+        content_type: str,
+        blob: CachedBlob,
+    ) -> str:
+        """为缓存文件创建新的短期上传句柄。"""
+        upload_id = uuid.uuid4().hex
+        now = time.time()
+        self._write_meta(
+            upload_id,
+            {
+                "upload_length": blob.digest.size,
+                "filename": filename,
+                "content_type": content_type or "application/octet-stream",
+                "created_at": now,
+                "user_id": user_id,
+                "expected_md5": blob.digest.md5,
+                "expected_sha256": blob.digest.sha256,
+                "md5": blob.digest.md5,
+                "sha256": blob.digest.sha256,
+                "cache_hit": True,
+                "completed": True,
+            },
+        )
+        return upload_id
+
+    def find_cached_blob(
+        self,
+        *,
+        user_id: int,
+        digest: ContentDigest,
+    ) -> CachedBlob | None:
+        """查找属于指定用户且摘要完全一致的缓存文件。"""
+        return self.artifact_store.find_blob(user_id=user_id, digest=digest)
 
     async def write_stream(
         self,
@@ -161,21 +223,39 @@ class UploadStore:
 
         # 检查是否完成
         if new_offset >= upload_length:
-            meta["completed"] = True
-            self._write_meta(upload_id, meta)
+            try:
+                digest = self._calculate_digest(data_path)
+                self._validate_expected_digest(meta, digest)
+                self.artifact_store.publish_blob(
+                    user_id=meta["user_id"],
+                    source_path=data_path,
+                    digest=digest,
+                )
+                meta.update(
+                    {
+                        "completed": True,
+                        "md5": digest.md5,
+                        "sha256": digest.sha256,
+                    }
+                )
+                self._write_meta(upload_id, meta)
+            except Exception:
+                self.delete(upload_id)
+                raise
 
         return new_offset
 
     def get_offset(self, upload_id: str) -> int:
         """返回已上传字节数。"""
-        # 确保 meta 存在
-        self._read_meta(upload_id)
+        meta = self._read_meta(upload_id)
+        if meta.get("completed"):
+            return meta["upload_length"]
         return self._data_path(upload_id).stat().st_size
 
     def get_info(self, upload_id: str) -> dict:
         """返回上传信息。"""
         meta = self._read_meta(upload_id)
-        data_path = self._data_path(upload_id)
+        data_path = self._content_path(upload_id, meta)
         size = data_path.stat().st_size
         return {
             "upload_id": upload_id,
@@ -187,6 +267,9 @@ class UploadStore:
             "completed": meta.get("completed", False),
             "created_at": meta.get("created_at"),
             "user_id": meta.get("user_id"),
+            "md5": meta.get("md5"),
+            "sha256": meta.get("sha256"),
+            "cache_hit": meta.get("cache_hit", False),
         }
 
     def get_owned_info(self, upload_id: str, user_id: int) -> dict:
@@ -201,30 +284,27 @@ class UploadStore:
         meta = self._read_meta(upload_id)
         if not meta.get("completed"):
             raise UploadNotCompleteError(f"上传尚未完成: {upload_id}")
-        return self._data_path(upload_id).read_bytes()
+        return self._content_path(upload_id, meta).read_bytes()
 
     def read_owned_bytes(self, upload_id: str, user_id: int) -> bytes:
         """读取属于指定用户的完整上传内容。"""
-        info = self.get_owned_info(upload_id, user_id)
-        if not info.get("completed"):
-            raise UploadNotCompleteError(f"上传尚未完成: {upload_id}")
-        return self._data_path(upload_id).read_bytes()
+        self.get_owned_info(upload_id, user_id)
+        return self.read_bytes(upload_id)
 
     def get_file_path(self, upload_id: str) -> Path:
         """返回数据文件路径。"""
-        # 确保 meta 存在
-        self._read_meta(upload_id)
-        return self._data_path(upload_id)
+        meta = self._read_meta(upload_id)
+        if not meta.get("completed"):
+            raise UploadNotCompleteError(f"上传尚未完成: {upload_id}")
+        return self._content_path(upload_id, meta)
 
     def get_owned_file_path(self, upload_id: str, user_id: int) -> Path:
         """返回属于指定用户的完整上传文件路径。"""
-        info = self.get_owned_info(upload_id, user_id)
-        if not info.get("completed"):
-            raise UploadNotCompleteError(f"上传尚未完成: {upload_id}")
-        return self._data_path(upload_id)
+        self.get_owned_info(upload_id, user_id)
+        return self.get_file_path(upload_id)
 
     def delete(self, upload_id: str) -> None:
-        """删除上传文件及元数据。不存在则静默忽略。"""
+        """删除上传句柄和未完成分片，不删除共享内容缓存。"""
         data_path = self._data_path(upload_id)
         meta_path = self._meta_path(upload_id)
         try:
@@ -260,3 +340,39 @@ class UploadStore:
 
             if age > max_age:
                 self.delete(upload_id)
+
+    def _content_path(self, upload_id: str, meta: dict) -> Path:
+        sha256 = meta.get("sha256")
+        user_id = meta.get("user_id")
+        if meta.get("completed") and sha256 and user_id:
+            digest = ContentDigest(
+                md5=meta["md5"],
+                sha256=sha256,
+                size=meta["upload_length"],
+            )
+            blob = self.artifact_store.find_blob(user_id=user_id, digest=digest)
+            if blob is None:
+                raise UploadNotFoundError(f"上传缓存不存在: {upload_id}")
+            return blob.path
+        return self._data_path(upload_id)
+
+    @staticmethod
+    def _calculate_digest(path: Path) -> ContentDigest:
+        md5 = hashlib.md5(usedforsecurity=False)
+        sha256 = hashlib.sha256()
+        size = 0
+        with path.open("rb") as file:
+            while chunk := file.read(1024 * 1024):
+                md5.update(chunk)
+                sha256.update(chunk)
+                size += len(chunk)
+        return ContentDigest(md5=md5.hexdigest(), sha256=sha256.hexdigest(), size=size)
+
+    @staticmethod
+    def _validate_expected_digest(meta: dict, digest: ContentDigest) -> None:
+        expected_md5 = meta.get("expected_md5")
+        expected_sha256 = meta.get("expected_sha256")
+        if expected_md5 and expected_md5.lower() != digest.md5:
+            raise UploadChecksumMismatchError("上传内容的 MD5 校验失败")
+        if expected_sha256 and expected_sha256.lower() != digest.sha256:
+            raise UploadChecksumMismatchError("上传内容的 SHA-256 校验失败")
