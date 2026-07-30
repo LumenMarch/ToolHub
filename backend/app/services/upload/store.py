@@ -47,6 +47,12 @@ class UploadWriteConflictError(ValueError):
     pass
 
 
+class UploadOwnershipError(PermissionError):
+    """上传资源不属于当前用户。"""
+
+    pass
+
+
 class UploadStore:
     """tus 上传的本地文件存储。"""
 
@@ -183,6 +189,13 @@ class UploadStore:
             "user_id": meta.get("user_id"),
         }
 
+    def get_owned_info(self, upload_id: str, user_id: int) -> dict:
+        """返回属于指定用户的上传信息。"""
+        info = self.get_info(upload_id)
+        if info.get("user_id") != user_id:
+            raise UploadOwnershipError(f"无权访问此上传: {upload_id}")
+        return info
+
     def read_bytes(self, upload_id: str) -> bytes:
         """读取完整文件内容。仅 completed 时可读。"""
         meta = self._read_meta(upload_id)
@@ -190,10 +203,24 @@ class UploadStore:
             raise UploadNotCompleteError(f"上传尚未完成: {upload_id}")
         return self._data_path(upload_id).read_bytes()
 
+    def read_owned_bytes(self, upload_id: str, user_id: int) -> bytes:
+        """读取属于指定用户的完整上传内容。"""
+        info = self.get_owned_info(upload_id, user_id)
+        if not info.get("completed"):
+            raise UploadNotCompleteError(f"上传尚未完成: {upload_id}")
+        return self._data_path(upload_id).read_bytes()
+
     def get_file_path(self, upload_id: str) -> Path:
         """返回数据文件路径。"""
         # 确保 meta 存在
         self._read_meta(upload_id)
+        return self._data_path(upload_id)
+
+    def get_owned_file_path(self, upload_id: str, user_id: int) -> Path:
+        """返回属于指定用户的完整上传文件路径。"""
+        info = self.get_owned_info(upload_id, user_id)
+        if not info.get("completed"):
+            raise UploadNotCompleteError(f"上传尚未完成: {upload_id}")
         return self._data_path(upload_id)
 
     def delete(self, upload_id: str) -> None:
@@ -205,6 +232,11 @@ class UploadStore:
             meta_path.unlink(missing_ok=True)
         except OSError:
             pass
+
+    def delete_owned(self, upload_id: str, user_id: int) -> None:
+        """删除属于指定用户的上传文件及元数据。"""
+        self.get_owned_info(upload_id, user_id)
+        self.delete(upload_id)
 
     def _list_upload_ids(self) -> list[str]:
         """列出所有上传 ID（基于 .meta 文件）。"""
