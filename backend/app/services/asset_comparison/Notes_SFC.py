@@ -1,33 +1,3 @@
-class pyqtSignal:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def connect(self, *args, **kwargs):
-        pass
-
-    def emit(self, *args, **kwargs):
-        pass
-
-
-class QThread:
-    pass
-
-
-class QObject:
-    pass
-
-
-class QWidget:
-    pass
-
-
-def safe_thread_run(func):  # noqa: F811
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
@@ -42,17 +12,8 @@ from app.services.asset_comparison.TableParser import (  # noqa: E402
 )  # 使用自定義的 HTML 表格解析器  # noqa: E402, I001, UP015, F401
 
 
-class Notes_SFC(QThread):
-    _Notes_SFC_signal = pyqtSignal(int, int, int, int)
-    _unlock_signal = pyqtSignal()
-    _Error_signal = pyqtSignal()
-    _Save_signal = pyqtSignal(object)
-    _progress_signal = pyqtSignal(int, str)  # 進度信號：進度值, 進度文本
-    _Update_Message_signal = pyqtSignal(str)
-
-    def __init__(self, ui):
-        super().__init__()
-        self.ui = ui
+class Notes_SFC:
+    def __init__(self):
 
         self.Notes_new_assets = None
         self.Notes_removed_assets = None
@@ -72,27 +33,6 @@ class Notes_SFC(QThread):
         self.sfc_asset_col = "资产编号"  # 默认值
         self.notes_device_col = None
         self.sfc_device_col = None
-
-    @safe_thread_run
-    def run(self):
-        if not self.this_SFC_path or not self.this_Notes_path:
-            self._Update_Message_signal.emit("请选择文件")
-            return
-
-        self._Update_Message_signal.emit("Start")
-        try:
-            self._progress_signal.emit(10, "读取SFC数据...")
-            self.This_SFC_date()
-            self._progress_signal.emit(30, "读取Notes数据...")
-            self.This_Notes_date()
-            self._progress_signal.emit(60, "开始进行数据对比...")
-            self.Notes_SFC_Comparison()
-            self._progress_signal.emit(100, "对比完成")
-            self._unlock_signal.emit()
-        except Exception as e:
-            logger.exception(e)
-            self._Error_signal.emit()
-            self._unlock_signal.emit()
 
     def safe_read_excel(self, path):
         """安全讀取Excel或HTML偽裝的Excel，並轉為LazyFrame"""
@@ -308,8 +248,6 @@ class Notes_SFC(QThread):
                 return df_polars.select(non_null_cols)
 
             except Exception as e2:
-                self._unlock_signal.emit()
-                self._Error_signal.emit()
                 logger.exception(f"HTML解析也失敗: {e2}")
                 raise e2
 
@@ -325,8 +263,6 @@ class Notes_SFC(QThread):
                 logger.info(f"Notes数据列名: {list(self.this_Notes_data.columns)}")
                 logger.info(f"Notes数据形状: {self.this_Notes_data.shape}")
         except Exception as e:
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
             logger.exception(e)
 
     def This_SFC_date(self):
@@ -341,15 +277,12 @@ class Notes_SFC(QThread):
                 logger.info(f"SFC数据列名: {list(self.this_SFC_data.columns)}")
                 logger.info(f"SFC数据形状: {self.this_SFC_data.shape}")
         except Exception as e:
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
             logger.exception(e)
 
     def Notes_SFC_Comparison(self):
         """Notes與SFC數據比較（使用 pandas DataFrame）"""
         if self.this_Notes_data is None or self.this_SFC_data is None:
             logger.error("文件讀取錯誤，請檢查文件")
-            self._Error_signal.emit()
             return
         else:
             try:
@@ -361,7 +294,6 @@ class Notes_SFC(QThread):
                     sfc_asset_col = "資產編號"
                 else:
                     logger.error("SFC数据中未找到资产编号列")
-                    self._Error_signal.emit()
                     return
 
                 # 检测SFC设备编号列（用于资产编号为NA时降级）
@@ -396,7 +328,6 @@ class Notes_SFC(QThread):
                     notes_asset_col = "資產編號"
                 else:
                     logger.error("Notes数据中未找到资产编号列")
-                    self._Error_signal.emit()
                     return
 
                 # 检测Notes设备编号列
@@ -436,16 +367,7 @@ class Notes_SFC(QThread):
                 self.Notes_new_assets = notes_keys - sfc_keys
                 self.Notes_removed_assets = sfc_keys - notes_keys
 
-                self._Notes_SFC_signal.emit(
-                    len(self.this_Notes_assets),
-                    len(self.this_SFC_assets),
-                    len(self.Notes_new_assets),
-                    len(self.Notes_removed_assets),
-                )
-
             except Exception as e:
-                self._Error_signal.emit()
-                self._unlock_signal.emit()
                 logger.exception(e)
 
     def Save_Notes_SFC_Comparison(self):
@@ -697,7 +619,5 @@ class Notes_SFC(QThread):
                         for cell in r:
                             cell.border = thin
 
-                self._Save_signal.emit(self.ui.frame_5)
         except Exception as e:
-            self._unlock_signal.emit()
             logger.exception(e)

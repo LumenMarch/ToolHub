@@ -1,3 +1,6 @@
+import tempfile
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 
@@ -14,6 +17,15 @@ class Settings(BaseSettings):
 
     # Database
     SQLALCHEMY_DATABASE_URI: str = "sqlite:///./toolhub.db"
+
+    # 资产核对任务
+    ASSET_COMPARISON_ARTIFACT_ROOT: str = str(
+        Path(tempfile.gettempdir()) / "toolhub-asset-comparison-jobs"
+    )
+    ASSET_COMPARISON_MAX_ACTIVE_JOBS: int = 1
+    ASSET_COMPARISON_JOB_TTL_HOURS: int = 24
+    ASSET_COMPARISON_MAX_STORED_JOBS: int = 20
+    ASSET_COMPARISON_MAX_STORAGE_BYTES: int = 1024 * 1024 * 1024
 
     class Config:
         case_sensitive = True

@@ -1,37 +1,4 @@
-class pyqtSignal:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def connect(self, *args, **kwargs):
-        pass
-
-    def emit(self, *args, **kwargs):
-        pass
-
-
-class QThread:
-    pass
-
-
-class QObject:
-    pass
-
-
-class QWidget:
-    pass
-
-
-def safe_thread_run(func):  # noqa: F811
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-import sys  # noqa: E402, I001, UP015, F401
-import traceback  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
-from functools import wraps  # noqa: E402, I001, UP015, F401
 
 import pandas as pd  # noqa: E402, I001, UP015, F401
 from dateutil.relativedelta import relativedelta  # noqa: E402, I001, UP015, F401
@@ -42,72 +9,6 @@ current_date = datetime.now()
 this_month_str = current_date.strftime("%Y%m")
 last_month_date = current_date - relativedelta(months=1)
 last_month_str = last_month_date.strftime("%Y%m")
-
-
-# 全局异常信号管理器
-class GlobalExceptionHandler(QObject):
-    """全局异常处理器，用于在主线程显示错误弹窗"""
-
-    exception_signal = pyqtSignal(str, str, str)  # 错误类型、错误信息、详细信息
-
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-
-# 创建全局单例
-global_exception_handler = GlobalExceptionHandler()
-
-
-def safe_thread_run(run_method):  # noqa: F811
-    """
-    装饰器：为QThread的run方法添加异常处理
-    使用方法：
-        @safe_thread_run
-        def run(self):
-            # 线程代码
-    """
-
-    @wraps(run_method)
-    def wrapper(self):
-        try:
-            run_method(self)
-        except Exception:
-            # 捕获异常并格式化
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            error_msg = "".join(
-                traceback.format_exception(exc_type, exc_value, exc_traceback)
-            )
-
-            # 记录日志
-            try:
-                from loguru import logger  # noqa: E402, I001, UP015, F401
-
-                logger.error(f"线程异常 [{self.__class__.__name__}]:\n{error_msg}")
-            except Exception:
-                print(
-                    f"线程异常 [{self.__class__.__name__}]: {error_msg}",
-                    file=sys.stderr,
-                )
-
-            # 发送异常信号到主线程
-            global_exception_handler.exception_signal.emit(
-                exc_type.__name__ if exc_type else "未知错误",
-                str(exc_value) if exc_value else "发生未知错误",
-                error_msg,
-            )
-
-            # 如果线程有错误信号，也发送它
-            if hasattr(self, "_Error_signal"):
-                try:
-                    self._Error_signal.emit()
-                except Exception:
-                    pass
-
-    return wrapper
 
 
 def create_excel_template(SAVE_ALL_PATH):

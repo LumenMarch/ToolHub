@@ -1,33 +1,3 @@
-class pyqtSignal:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def connect(self, *args, **kwargs):
-        pass
-
-    def emit(self, *args, **kwargs):
-        pass
-
-
-class QThread:
-    pass
-
-
-class QObject:
-    pass
-
-
-class QWidget:
-    pass
-
-
-def safe_thread_run(func):  # noqa: F811
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
@@ -41,17 +11,8 @@ from app.services.asset_comparison.TableParser import (  # noqa: E402
 )  # 使用自定義的 HTML 表格解析器  # noqa: E402, I001, UP015, F401
 
 
-class SFC_SFC(QThread):
-    _SFC_SFC_Comparison = pyqtSignal(int, int, int, int)
-    _unlock_signal = pyqtSignal()
-    _Error_signal = pyqtSignal()
-    _Save_signal = pyqtSignal(object)
-    _progress_signal = pyqtSignal(int, str)  # 進度信號：進度值, 進度文本
-    _Update_Message_signal = pyqtSignal(str)
-
-    def __init__(self, ui):
-        super().__init__()
-        self.ui = ui
+class SFC_SFC:
+    def __init__(self):
         self.removed_count = None
         self.new_count = None
         self.removed_assets = None
@@ -63,27 +24,6 @@ class SFC_SFC(QThread):
 
         self.This_data_Path = None
         self.Last_data_path = None
-
-    @safe_thread_run
-    def run(self):
-        if not self.This_data_Path or not self.Last_data_path:
-            self._Update_Message_signal.emit("请选择文件")
-            return
-
-        self._Update_Message_signal.emit("Start")
-        try:
-            self._progress_signal.emit(10, "读取本月SFC数据...")
-            self.This_SFC_date()
-            self._progress_signal.emit(30, "读取上月SFC数据...")
-            self.Last_SFC_date()
-            self._progress_signal.emit(60, "开始进行数据对比...")
-            self.SFC_SFC_Comparison()
-            self._progress_signal.emit(100, "对比完成")
-            self._unlock_signal.emit()
-        except Exception as e:
-            logger.exception(e)
-            self._Error_signal.emit()
-            self._unlock_signal.emit()
 
     def safe_read_excel(self, path):
         """安全讀取Excel或HTML偽裝的Excel，並返回 pandas DataFrame"""
@@ -206,8 +146,6 @@ class SFC_SFC(QThread):
 
             except Exception as html_error:
                 logger.exception(f"HTML解析失敗: {html_error}")
-                self._unlock_signal.emit()
-                self._Error_signal.emit()
                 return None
 
         else:
@@ -315,8 +253,6 @@ class SFC_SFC(QThread):
                     logger.info(f"HTML回退解析成功，原始数据行数: {len(df_pandas)}")
                 except Exception as html_error:
                     logger.exception(f"HTML回退解析也失敗: {html_error}")
-                    self._unlock_signal.emit()
-                    self._Error_signal.emit()
                     return None
 
         # 統一的数据清理和过滤逻辑
@@ -386,8 +322,6 @@ class SFC_SFC(QThread):
 
         except Exception as e:
             logger.exception(f"数据清理和过滤失败: {e}")
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
             return None
 
     def This_SFC_date(self):
@@ -396,8 +330,6 @@ class SFC_SFC(QThread):
         try:
             self.this_SFC_data = self.safe_read_excel(self.This_data_Path)
         except Exception as e:
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
             logger.exception(e)
 
     def Last_SFC_date(self):
@@ -467,14 +399,7 @@ class SFC_SFC(QThread):
                 logger.info(f"新增资产数量: {new_count}")
                 logger.info(f"减少资产数量: {removed_count}")
 
-                if new_count > 0 or removed_count > 0:
-                    self._SFC_SFC_Comparison.emit(
-                        len(this_keys), len(last_keys), new_count, removed_count
-                    )
-                else:
-                    self._SFC_SFC_Comparison.emit(len(this_keys), len(last_keys), 0, 0)
             except Exception as e:
-                self._unlock_signal.emit()
                 logger.exception(e)
 
     def Save_SFC_SFC_Comparison(self):
@@ -729,8 +654,5 @@ class SFC_SFC(QThread):
                         for cell in row:
                             cell.border = thin_border
 
-                self._Save_signal.emit(self.ui.frame_2)
         except Exception as e:
-            self._Error_signal.emit()
-            self._unlock_signal.emit()
             logger.exception(e)
