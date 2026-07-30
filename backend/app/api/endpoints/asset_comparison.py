@@ -308,14 +308,6 @@ def _safe_len(d):
         return 0
 
 
-def _log_save_stage(stage: str, started_at: float, **details) -> float:
-    elapsed = perf_counter() - started_at
-    detail_text = " ".join(f"{key}={value!r}" for key, value in details.items())
-    suffix = f" {detail_text}" if detail_text else ""
-    logger.info(f"save: stage={stage} elapsed={elapsed:.3f}s{suffix}")
-    return elapsed
-
-
 def task_ff(req: ComparisonRequest):
     ff = Finance_Finance()
     ff.this_Finance_path = req.thisFinance
@@ -1420,15 +1412,7 @@ def _build_raw_data_xlsx_rustpy(
 
     with rx.FastExcel(buf, autofit=False) as fe:
         for safe_name, df in sheet_dfs:
-            sheet_started_at = perf_counter()
             fe.sheet(safe_name, df)
-            _log_save_stage(
-                "write_raw_data_sheet_rustpy",
-                sheet_started_at,
-                sheet=safe_name,
-                rows=len(df),
-                columns=len(df.columns),
-            )
 
     buf.seek(0)
     return buf
@@ -1458,18 +1442,10 @@ def _build_raw_data_xlsx(
     buf = io.BytesIO()
     workbook = xlsxwriter.Workbook(buf, {"constant_memory": True})
     for safe_name, df in sheet_dfs:
-        sheet_started_at = perf_counter()
         worksheet = workbook.add_worksheet(safe_name)
         worksheet.write_row(0, 0, list(df.columns))
         for r_idx, row in enumerate(df.iter_rows(named=False), start=1):
             worksheet.write_row(r_idx, 0, [_format_cell_value(v) for v in row])
-        _log_save_stage(
-            "write_raw_data_sheet",
-            sheet_started_at,
-            sheet=safe_name,
-            rows=len(df),
-            columns=len(df.columns),
-        )
     workbook.close()
     buf.seek(0)
     return buf
@@ -1505,8 +1481,6 @@ def _build_complete_export(
         ns = summary.get("ns")
         cn = summary.get("cn")
 
-        logger.info("save: run_comparisons 完成，开始准备模板")
-
         from app.services.asset_comparison.const import SAVE_CHECK_PATH
 
         if not os.path.exists(SAVE_CHECK_PATH):
@@ -1526,19 +1500,15 @@ def _build_complete_export(
         if os.path.exists(save_all_path):
             os.remove(save_all_path)
 
-        stage_started_at = perf_counter()
-        logger.info("save: create_excel_template 开始")
+        # Step 1: 结果表 Excel 模版导出
+        step1_started_at = perf_counter()
         try:
             create_excel_template(save_all_path)
         except Exception as err:
             logger.warning(f"Template creation err: {err}")
-        _log_save_stage("create_excel_template", stage_started_at)
-        logger.info("save: create_excel_template 完成，开始 load_workbook")
 
-        stage_started_at = perf_counter()
         wb = load_workbook(save_all_path)
         ws = wb["差异总结"]
-        logger.info("save: 工作簿加载完成，开始填充数据行")
 
         this_Finance_Custodian_assets = _safe_len(
             getattr(ff, "this_Custodian_assets", [])
@@ -1634,10 +1604,7 @@ def _build_complete_export(
             )
 
         wb.save(save_all_path)
-        _log_save_stage("write_summary_workbook", stage_started_at)
-        logger.info("save: 差异总结 Sheet 填充并保存完成，开始构建比对明细")
 
-        stage_started_at = perf_counter()
         comparisons = []
 
         # 1-财务 VS 财务
@@ -1894,18 +1861,9 @@ def _build_complete_export(
                     )
                 )
 
-        _log_save_stage(
-            "build_comparison_details",
-            stage_started_at,
-            sheet_count=len(comparisons),
-        )
-        logger.info("save: 比对明细构建完成，开始写入工作表")
-
-        stage_started_at = perf_counter()
         sheet_data_dict = {}
         wb = load_workbook(save_all_path)
         for sheet_name, diff_dict, comment in comparisons:
-            sheet_started_at = perf_counter()
             if sheet_name not in wb.sheetnames:
                 wb.create_sheet(sheet_name)
             ws_comp = wb[sheet_name]
@@ -1927,18 +1885,13 @@ def _build_complete_export(
                 )
                 if merged_df is not None and not merged_df.is_empty():
                     sheet_data_dict[sheet_name] = (merged_df, comment_text)
-            _log_save_stage("write_detail_sheet", sheet_started_at, sheet=sheet_name)
 
         wb.save(save_all_path)
-        _log_save_stage(
-            "write_detail_workbook",
-            stage_started_at,
-            sheet_count=len(comparisons),
-        )
-        logger.info("save: 比对明细工作表写入完成，开始生成 PDF")
+        step1_elapsed = perf_counter() - step1_started_at
+        logger.info(f"Step 1: 结果表 Excel 模版导出完成，耗时 {step1_elapsed:.3f}s")
 
-        # 生成 PDF
-        pdf_started_at = perf_counter()
+        # Step 2: PDF 导出会签表
+        step2_started_at = perf_counter()
         pdf_ok = False
         summary_pdf_path = os.path.join(
             SAVE_CHECK_PATH, f"TE&PE资产对比_{this_month_str}对比总结_summary.pdf"
@@ -1949,21 +1902,14 @@ def _build_complete_export(
 
         try:
             summary_ok = False
-            summary_pdf_started_at = perf_counter()
             try:
                 summary_ok = excel_sheet_to_pdf(
                     save_all_path, "差异总结", summary_pdf_path
                 )
             except Exception as sum_e:
                 logger.warning(f"总结PDF生成失败: {sum_e}")
-            _log_save_stage(
-                "generate_summary_pdf",
-                summary_pdf_started_at,
-                ok=summary_ok,
-            )
 
             detail_ok = False
-            detail_pdf_started_at = perf_counter()
             if sheet_data_dict:
                 try:
                     detail_ok = create_pdf_from_sheets(
@@ -1973,14 +1919,7 @@ def _build_complete_export(
                     )
                 except Exception as det_e:
                     logger.warning(f"明细PDF生成失败: {det_e}")
-            _log_save_stage(
-                "generate_detail_pdf",
-                detail_pdf_started_at,
-                ok=detail_ok,
-                sheet_count=len(sheet_data_dict),
-            )
 
-            merge_pdf_started_at = perf_counter()
             if (
                 summary_ok
                 and detail_ok
@@ -2002,7 +1941,6 @@ def _build_complete_export(
 
                 shutil.copy2(summary_pdf_path, save_pdf_path)
                 pdf_ok = True
-            _log_save_stage("merge_pdf", merge_pdf_started_at, ok=pdf_ok)
 
         except Exception as pdf_e:
             logger.warning(f"PDF生成处理出错: {pdf_e}")
@@ -2015,27 +1953,26 @@ def _build_complete_export(
                     except Exception as clean_e:
                         logger.warning(f"清理临时文件失败 ({tmp}): {clean_e}")
 
-        _log_save_stage("generate_pdf_total", pdf_started_at, ok=pdf_ok)
-        logger.info(f"save: PDF 生成完成 (ok={pdf_ok})")
+        step2_elapsed = perf_counter() - step2_started_at
+        logger.info(
+            f"Step 2: PDF 导出会签表完成，耗时 {step2_elapsed:.3f}s (ok={pdf_ok})"
+        )
 
-        # 生成原始数据 XLSX
-        stage_started_at = perf_counter()
-        logger.info("save: _build_raw_data_xlsx 开始")
+        # Step 3: 原始数据.xlsx 生成
+        step3_started_at = perf_counter()
         raw_buf = (
             io.BytesIO(raw_data)
             if raw_data is not None
             else _build_raw_data_xlsx(summary, this_month_str, last_month_str)
         )
-        _log_save_stage(
-            "build_raw_data_xlsx",
-            stage_started_at,
-            size_bytes=raw_buf.getbuffer().nbytes if raw_buf else 0,
+        step3_elapsed = perf_counter() - step3_started_at
+        raw_size = raw_buf.getbuffer().nbytes if raw_buf else 0
+        logger.info(
+            f"Step 3: 原始数据.xlsx 生成完成，耗时 {step3_elapsed:.3f}s，文件大小 {raw_size} 字节"
         )
-        logger.info("save: _build_raw_data_xlsx 完成")
 
-        # 打包 ZIP
-        stage_started_at = perf_counter()
-        logger.info("save: 开始打包 ZIP")
+        # Step 4: 导出包 ZIP 压缩打包
+        step4_started_at = perf_counter()
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
             # 对比总结 XLSX
@@ -2047,21 +1984,21 @@ def _build_complete_export(
             if raw_buf:
                 zf.writestr("原始数据.xlsx", raw_buf.getvalue())
         zip_buf.seek(0)
-        _log_save_stage(
-            "build_zip",
-            stage_started_at,
-            size_bytes=zip_buf.getbuffer().nbytes,
+        step4_elapsed = perf_counter() - step4_started_at
+        zip_size = zip_buf.getbuffer().nbytes
+        logger.info(
+            f"Step 4: 导出包 ZIP 压缩打包完成，耗时 {step4_elapsed:.3f}s，文件大小 {zip_size} 字节"
         )
 
         zip_filename = f"TE&PE资产对比_{this_month_str}.zip"
-        _log_save_stage("total", request_started_at, ok=True)
+        total_elapsed = perf_counter() - request_started_at
+        logger.info(f"导出包处理完成，总耗时 {total_elapsed:.3f}s")
         return zip_buf.getvalue(), zip_filename
 
     except Exception as e:
         elapsed = perf_counter() - request_started_at
         logger.error(
-            f"save: stage=total elapsed={elapsed:.3f}s ok=False "
-            f"error={e!r}\n{traceback.format_exc()}"
+            f"导出包处理出错，耗时 {elapsed:.3f}s: {e!r}\n{traceback.format_exc()}"
         )
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2073,9 +2010,11 @@ def save_results(
     _: None = Depends(require_tool_enabled("asset-comparison")),
 ):
     stage_started_at = perf_counter()
-    logger.info("save: run_comparisons 开始")
+    logger.info("资产对比 save 开始: run_comparisons")
     summary = run_comparisons(req)
-    _log_save_stage("run_comparisons", stage_started_at)
+    logger.info(
+        f"资产对比 run_comparisons 完成，耗时 {perf_counter() - stage_started_at:.3f}s"
+    )
     content, filename = _build_complete_export(req, summary)
     return StreamingResponse(
         io.BytesIO(content),

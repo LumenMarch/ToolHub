@@ -5,9 +5,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
+import rustpy_xlsxwriter  # noqa: F401
 import xlrd
+import xlsxwriter
+from loguru import logger
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -150,11 +154,17 @@ class AttendanceService:
         attendance_suffix: str,
         shift_content: bytes,
     ) -> AttendanceAnalysis:
+        # Step 1: 读取与解析考勤/班别文件
+        step1_started_at = perf_counter()
         shifts = self._load_shifts(shift_content)
         sheet_order, records = self._load_attendance(
             attendance_content, attendance_suffix
         )
+        step1_elapsed = perf_counter() - step1_started_at
+        logger.info(f"Step 1: 读取与解析考勤/班别文件完成，耗时 {step1_elapsed:.3f}s")
 
+        # Step 2: 班别算法与离岗分析计算
+        step2_started_at = perf_counter()
         missing_shift_ids = sorted(
             {record.emp_id for record in records} - shifts.keys()
         )
@@ -183,6 +193,9 @@ class AttendanceService:
             missing_records,
         )
         output_rows = [row for sheet in sheets for row in sheet.rows]
+        step2_elapsed = perf_counter() - step2_started_at
+        logger.info(f"Step 2: 班别算法与离岗分析计算完成，耗时 {step2_elapsed:.3f}s")
+
         return AttendanceAnalysis(
             summary=AttendanceSummary(
                 total_records=len(output_rows),
@@ -207,7 +220,14 @@ class AttendanceService:
         )
 
     def export(self, analysis: AttendanceAnalysis) -> bytes:
-        return self._export(analysis.sheets)
+        step3_started_at = perf_counter()
+        output, engine = self._export(analysis.sheets)
+        step3_elapsed = perf_counter() - step3_started_at
+        size_bytes = len(output)
+        logger.info(
+            f"Step 3: Excel 报表导出完成 ({engine})，耗时 {step3_elapsed:.3f}s，文件大小 {size_bytes} 字节"
+        )
+        return output
 
     def _load_shifts(self, content: bytes) -> dict[str, ShiftSchedule]:
         try:
@@ -680,6 +700,55 @@ class AttendanceService:
         return output_sheets
 
     def _export(
+        self,
+        sheets: tuple[AttendanceOutputSheet, ...],
+    ) -> tuple[bytes, str]:
+        try:
+            return self._export_rustpy(sheets), "rustpy-xlsxwriter"
+        except Exception as exc:
+            logger.warning(f"rustpy_xlsxwriter 导出失败，降级回退到 openpyxl: {exc}")
+            return self._export_openpyxl(sheets), "openpyxl"
+
+    def _export_rustpy(
+        self,
+        sheets: tuple[AttendanceOutputSheet, ...],
+    ) -> bytes:
+        output = BytesIO()
+        workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+
+        title_format = workbook.add_format({"bold": True, "font_size": 12})
+        header_format = workbook.add_format(
+            {
+                "bg_color": "#34495E",
+                "font_color": "#FFFFFF",
+                "bold": True,
+            }
+        )
+
+        tone_formats = {
+            "success": workbook.add_format({"bg_color": "#C6EFCE"}),
+            "danger": workbook.add_format({"bg_color": "#FFC7CE"}),
+            "warning": workbook.add_format({"bg_color": "#FFEB9C"}),
+        }
+
+        for output_sheet in sheets:
+            worksheet = workbook.add_worksheet(output_sheet.name)
+            worksheet.merge_range("A1:P1", "通行记录", title_format)
+            worksheet.write_row(1, 0, OUTPUT_HEADERS, header_format)
+
+            for row_index, output_row in enumerate(output_sheet.rows, start=2):
+                fmt = tone_formats.get(output_row.tone)
+                if fmt:
+                    worksheet.write_row(row_index, 0, output_row.values, fmt)
+                else:
+                    worksheet.write_row(row_index, 0, output_row.values)
+
+            worksheet.autofit()
+
+        workbook.close()
+        return output.getvalue()
+
+    def _export_openpyxl(
         self,
         sheets: tuple[AttendanceOutputSheet, ...],
     ) -> bytes:
