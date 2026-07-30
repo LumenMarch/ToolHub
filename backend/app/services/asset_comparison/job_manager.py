@@ -19,6 +19,13 @@ from app.models.asset_comparison_job import AssetComparisonJob
 MODULE_ORDER = ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
 BASE_ARTIFACT_KEYS = [*(f"module_{key}" for key in MODULE_ORDER), "raw_data_xlsx"]
 REVIEW_VALUES = {"差異確認OK", "待跟进", "異常"}
+ACTIVE_JOB_STATUSES = {
+    "queued",
+    "validating",
+    "running",
+    "finalizing",
+    "cancel_requested",
+}
 
 
 class AssetComparisonJobNotFoundError(LookupError):
@@ -273,6 +280,16 @@ class AssetComparisonJobManager:
             db.commit()
             db.refresh(job)
             return self._serialize(job)
+
+    def purge(self, *, user_id: int, job_id: str) -> None:
+        with self._lock, SessionLocal() as db:
+            job = self._get_owned_job(db, user_id, job_id)
+            if job.status in ACTIVE_JOB_STATUSES:
+                raise AssetComparisonJobConflictError("任务仍在运行，暂时无法删除")
+            self._delete_job_files(job.user_id, job.id, ignore_errors=False)
+            self._runtime.pop(job.id, None)
+            db.delete(job)
+            db.commit()
 
     def open_artifact(
         self,
@@ -728,8 +745,16 @@ class AssetComparisonJobManager:
     def _job_dir(self, user_id: int, job_id: str) -> Path:
         return self._artifact_root / str(user_id) / job_id
 
-    def _delete_job_files(self, user_id: int, job_id: str) -> None:
-        shutil.rmtree(self._job_dir(user_id, job_id), ignore_errors=True)
+    def _delete_job_files(
+        self,
+        user_id: int,
+        job_id: str,
+        *,
+        ignore_errors: bool = True,
+    ) -> None:
+        job_dir = self._job_dir(user_id, job_id)
+        if ignore_errors or job_dir.exists():
+            shutil.rmtree(job_dir, ignore_errors=ignore_errors)
 
     def _cleanup_storage_limit(self) -> None:
         with self._lock, SessionLocal() as db:

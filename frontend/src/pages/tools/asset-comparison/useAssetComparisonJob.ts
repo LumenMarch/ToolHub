@@ -55,11 +55,15 @@ export function useAssetComparisonJob() {
   const [job, setJob] = useState<AssetComparisonJob | null>(null);
   const [error, setError] = useState('');
   const jobRef = useRef<AssetComparisonJob | null>(null);
+  const detachedJobIdsRef = useRef(new Set<string>());
   const annotationQueueRef = useRef<Promise<AssetComparisonJob | null>>(
     Promise.resolve(null),
   );
 
   const updateJob = useCallback((nextJob: AssetComparisonJob | null) => {
+    if (nextJob && detachedJobIdsRef.current.has(nextJob.jobId)) {
+      return;
+    }
     const currentJob = jobRef.current;
     if (
       nextJob
@@ -88,6 +92,7 @@ export function useAssetComparisonJob() {
   const refresh = useCallback(async (jobId?: string) => {
     const targetJobId = jobId ?? jobRef.current?.jobId;
     if (!targetJobId) return null;
+    if (detachedJobIdsRef.current.has(targetJobId)) return null;
     try {
       const response = await api.get<AssetComparisonJob>(
         `/tools/asset/jobs/${targetJobId}`,
@@ -96,6 +101,9 @@ export function useAssetComparisonJob() {
       updateJob(response.data);
       return response.data;
     } catch (refreshError: unknown) {
+      if (detachedJobIdsRef.current.has(targetJobId)) {
+        return null;
+      }
       const status = (
         refreshError as { response?: { status?: number } }
       ).response?.status;
@@ -157,6 +165,9 @@ export function useAssetComparisonJob() {
           updateJob(response.data);
           return response.data;
         } catch (saveError: unknown) {
+          if (detachedJobIdsRef.current.has(currentJob.jobId)) {
+            return null;
+          }
           setError(readError(saveError));
           if (
             (saveError as { response?: { status?: number } }).response?.status
@@ -212,6 +223,32 @@ export function useAssetComparisonJob() {
     return response.data;
   }, [updateJob]);
 
+  const reset = useCallback(async () => {
+    const currentJobId = (
+      jobRef.current?.jobId
+      ?? sessionStorage.getItem(STORAGE_KEY)
+    );
+    if (currentJobId) {
+      try {
+        await api.delete(`/tools/asset/jobs/${currentJobId}/purge`);
+      } catch (purgeError: unknown) {
+        const status = (
+          purgeError as { response?: { status?: number } }
+        ).response?.status;
+        if (status !== 404 && status !== 410) {
+          setError(readError(purgeError));
+          throw purgeError;
+        }
+      }
+      detachedJobIdsRef.current.add(currentJobId);
+    }
+    annotationQueueRef.current = Promise.resolve(null);
+    jobRef.current = null;
+    setJob(null);
+    setError('');
+    sessionStorage.removeItem(STORAGE_KEY);
+  }, []);
+
   const download = useCallback((artifactKey: string) => {
     const downloadUrl = jobRef.current?.artifacts[artifactKey]?.downloadUrl;
     if (!downloadUrl) return;
@@ -232,6 +269,7 @@ export function useAssetComparisonJob() {
     finalize,
     retry,
     cancel,
+    reset,
     download,
   };
 }

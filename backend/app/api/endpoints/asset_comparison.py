@@ -1087,6 +1087,22 @@ def cancel_asset_comparison_job(
         _raise_job_http_error(exc)
 
 
+@router.delete("/jobs/{job_id}/purge")
+def purge_asset_comparison_job(
+    job_id: str,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    try:
+        asset_comparison_job_manager.purge(
+            user_id=current_user.id,
+            job_id=job_id,
+        )
+        return {"status": "success"}
+    except Exception as exc:
+        _raise_job_http_error(exc)
+
+
 def _safe_to_pandas(df):
     if df is None:
         import pandas as pd
