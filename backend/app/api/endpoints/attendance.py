@@ -1,9 +1,11 @@
 from dataclasses import asdict
 from datetime import datetime
+from time import perf_counter
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -65,6 +67,8 @@ def process_attendance(
     current_user: User = Depends(require_permission("tool:use")),
     __: None = Depends(require_tool_enabled("attendance-organizer")),
 ) -> Response:
+    start_time = perf_counter()
+    logger.info("考勤整理 process 开始")
     try:
         attendance_info = store.get_info(req.attendance_upload_id)
         shift_info = store.get_info(req.shift_upload_id)
@@ -81,6 +85,8 @@ def process_attendance(
         )
     except AttendanceValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elapsed = perf_counter() - start_time
+    logger.info(f"考勤整理 process 完成，总耗时 {elapsed:.3f}s")
 
     log_action(
         db,
@@ -107,6 +113,8 @@ def analyze_attendance(
     current_user: User = Depends(require_permission("tool:use")),
     __: None = Depends(require_tool_enabled("attendance-organizer")),
 ) -> AttendanceAnalyzeResponse:
+    start_time = perf_counter()
+    logger.info("考勤整理 analyze 开始")
     try:
         attendance_info = store.get_info(req.attendance_upload_id)
         shift_info = store.get_info(req.shift_upload_id)
@@ -125,6 +133,8 @@ def analyze_attendance(
         output = service.export(analysis)
     except AttendanceValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elapsed = perf_counter() - start_time
+    logger.info(f"考勤整理 analyze 完成，总耗时 {elapsed:.3f}s")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"出勤整理_完整_{timestamp}.xlsx"
