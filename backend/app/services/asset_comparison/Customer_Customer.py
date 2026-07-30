@@ -1,33 +1,3 @@
-class pyqtSignal:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def connect(self, *args, **kwargs):
-        pass
-
-    def emit(self, *args, **kwargs):
-        pass
-
-
-class QThread:
-    pass
-
-
-class QObject:
-    pass
-
-
-class QWidget:
-    pass
-
-
-def safe_thread_run(func):  # noqa: F811
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
@@ -38,18 +8,8 @@ from app.services.asset_comparison.const import CUSTOMER_CUSTOMER_SAVE_PATH  # n
 from loguru import logger  # noqa: E402, I001, UP015, F401
 
 
-class Customer_Customer(QThread):
-    _Customer_Customer_signal = pyqtSignal(int, int, int, int)
-    _unlock_signal = pyqtSignal()
-    _Error_signal = pyqtSignal()
-    _Save_signal = pyqtSignal(object)
-    _progress_signal = pyqtSignal(int, str)
-    _Update_Message_signal = pyqtSignal(str)
-
-    # 進度信號：進度值, 進度文本
-    def __init__(self, ui):
-        super().__init__()
-        self.ui = ui
+class Customer_Customer:
+    def __init__(self):
 
         self.last_Customer_assets = None
         self.this_Customer_assets = None
@@ -63,33 +23,6 @@ class Customer_Customer(QThread):
 
         self.new_Customer_assets = None
         self.removed_Customer_assets = None
-
-    @safe_thread_run
-    def run(self):
-        if (
-            not self.this_Customer_path
-            or not self.last_Customer_path
-            or not self.Custodian_DRI_path
-        ):
-            self._Update_Message_signal.emit("请选择文件")
-            return
-
-        self._Update_Message_signal.emit("Start")
-        try:
-            self._progress_signal.emit(15, "讀取DRI數據...")
-            self.get_Customer_DRI()
-            self._progress_signal.emit(35, "讀取本月客戶數據...")
-            self.read_this_Customer_data()
-            self._progress_signal.emit(65, "讀取上月客戶數據...")
-            self.read_last_Customer_data()
-            self._progress_signal.emit(85, "開始客戶數據對比...")
-            self.Customer_Customer_Comparison()
-            self._progress_signal.emit(100, "對比完成")
-            self._unlock_signal.emit()
-        except Exception as e:
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
-            logger.exception(e)
 
     def safe_read_excel(self, path):
         """安全讀取Excel並轉為LazyFrame"""
@@ -156,7 +89,6 @@ class Customer_Customer(QThread):
 
         except Exception as e:
             logger.exception(f"读取 {os.path.basename(path)} 失败: {e}")
-            self._unlock_signal.emit()
             raise
 
     def get_Customer_DRI(self):
@@ -214,24 +146,7 @@ class Customer_Customer(QThread):
                     self.this_Customer_assets
                 )
 
-                if self.new_Customer_assets or self.removed_Customer_assets:
-                    self._Customer_Customer_signal.emit(
-                        len(self.this_Customer_assets),
-                        len(self.last_Customer_assets),
-                        len(self.new_Customer_assets),
-                        len(self.removed_Customer_assets),
-                    )
-                else:
-                    self._Customer_Customer_signal.emit(
-                        len(self.this_Customer_assets),
-                        len(self.last_Customer_assets),
-                        0,
-                        0,
-                    )
-
             except Exception as e:
-                self._unlock_signal.emit()
-                self._Error_signal.emit()
                 logger.exception(e)
 
     def Save_Customer_Customer_Comparison(self):
@@ -383,8 +298,5 @@ class Customer_Customer(QThread):
                         for cell in r:
                             cell.border = thin
 
-                self._Save_signal.emit(self.ui.frame_6)
-
         except Exception as e:
-            self._unlock_signal.emit()
             logger.exception(e)

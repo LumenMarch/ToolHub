@@ -2,18 +2,20 @@ import io
 import os
 import shutil
 import tempfile
+import threading
 import traceback
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from urllib.parse import quote
 
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field
@@ -21,10 +23,21 @@ from PyPDF2 import PdfMerger
 
 from app.core.auth import require_permission, require_tool_enabled
 from app.models.user import User
+from app.schemas.asset_comparison import (
+    AssetComparisonAnnotationsUpdate,
+    AssetComparisonJobCreate,
+)
 from app.services.asset_comparison.Customer_Customer import Customer_Customer
 from app.services.asset_comparison.Customer_Notes import Customer_Notes
 from app.services.asset_comparison.Finance_Finance import Finance_Finance
 from app.services.asset_comparison.Finance_Notes import Finance_Notes
+from app.services.asset_comparison.job_manager import (
+    AssetComparisonJobConflictError,
+    AssetComparisonJobExpiredError,
+    AssetComparisonJobManager,
+    AssetComparisonJobNotFoundError,
+    AssetComparisonJobValidationError,
+)
 from app.services.asset_comparison.Notes_Notes import Notes_Notes
 from app.services.asset_comparison.Notes_SFC import Notes_SFC
 from app.services.asset_comparison.SFC_SFC import SFC_SFC
@@ -293,8 +306,16 @@ def _safe_len(d):
         return 0
 
 
+def _log_save_stage(stage: str, started_at: float, **details) -> float:
+    elapsed = perf_counter() - started_at
+    detail_text = " ".join(f"{key}={value!r}" for key, value in details.items())
+    suffix = f" {detail_text}" if detail_text else ""
+    logger.info(f"save: stage={stage} elapsed={elapsed:.3f}s{suffix}")
+    return elapsed
+
+
 def task_ff(req: ComparisonRequest):
-    ff = Finance_Finance(None)
+    ff = Finance_Finance()
     ff.this_Finance_path = req.thisFinance
     ff.last_Finance_path = req.lastFinance
     ff.Custodian_path = req.custodianData
@@ -355,7 +376,7 @@ def task_ff(req: ComparisonRequest):
 
 
 def task_sfc(req: ComparisonRequest):
-    sfc = SFC_SFC(None)
+    sfc = SFC_SFC()
     sfc.This_data_Path = req.thisSFC
     sfc.Last_data_path = req.lastSFC
     info = None
@@ -382,7 +403,7 @@ def task_sfc(req: ComparisonRequest):
 
 
 def task_nn(req: ComparisonRequest):
-    nn = Notes_Notes(None)
+    nn = Notes_Notes()
     nn.This_Notes_path = req.thisNotes
     nn.Last_Notes_path = req.lastNotes
     info = None
@@ -413,7 +434,7 @@ def task_nn(req: ComparisonRequest):
 
 
 def task_cc(req: ComparisonRequest):
-    cc = Customer_Customer(None)
+    cc = Customer_Customer()
     cc.this_Customer_path = req.thisCustomer
     cc.last_Customer_path = req.lastCustomer
     cc.Custodian_DRI_path = req.driData
@@ -444,7 +465,7 @@ def task_cc(req: ComparisonRequest):
 
 
 def task_fn(req: ComparisonRequest):
-    fn = Finance_Notes(None)
+    fn = Finance_Notes()
     fn.Finance_path = req.thisFinance
     fn.Notes_path = req.thisNotes
     fn.Custodian_path = req.custodianData
@@ -473,7 +494,7 @@ def task_fn(req: ComparisonRequest):
 
 
 def task_ns(req: ComparisonRequest):
-    ns = Notes_SFC(None)
+    ns = Notes_SFC()
     ns.this_Notes_path = req.thisNotes
     ns.this_SFC_path = req.thisSFC
     info = None
@@ -502,7 +523,7 @@ def task_ns(req: ComparisonRequest):
 
 
 def task_cn(req: ComparisonRequest):
-    cn = Customer_Notes(None)
+    cn = Customer_Notes()
     cn.this_Customer_path = req.thisCustomer
     cn.this_Notes_path = req.thisNotes
     cn.this_Customer_DRI_path = req.driData
@@ -530,7 +551,7 @@ def task_cn(req: ComparisonRequest):
     return "cn", cn, info
 
 
-def run_comparisons(req: ComparisonRequest):
+def run_comparisons(req: ComparisonRequest, on_complete=None):
     summary = {}
     results_info = []
 
@@ -545,11 +566,13 @@ def run_comparisons(req: ComparisonRequest):
             executor.submit(task_ns, req),
             executor.submit(task_cn, req),
         ]
-        for future in futures:
+        for future in as_completed(futures):
             key, instance, info = future.result()
             summary[key] = instance
             if info:
                 results_info.append(info)
+            if on_complete is not None:
+                on_complete(key, instance, info)
 
     # 排序以保持输出顺序稳定
     order = ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
@@ -621,6 +644,463 @@ def check_data(
             "message": str(e),
             "errors": [traceback.format_exc()],
         }
+
+
+_legacy_export_lock = threading.Lock()
+_RAW_SOURCE_MODULES = {"ff", "nn", "sfc", "cc"}
+
+
+def _module_export_definition(module_key: str):
+    from app.services.asset_comparison.const import (
+        CUSTOMER_CUSTOMER_SAVE_PATH,
+        CUSTOMER_NOTES_SAVE_PATH,
+        FINANCE_FINANCE_SAVE_PATH,
+        FINANCE_NOTES_SAVE_PATH,
+        NOTES_NOTES_SAVE_PATH,
+        NOTES_SFC_SAVE_PATH,
+        SFC_SFC_SAVE_PATH,
+    )
+
+    definitions = {
+        "ff": ("Save_Check", Path(FINANCE_FINANCE_SAVE_PATH)),
+        "nn": ("Save_Notes_Notes_Comparison", Path(NOTES_NOTES_SAVE_PATH)),
+        "sfc": ("Save_SFC_SFC_Comparison", Path(SFC_SFC_SAVE_PATH)),
+        "cc": (
+            "Save_Customer_Customer_Comparison",
+            Path(CUSTOMER_CUSTOMER_SAVE_PATH),
+        ),
+        "fn": ("Save_Finance_Notes_Comparison", Path(FINANCE_NOTES_SAVE_PATH)),
+        "ns": ("Save_Notes_SFC_Comparison", Path(NOTES_SFC_SAVE_PATH)),
+        "cn": ("Save_Customer_Notes_Comparison", Path(CUSTOMER_NOTES_SAVE_PATH)),
+    }
+    try:
+        return definitions[module_key]
+    except KeyError as exc:
+        raise ValueError(f"未知的核对模块: {module_key}") from exc
+
+
+def _write_no_difference_workbook(path: Path, label: str) -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "對比結果"
+    worksheet["A1"] = label
+    worksheet["A2"] = "本次核对未发现差异"
+    worksheet.column_dimensions["A"].width = 48
+    workbook.save(path)
+
+
+def _build_module_job_artifact(
+    module_key: str,
+    instance,
+    result: dict,
+    job_dir: Path,
+) -> dict:
+    method_name, legacy_path = _module_export_definition(module_key)
+    target_path = job_dir / f"module-{module_key}.xlsx"
+    temporary_path = target_path.with_suffix(".xlsx.tmp")
+
+    with _legacy_export_lock:
+        temporary_path.unlink(missing_ok=True)
+        if result.get("has_diff"):
+            legacy_path.unlink(missing_ok=True)
+            getattr(instance, method_name)()
+            if not legacy_path.is_file():
+                raise RuntimeError(f"{result['label']}文件生成失败")
+            shutil.copy2(legacy_path, temporary_path)
+        else:
+            _write_no_difference_workbook(temporary_path, result["label"])
+        os.replace(temporary_path, target_path)
+
+    return {
+        "path": target_path.name,
+        "filename": legacy_path.name,
+        "content_type": (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        "size_bytes": target_path.stat().st_size,
+    }
+
+
+def _build_raw_job_artifact(summary: dict, job_dir: Path) -> dict:
+    current_date = datetime.now()
+    this_month_str = current_date.strftime("%Y%m")
+    last_month_str = (current_date - relativedelta(months=1)).strftime("%Y%m")
+    raw_buffer = _build_raw_data_xlsx(summary, this_month_str, last_month_str)
+    if raw_buffer is None:
+        raise RuntimeError("没有可供导出的原始数据")
+
+    target_path = job_dir / "raw-data.xlsx"
+    temporary_path = target_path.with_suffix(".xlsx.tmp")
+    temporary_path.write_bytes(raw_buffer.getvalue())
+    os.replace(temporary_path, target_path)
+    return {
+        "path": target_path.name,
+        "filename": "原始数据.xlsx",
+        "content_type": (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        "size_bytes": target_path.stat().st_size,
+    }
+
+
+def _execute_asset_comparison_job(
+    job_id: str,
+    inputs: dict[str, str],
+    job_dir: Path,
+    emit,
+    is_cancel_requested,
+):
+    missing_inputs = [key for key, value in inputs.items() if not str(value).strip()]
+    invalid_paths = [
+        key
+        for key, value in inputs.items()
+        if str(value).strip() and not Path(value).is_file()
+    ]
+    if missing_inputs:
+        raise ValueError(f"缺少输入文件: {', '.join(missing_inputs)}")
+    if invalid_paths:
+        raise ValueError(f"输入文件不存在: {', '.join(invalid_paths)}")
+
+    emit("validation_ready")
+    for module_key in ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]:
+        emit("comparison_started", module_key=module_key)
+
+    request = ComparisonRequest(**inputs)
+    partial_summary = {}
+    results_by_key = {}
+    raw_future = None
+
+    with ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix=f"asset-raw-{job_id[:8]}",
+    ) as raw_executor:
+
+        def on_complete(module_key, instance, info):
+            nonlocal raw_future
+            partial_summary[module_key] = instance
+            result = info or {
+                "key": module_key,
+                "label": module_key,
+                "has_diff": False,
+                "msg": "异常: 核对模块没有返回结果",
+            }
+            results_by_key[module_key] = result
+            if result.get("msg", "").startswith("异常:"):
+                emit("comparison_failed", result=result)
+            else:
+                emit("comparison_ready", result=result)
+                emit(
+                    "artifact_building",
+                    artifact_key=f"module_{module_key}",
+                )
+                try:
+                    artifact = _build_module_job_artifact(
+                        module_key,
+                        instance,
+                        result,
+                        job_dir,
+                    )
+                    emit(
+                        "artifact_ready",
+                        artifact_key=f"module_{module_key}",
+                        **artifact,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        f"asset module artifact failed: "
+                        f"job_id={job_id} module={module_key} error={exc}"
+                    )
+                    emit(
+                        "artifact_failed",
+                        artifact_key=f"module_{module_key}",
+                        error=str(exc),
+                    )
+
+            if raw_future is None and _RAW_SOURCE_MODULES.issubset(partial_summary):
+                emit("artifact_building", artifact_key="raw_data_xlsx")
+                raw_future = raw_executor.submit(
+                    _build_raw_job_artifact,
+                    {key: partial_summary[key] for key in _RAW_SOURCE_MODULES},
+                    job_dir,
+                )
+
+        summary = run_comparisons(request, on_complete=on_complete)
+
+        if is_cancel_requested():
+            return {
+                "summary": summary,
+                "inputs": inputs,
+                "results": results_by_key,
+            }
+
+        if raw_future is None:
+            emit("artifact_building", artifact_key="raw_data_xlsx")
+            raw_future = raw_executor.submit(
+                _build_raw_job_artifact,
+                summary,
+                job_dir,
+            )
+        try:
+            raw_artifact = raw_future.result()
+            emit(
+                "artifact_ready",
+                artifact_key="raw_data_xlsx",
+                **raw_artifact,
+            )
+        except Exception as exc:
+            logger.exception(f"asset raw artifact failed: job_id={job_id} error={exc}")
+            emit(
+                "artifact_failed",
+                artifact_key="raw_data_xlsx",
+                error=str(exc),
+            )
+
+    return {
+        "summary": summary,
+        "inputs": inputs,
+        "results": results_by_key,
+    }
+
+
+def _finalize_asset_comparison_job(
+    job_id: str,
+    runtime: dict,
+    job_dir: Path,
+    remarks: dict[str, str],
+    reviews: dict[str, str],
+) -> dict:
+    effective_reviews = {
+        key: reviews.get(key, "差異確認OK")
+        for key in ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
+    }
+    request = ComparisonRequest(
+        **runtime["inputs"],
+        remarks=remarks,
+        reviews=effective_reviews,
+    )
+    raw_path = job_dir / "raw-data.xlsx"
+    if not raw_path.is_file():
+        raise RuntimeError("原始数据文件不存在")
+
+    with _legacy_export_lock:
+        content, filename = _build_complete_export(
+            request,
+            runtime["summary"],
+            raw_data=raw_path.read_bytes(),
+        )
+    target_path = job_dir / "complete.zip"
+    temporary_path = target_path.with_suffix(".zip.tmp")
+    temporary_path.write_bytes(content)
+    os.replace(temporary_path, target_path)
+    return {
+        "path": target_path.name,
+        "filename": filename,
+        "content_type": "application/zip",
+        "size_bytes": target_path.stat().st_size,
+    }
+
+
+def _retry_asset_comparison_artifact(
+    job_id: str,
+    artifact_key: str,
+    runtime: dict,
+    job_dir: Path,
+) -> dict:
+    if artifact_key == "raw_data_xlsx":
+        return _build_raw_job_artifact(runtime["summary"], job_dir)
+    if artifact_key.startswith("module_"):
+        module_key = artifact_key.removeprefix("module_")
+        result = runtime["results"][module_key]
+        instance = runtime["summary"][module_key]
+        retried_result = None
+        if result.get("msg", "").startswith("异常:"):
+            task_by_key = {
+                "ff": task_ff,
+                "sfc": task_sfc,
+                "nn": task_nn,
+                "cc": task_cc,
+                "fn": task_fn,
+                "ns": task_ns,
+                "cn": task_cn,
+            }
+            _, instance, result = task_by_key[module_key](
+                ComparisonRequest(**runtime["inputs"])
+            )
+            if result is None or result.get("msg", "").startswith("异常:"):
+                message = result.get("msg") if result else "核对模块没有返回结果"
+                raise RuntimeError(message)
+            runtime["summary"][module_key] = instance
+            runtime["results"][module_key] = result
+            retried_result = result
+
+        artifact = _build_module_job_artifact(
+            module_key,
+            instance,
+            result,
+            job_dir,
+        )
+        if retried_result is not None:
+            artifact["_comparison_result"] = retried_result
+        return artifact
+    raise ValueError(f"不支持重试的产物: {artifact_key}")
+
+
+asset_comparison_job_manager = AssetComparisonJobManager(
+    execute_job=_execute_asset_comparison_job,
+    finalize_job=_finalize_asset_comparison_job,
+    retry_artifact=_retry_asset_comparison_artifact,
+)
+
+
+def _raise_job_http_error(exc: Exception):
+    if isinstance(exc, AssetComparisonJobExpiredError):
+        raise HTTPException(status_code=410, detail="核对任务已过期") from exc
+    if isinstance(exc, AssetComparisonJobNotFoundError):
+        raise HTTPException(status_code=404, detail="核对任务不存在") from exc
+    if isinstance(exc, AssetComparisonJobConflictError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, AssetComparisonJobValidationError):
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    raise exc
+
+
+@router.post("/jobs", status_code=202)
+def create_asset_comparison_job(
+    req: AssetComparisonJobCreate,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    payload = req.model_dump()
+    client_request_id = payload.pop("clientRequestId")
+    job, reused = asset_comparison_job_manager.create_job(
+        user_id=current_user.id,
+        client_request_id=client_request_id,
+        inputs=payload,
+    )
+    return {
+        **job,
+        "reused": reused,
+        "pollAfterMs": 1000,
+    }
+
+
+@router.get("/jobs/{job_id}")
+def get_asset_comparison_job(
+    job_id: str,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    try:
+        return asset_comparison_job_manager.get_job(
+            user_id=current_user.id,
+            job_id=job_id,
+        )
+    except Exception as exc:
+        _raise_job_http_error(exc)
+
+
+@router.patch("/jobs/{job_id}/annotations")
+def update_asset_comparison_annotations(
+    job_id: str,
+    req: AssetComparisonAnnotationsUpdate,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    try:
+        return asset_comparison_job_manager.update_annotations(
+            user_id=current_user.id,
+            job_id=job_id,
+            expected_revision=req.expectedRevision,
+            remarks=req.remarks,
+            reviews=req.reviews,
+        )
+    except Exception as exc:
+        _raise_job_http_error(exc)
+
+
+@router.post("/jobs/{job_id}/finalize", status_code=202)
+def finalize_asset_comparison_job(
+    job_id: str,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    try:
+        return asset_comparison_job_manager.finalize(
+            user_id=current_user.id,
+            job_id=job_id,
+        )
+    except Exception as exc:
+        _raise_job_http_error(exc)
+
+
+@router.post("/jobs/{job_id}/artifacts/{artifact_key}/retry", status_code=202)
+def retry_asset_comparison_artifact(
+    job_id: str,
+    artifact_key: str,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    try:
+        return asset_comparison_job_manager.retry(
+            user_id=current_user.id,
+            job_id=job_id,
+            artifact_key=artifact_key,
+        )
+    except Exception as exc:
+        _raise_job_http_error(exc)
+
+
+@router.get("/jobs/{job_id}/artifacts/{artifact_key}")
+def download_asset_comparison_artifact(
+    job_id: str,
+    artifact_key: str,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    try:
+        path, filename, content_type = asset_comparison_job_manager.open_artifact(
+            user_id=current_user.id,
+            job_id=job_id,
+            artifact_key=artifact_key,
+        )
+        return FileResponse(
+            path=path,
+            media_type=content_type,
+            filename=filename,
+        )
+    except Exception as exc:
+        _raise_job_http_error(exc)
+
+
+@router.delete("/jobs/{job_id}")
+def cancel_asset_comparison_job(
+    job_id: str,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    try:
+        return asset_comparison_job_manager.cancel(
+            user_id=current_user.id,
+            job_id=job_id,
+        )
+    except Exception as exc:
+        _raise_job_http_error(exc)
+
+
+@router.delete("/jobs/{job_id}/purge")
+def purge_asset_comparison_job(
+    job_id: str,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    try:
+        asset_comparison_job_manager.purge(
+            user_id=current_user.id,
+            job_id=job_id,
+        )
+        return {"status": "success"}
+    except Exception as exc:
+        _raise_job_http_error(exc)
 
 
 def _safe_to_pandas(df):
@@ -860,6 +1340,32 @@ def _df_to_pandas(df):
         return None
 
 
+def _normalize_raw_data_line_breaks(df):
+    """规范化备注说明列的换行符，避免导出后显示 OOXML 控制字符转义"""
+    remark_columns = {
+        "备注说明",
+        "备注説明",
+        "備注说明",
+        "備注説明",
+        "備註說明",
+        "備註説明",
+    }
+    target_columns = remark_columns.intersection(df.columns)
+    if not target_columns:
+        return df
+
+    normalized_df = df.copy(deep=False)
+    for column in target_columns:
+        normalized_df[column] = normalized_df[column].map(
+            lambda value: (
+                value.replace("\r\n", "\n").replace("\r", "\n")
+                if isinstance(value, str)
+                else value
+            )
+        )
+    return normalized_df
+
+
 def _build_raw_data_xlsx(
     summary: dict, this_month_str: str, last_month_str: str
 ) -> io.BytesIO | None:
@@ -912,24 +1418,46 @@ def _build_raw_data_xlsx(
         return None
 
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
         for sheet_name, df in data_sheets.items():
-            # openpyxl sheet名最长31字符
+            sheet_started_at = perf_counter()
+            # Excel 工作表名称最长 31 个字符
             safe_name = sheet_name[:31]
-            df.to_excel(writer, sheet_name=safe_name, index=False)
+            normalized_df = _normalize_raw_data_line_breaks(df)
+            normalized_df.to_excel(writer, sheet_name=safe_name, index=False)
+            _log_save_stage(
+                "write_raw_data_sheet",
+                sheet_started_at,
+                sheet=safe_name,
+                rows=len(df),
+                columns=len(df.columns),
+            )
     buf.seek(0)
     return buf
 
 
-@router.post("/save")
-def save_results(
+def _build_complete_export(
     req: ComparisonRequest,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
-):
+    summary: dict,
+    raw_data: bytes | None = None,
+) -> tuple[bytes, str]:
+    missing_remark_labels = [
+        result.get("label", result.get("key", "未知模块"))
+        for result in summary.get("results_info", [])
+        if result.get("has_diff")
+        and not str(req.remarks.get(result.get("key", ""), "")).strip()
+    ]
+    if missing_remark_labels:
+        labels = "、".join(
+            label.replace("【", "").replace("】", "") for label in missing_remark_labels
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=f"请先填写异常原因再生成对比总结与 PDF：{labels}",
+        )
+
+    request_started_at = perf_counter()
     try:
-        logger.info("save: run_comparisons 开始")
-        summary = run_comparisons(req)
         ff = summary.get("ff")
         nn = summary.get("nn")
         sfc = summary.get("sfc")
@@ -959,13 +1487,16 @@ def save_results(
         if os.path.exists(save_all_path):
             os.remove(save_all_path)
 
+        stage_started_at = perf_counter()
         logger.info("save: create_excel_template 开始")
         try:
             create_excel_template(save_all_path)
         except Exception as err:
             logger.warning(f"Template creation err: {err}")
+        _log_save_stage("create_excel_template", stage_started_at)
         logger.info("save: create_excel_template 完成，开始 load_workbook")
 
+        stage_started_at = perf_counter()
         wb = load_workbook(save_all_path)
         ws = wb["差异总结"]
         logger.info("save: 工作簿加载完成，开始填充数据行")
@@ -1064,8 +1595,10 @@ def save_results(
             )
 
         wb.save(save_all_path)
+        _log_save_stage("write_summary_workbook", stage_started_at)
         logger.info("save: 差异总结 Sheet 填充并保存完成，开始构建比对明细")
 
+        stage_started_at = perf_counter()
         comparisons = []
 
         # 1-财务 VS 财务
@@ -1232,11 +1765,18 @@ def save_results(
                     )
                 )
 
+        _log_save_stage(
+            "build_comparison_details",
+            stage_started_at,
+            sheet_count=len(comparisons),
+        )
         logger.info("save: 比对明细构建完成，开始写入工作表")
 
+        stage_started_at = perf_counter()
         sheet_data_dict = {}
         wb = load_workbook(save_all_path)
         for sheet_name, diff_dict, comment in comparisons:
+            sheet_started_at = perf_counter()
             if sheet_name not in wb.sheetnames:
                 wb.create_sheet(sheet_name)
             ws_comp = wb[sheet_name]
@@ -1258,11 +1798,18 @@ def save_results(
                 )
                 if merged_df is not None and not getattr(merged_df, "empty", True):
                     sheet_data_dict[sheet_name] = merged_df
+            _log_save_stage("write_detail_sheet", sheet_started_at, sheet=sheet_name)
 
         wb.save(save_all_path)
+        _log_save_stage(
+            "write_detail_workbook",
+            stage_started_at,
+            sheet_count=len(comparisons),
+        )
         logger.info("save: 比对明细工作表写入完成，开始生成 PDF")
 
         # 生成 PDF
+        pdf_started_at = perf_counter()
         pdf_ok = False
         summary_pdf_path = os.path.join(
             SAVE_CHECK_PATH, f"TE&PE资产对比_{this_month_str}对比总结_summary.pdf"
@@ -1273,14 +1820,21 @@ def save_results(
 
         try:
             summary_ok = False
+            summary_pdf_started_at = perf_counter()
             try:
                 summary_ok = excel_sheet_to_pdf(
                     save_all_path, "差异总结", summary_pdf_path
                 )
             except Exception as sum_e:
                 logger.warning(f"总结PDF生成失败: {sum_e}")
+            _log_save_stage(
+                "generate_summary_pdf",
+                summary_pdf_started_at,
+                ok=summary_ok,
+            )
 
             detail_ok = False
+            detail_pdf_started_at = perf_counter()
             if sheet_data_dict:
                 try:
                     detail_ok = create_pdf_from_sheets(
@@ -1290,7 +1844,14 @@ def save_results(
                     )
                 except Exception as det_e:
                     logger.warning(f"明细PDF生成失败: {det_e}")
+            _log_save_stage(
+                "generate_detail_pdf",
+                detail_pdf_started_at,
+                ok=detail_ok,
+                sheet_count=len(sheet_data_dict),
+            )
 
+            merge_pdf_started_at = perf_counter()
             if (
                 summary_ok
                 and detail_ok
@@ -1312,6 +1873,7 @@ def save_results(
 
                 shutil.copy2(summary_pdf_path, save_pdf_path)
                 pdf_ok = True
+            _log_save_stage("merge_pdf", merge_pdf_started_at, ok=pdf_ok)
 
         except Exception as pdf_e:
             logger.warning(f"PDF生成处理出错: {pdf_e}")
@@ -1324,14 +1886,26 @@ def save_results(
                     except Exception as clean_e:
                         logger.warning(f"清理临时文件失败 ({tmp}): {clean_e}")
 
+        _log_save_stage("generate_pdf_total", pdf_started_at, ok=pdf_ok)
         logger.info(f"save: PDF 生成完成 (ok={pdf_ok})")
 
         # 生成原始数据 XLSX
+        stage_started_at = perf_counter()
         logger.info("save: _build_raw_data_xlsx 开始")
-        raw_buf = _build_raw_data_xlsx(summary, this_month_str, last_month_str)
+        raw_buf = (
+            io.BytesIO(raw_data)
+            if raw_data is not None
+            else _build_raw_data_xlsx(summary, this_month_str, last_month_str)
+        )
+        _log_save_stage(
+            "build_raw_data_xlsx",
+            stage_started_at,
+            size_bytes=raw_buf.getbuffer().nbytes if raw_buf else 0,
+        )
         logger.info("save: _build_raw_data_xlsx 完成")
 
         # 打包 ZIP
+        stage_started_at = perf_counter()
         logger.info("save: 开始打包 ZIP")
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1344,19 +1918,43 @@ def save_results(
             if raw_buf:
                 zf.writestr("原始数据.xlsx", raw_buf.getvalue())
         zip_buf.seek(0)
-
-        zip_filename = f"TE&PE资产对比_{this_month_str}.zip"
-        return StreamingResponse(
-            zip_buf,
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_filename)}"
-            },
+        _log_save_stage(
+            "build_zip",
+            stage_started_at,
+            size_bytes=zip_buf.getbuffer().nbytes,
         )
 
+        zip_filename = f"TE&PE资产对比_{this_month_str}.zip"
+        _log_save_stage("total", request_started_at, ok=True)
+        return zip_buf.getvalue(), zip_filename
+
     except Exception as e:
-        logger.error(f"save: 失败 — {e}\n{traceback.format_exc()}")
+        elapsed = perf_counter() - request_started_at
+        logger.error(
+            f"save: stage=total elapsed={elapsed:.3f}s ok=False "
+            f"error={e!r}\n{traceback.format_exc()}"
+        )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/save")
+def save_results(
+    req: ComparisonRequest,
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    stage_started_at = perf_counter()
+    logger.info("save: run_comparisons 开始")
+    summary = run_comparisons(req)
+    _log_save_stage("run_comparisons", stage_started_at)
+    content, filename = _build_complete_export(req, summary)
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"
+        },
+    )
 
 
 @router.post("/export/{module}")

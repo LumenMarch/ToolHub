@@ -1,11 +1,19 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { gsap } from 'gsap';
-import { FileArrowUp, CheckSquareOffset, FloppyDisk, DownloadSimple, Plus, Minus, Warning, FolderOpen } from '@phosphor-icons/react';
+import { FileArrowUp, CheckSquareOffset, FloppyDisk, DownloadSimple, Plus, Minus, Warning, FolderOpen, CircleNotch, ArrowClockwise, ArrowCounterClockwise } from '@phosphor-icons/react';
 import api from '../../../api/axios';
 import { LoadingSignal } from '../../../components/LoadingSignal';
 import { useTusUpload } from '../../../hooks/useTusUpload';
+import type { AssetComparisonInputs } from './types';
+import { useAssetComparisonJob } from './useAssetComparisonJob';
 
-const UnboxedFileInput: React.FC<{ label: string; value: string; onChange: (val: string) => void; displayValue?: string }> = ({ label, value, onChange, displayValue }) => {
+const UnboxedFileInput: React.FC<{
+  label: string;
+  value: string;
+  onChange: (val: string) => void;
+  displayValue?: string;
+  disabled?: boolean;
+}> = ({ label, value, onChange, displayValue, disabled = false }) => {
   const [isFocused, setIsFocused] = useState(false);
   const shown = displayValue ?? (value.includes('/') ? value.split('/').pop()! : value.includes('\\') ? value.split('\\').pop()! : value);
 
@@ -21,11 +29,13 @@ const UnboxedFileInput: React.FC<{ label: string; value: string; onChange: (val:
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-transparent border-none outline-none py-1.5 text-base md:text-lg font-medium tracking-wide text-foreground truncate"
+          disabled={disabled}
+          className="w-full bg-transparent border-none outline-none py-1.5 text-base md:text-lg font-medium tracking-wide text-foreground truncate disabled:cursor-not-allowed disabled:opacity-60"
           placeholder=""
         />
         <button
-          className="p-1.5 text-muted-foreground hover:text-primary transition-colors active:scale-95 flex-shrink-0"
+          disabled={disabled}
+          className="p-1.5 text-muted-foreground hover:text-primary transition-colors active:scale-95 flex-shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
           title="选择文件"
         >
           <FileArrowUp weight="bold" className="size-5" />
@@ -34,22 +44,6 @@ const UnboxedFileInput: React.FC<{ label: string; value: string; onChange: (val:
     </div>
   );
 };
-
-interface SubGroup {
-  label: string;
-  new_count: number;
-  removed_count: number;
-  anomaly_count: number;
-  has_diff: boolean;
-}
-
-interface CheckResult {
-  key: string;
-  label: string;
-  has_diff: boolean;
-  msg: string;
-  sub_groups?: SubGroup[];
-}
 
 interface ModuleProgress {
   loaded: number;
@@ -63,6 +57,28 @@ interface ModuleProgress {
 type ModuleKey = 'finance' | 'sfc' | 'notes' | 'customer';
 
 const REVIEW_OPTIONS = ["差異確認OK", "待跟进", "異常"];
+const EMPTY_INPUTS: AssetComparisonInputs = {
+  thisFinance: '',
+  lastFinance: '',
+  thisSFC: '',
+  lastSFC: '',
+  thisNotes: '',
+  lastNotes: '',
+  thisCustomer: '',
+  lastCustomer: '',
+  departmentData: '',
+  custodianData: '',
+  driData: '',
+};
+
+function createEmptyModuleProgress(): Record<ModuleKey, ModuleProgress> {
+  return {
+    finance: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+    sfc: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+    notes: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+    customer: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
+  };
+}
 
 /** 提取错误消息，兼容 axios error / string / unknown */
 function getErrorMessage(err: unknown): string {
@@ -155,39 +171,45 @@ const ModuleProgressBar: React.FC<{ label: string; progress: ModuleProgress }> =
 const AssetComparison: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [paths, setPaths] = useState({
-    thisFinance: '',
-    lastFinance: '',
-    thisSFC: '',
-    lastSFC: '',
-    thisNotes: '',
-    lastNotes: '',
-    thisCustomer: '',
-    lastCustomer: '',
-    departmentData: '',
-    custodianData: '',
-    driData: ''
-  });
+  const [paths, setPaths] = useState<AssetComparisonInputs>(EMPTY_INPUTS);
 
   const [folderPath, setFolderPath] = useState('');
   const selectedFilesRef = useRef<File[]>([]);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
   const [reviews, setReviews] = useState<Record<string, string>>({});
-  const [checkResults, setCheckResults] = useState<CheckResult[]>([]);
   const [statusMsg, setStatusMsg] = useState<React.ReactNode>('');
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const scanInFlightRef = useRef(false);
+  const [isStartingJob, setIsStartingJob] = useState(false);
+  const [isFinalizingAction, setIsFinalizingAction] = useState(false);
+  const [isResettingPage, setIsResettingPage] = useState(false);
+  const [retryingArtifact, setRetryingArtifact] = useState('');
+  const restoredJobRef = useRef('');
+  const {
+    job,
+    error: jobError,
+    start,
+    saveAnnotations,
+    finalize,
+    retry,
+    reset,
+    download,
+  } = useAssetComparisonJob();
+  const checkResults = job?.results ?? [];
+  const isJobActive = job
+    ? ['queued', 'validating', 'running', 'finalizing', 'cancel_requested'].includes(job.status)
+    : false;
+  const isInputLocked = isJobActive || isResettingPage;
 
-  const [moduleProgress, setModuleProgress] = useState<Record<ModuleKey, ModuleProgress>>({
-    finance: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-    sfc: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-    notes: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-    customer: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-  });
+  const [moduleProgress, setModuleProgress] = useState<
+    Record<ModuleKey, ModuleProgress>
+  >(createEmptyModuleProgress);
 
   const { upload } = useTusUpload();
 
   const handlePathChange = (key: keyof typeof paths, value: string) => {
+    if (isInputLocked) return;
     setPaths(prev => ({ ...prev, [key]: value }));
   };
 
@@ -196,8 +218,20 @@ const AssetComparison: React.FC = () => {
   };
 
   const handleReviewChange = (key: string, value: string) => {
-    setReviews(prev => ({ ...prev, [key]: value }));
+    const nextReviews = { ...reviews, [key]: value };
+    setReviews(nextReviews);
+    if (job) {
+      void saveAnnotations(remarks, nextReviews).catch(() => undefined);
+    }
   };
+
+  useEffect(() => {
+    if (!job || restoredJobRef.current === job.jobId) return;
+    restoredJobRef.current = job.jobId;
+    setPaths(job.inputs);
+    setRemarks(job.remarks);
+    setReviews(job.reviews);
+  }, [job]);
 
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -249,16 +283,18 @@ const AssetComparison: React.FC = () => {
   };
 
   const handleScanFolder = async () => {
+    if (
+      scanInFlightRef.current
+      || isScanning
+      || isJobActive
+      || isResettingPage
+    ) return;
+    scanInFlightRef.current = true;
     const fileArr = selectedFilesRef.current;
 
     if (fileArr.length > 0) {
-      setIsProcessing(true);
-      const initProgress: Record<ModuleKey, ModuleProgress> = {
-        finance: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-        sfc: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-        notes: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-        customer: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
-      };
+      setIsScanning(true);
+      const initProgress = createEmptyModuleProgress();
 
       for (const f of fileArr) {
         const mod = classifyFile(f.name);
@@ -386,7 +422,8 @@ const AssetComparison: React.FC = () => {
       } catch (err: unknown) {
         setStatusMsg(<span><Badge variant="err">错误</Badge> {getErrorMessage(err)}</span>);
       } finally {
-        setIsProcessing(false);
+        setIsScanning(false);
+        scanInFlightRef.current = false;
         selectedFilesRef.current = [];
       }
       return;
@@ -394,9 +431,10 @@ const AssetComparison: React.FC = () => {
 
     if (!folderPath.trim()) {
       setStatusMsg(<span><Badge variant="warn">提示</Badge> 请先选择文件夹或输入服务器上的文件夹路径</span>);
+      scanInFlightRef.current = false;
       return;
     }
-    setIsProcessing(true);
+    setIsScanning(true);
     setStatusMsg(<span>正在解析文件夹: {folderPath} ...</span>);
     try {
       const res = await api.get('/tools/asset/auto-paths', {
@@ -426,122 +464,213 @@ const AssetComparison: React.FC = () => {
     } catch (err: unknown) {
       setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {getErrorMessage(err)}</span>);
     } finally {
-      setIsProcessing(false);
+      setIsScanning(false);
+      scanInFlightRef.current = false;
     }
   };
 
   const handleCheck = async () => {
-    setIsProcessing(true);
-    setStatusMsg('正在核对数据，请稍候...');
-    setCheckResults([]);
+    if (isStartingJob || isJobActive || isResettingPage) return;
+    const hasMissingPath = Object.values(paths).some(value => !value.trim());
+    if (hasMissingPath) {
+      setStatusMsg(
+        <span><Badge variant="warn">提示</Badge> 请先补齐全部输入文件</span>,
+      );
+      return;
+    }
+
+    setStatusMsg('正在创建核对任务...');
+    setIsStartingJob(true);
+    setRemarks({});
     setReviews({});
     try {
-      const res = await api.post('/tools/asset/check', { ...paths, remarks, reviews });
-
-      if (res.data.status === 'error') {
-        setStatusMsg(
-          <span><Badge variant="err">错误</Badge> {res.data.message}{"\n"}{res.data.errors?.join(' | ') || ''}</span>
-        );
-      } else {
-        const resData: CheckResult[] = res.data.data.results || [];
-        setCheckResults(resData);
-        const newReviews: Record<string, string> = {};
-        resData.forEach(r => newReviews[r.key] = REVIEW_OPTIONS[0]);
-        setReviews(newReviews);
-
-        setStatusMsg(
-          <div className="font-bold text-green-500">
-            <Badge variant="ok">核对完成</Badge> 请在下方填写有差异项的异常原因并选择审核状态。
-          </div>
-        );
-      }
+      await start(paths);
+      setStatusMsg('');
     } catch (err: unknown) {
       setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {getErrorMessage(err)}</span>);
     } finally {
-      setIsProcessing(false);
+      setIsStartingJob(false);
     }
   };
 
   const handleSaveAll = async () => {
+    if (!job || isFinalizingAction) return;
+    const currentFinalArtifact = job.artifacts.final_bundle;
+    if (
+      currentFinalArtifact?.status === 'ready'
+      && job.finalizedRevision === job.annotationRevision
+      && !annotationsDirty
+    ) {
+      download('final_bundle');
+      return;
+    }
+
     const missingRemarks = checkResults.filter(r => r.has_diff && !remarks[r.key]?.trim());
     if (missingRemarks.length > 0) {
       alert(`请先填写以下有差异模块的异常原因：\n${missingRemarks.map(r => r.label.replace(/【|】/g, '')).join(', ')}`);
       return;
     }
 
-    setIsProcessing(true);
-    setStatusMsg('正在生成完整对比总结、PDF及原始数据...');
+    setStatusMsg('正在保存异常原因并生成对比总结与 PDF...');
+    setIsFinalizingAction(true);
     try {
-      const res = await fetch('/api/v1/tools/asset/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ ...paths, remarks, reviews }),
-      });
+      await saveAnnotations(remarks, reviews);
+      await finalize();
+      setStatusMsg('');
+    } catch (err: unknown) {
+      setStatusMsg(<span><Badge variant="err">失败</Badge> {getErrorMessage(err)}</span>);
+    } finally {
+      setIsFinalizingAction(false);
+    }
+  };
 
-      if (!res.ok) {
-        let errMsg = `请求失败 (${res.status})`;
-        try {
-          const errData = await res.json();
-          errMsg = errData.detail || errData.message || errMsg;
-        } catch { /* ignore parse error */ }
-        setStatusMsg(<span><Badge variant="err">失败</Badge> {errMsg}</span>);
-        return;
+  const handleExportSingle = async (key: string) => {
+    const artifactKey = `module_${key}`;
+    if (retryingArtifact === artifactKey) return;
+    const artifact = job?.artifacts[artifactKey];
+    if (!artifact) return;
+    if (artifact.status === 'ready') {
+      download(artifactKey);
+      return;
+    }
+    if (artifact.status !== 'failed') return;
+
+    try {
+      setRetryingArtifact(artifactKey);
+      await retry(artifactKey);
+    } catch (err: unknown) {
+      setStatusMsg(<span><Badge variant="err">失败</Badge> {getErrorMessage(err)}</span>);
+    } finally {
+      setRetryingArtifact('');
+    }
+  };
+
+  const handleRemarkBlur = () => {
+    if (job) {
+      void saveAnnotations(remarks, reviews).catch(() => undefined);
+    }
+  };
+
+  const resetDisabled = Boolean(
+    isScanning
+    || isStartingJob
+    || isJobActive
+    || isFinalizingAction
+    || isResettingPage
+    || retryingArtifact,
+  );
+  const hasResettableState = Boolean(
+    job
+    || folderPath.trim()
+    || Object.values(paths).some(value => value.trim())
+    || statusMsg
+    || Object.keys(remarks).length
+    || Object.keys(reviews).length
+    || Object.values(moduleProgress).some(progress => progress.fileCount > 0),
+  );
+
+  const handleResetPage = async () => {
+    if (resetDisabled || !hasResettableState) return;
+    const confirmed = window.confirm(
+      '将清空当前页面，并永久删除对应的后台任务和已生成文件。此操作不可恢复，确定继续吗？',
+    );
+    if (!confirmed) return;
+
+    setIsResettingPage(true);
+    try {
+      await reset();
+      setPaths(EMPTY_INPUTS);
+      setFolderPath('');
+      selectedFilesRef.current = [];
+      if (folderInputRef.current) {
+        folderInputRef.current.value = '';
       }
-
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const errData = await res.json();
-        setStatusMsg(<span><Badge variant="err">失败</Badge> {errData.message || errData.detail || '未知错误'}</span>);
-        return;
-      }
-
-      const blob = await res.blob();
-
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const disposition = res.headers.get('content-disposition');
-      const match = disposition?.match(/filename="?(.+?)"?$/);
-      a.download = match?.[1] ?? '资产对比结果.zip';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-
+      setRemarks({});
+      setReviews({});
+      setStatusMsg('');
+      setModuleProgress(createEmptyModuleProgress());
+      setRetryingArtifact('');
+      restoredJobRef.current = '';
+    } catch (err: unknown) {
       setStatusMsg(
-        <div>
-          <Badge variant="ok">导出成功</Badge> ZIP 文件已开始下载，包含对比总结 XLSX、PDF 及原始数据。
-        </div>
+        <span>
+          <Badge variant="err">失败</Badge> 无法删除后台任务：{getErrorMessage(err)}
+        </span>,
       );
-    } catch (err: unknown) {
-      setStatusMsg(<span><Badge variant="err">失败</Badge> {getErrorMessage(err)}</span>);
     } finally {
-      setIsProcessing(false);
+      setIsResettingPage(false);
     }
   };
 
-  const handleExportSingle = async (key: string, label: string) => {
-    setIsProcessing(true);
-    setStatusMsg(<span>正在单独导出 {label} 模块...</span>);
-    try {
-      const res = await api.post(`/tools/asset/export/${key}`, { ...paths, remarks, reviews });
-      if (res.data.status === 'error') {
-        setStatusMsg(<span><Badge variant="err">失败</Badge> {res.data.message}</span>);
-      } else {
-        setStatusMsg(
-          <div className="whitespace-pre-line">
-            <Badge variant="ok">导出成功</Badge><br/>
-            {res.data.message.replace(/.*成功:\n/, '')}
-          </div>
-        );
-      }
-    } catch (err: unknown) {
-      setStatusMsg(<span><Badge variant="err">失败</Badge> {getErrorMessage(err)}</span>);
-    } finally {
-      setIsProcessing(false);
+  const finalArtifact = job?.artifacts.final_bundle;
+  const hasGeneratedFinal = Boolean(
+    (
+      job?.finalizedRevision !== null
+      && job?.finalizedRevision !== undefined
+    )
+    || ['ready', 'stale', 'failed'].includes(finalArtifact?.status ?? ''),
+  );
+  const inputsChanged = Boolean(
+    job && JSON.stringify(paths) !== JSON.stringify(job.inputs),
+  );
+  const localMissingRemarks = checkResults.filter(
+    result => result.has_diff && !remarks[result.key]?.trim(),
+  );
+  const normalizedLocalReviews = Object.fromEntries(
+    checkResults.map(result => [
+      result.key,
+      reviews[result.key] || REVIEW_OPTIONS[0],
+    ]),
+  );
+  const normalizedJobReviews = Object.fromEntries(
+    checkResults.map(result => [
+      result.key,
+      job?.reviews[result.key] || REVIEW_OPTIONS[0],
+    ]),
+  );
+  const annotationsDirty = Boolean(
+    job
+    && (
+      JSON.stringify(remarks) !== JSON.stringify(job.remarks)
+      || JSON.stringify(normalizedLocalReviews) !== JSON.stringify(normalizedJobReviews)
+    ),
+  );
+  const hasNonAnnotationBlocker = Boolean(
+    job?.finalizeBlockers.some(blocker => blocker.code !== 'missing_remarks'),
+  );
+  const canPrepareFinal = Boolean(
+    job && !hasNonAnnotationBlocker && localMissingRemarks.length === 0,
+  );
+  const finalButtonIsDownload = Boolean(
+    finalArtifact?.status === 'ready'
+    && job?.finalizedRevision === job?.annotationRevision
+    && !annotationsDirty,
+  );
+  const finalButtonDisabled = Boolean(
+    !job
+    || isFinalizingAction
+    || finalArtifact?.status === 'building'
+    || (!finalButtonIsDownload && inputsChanged)
+    || (!finalButtonIsDownload && !canPrepareFinal),
+  );
+  const finalButtonLabel = (() => {
+    if (!job) return '等待核对';
+    if (finalArtifact?.status === 'building') return '正在生成对比总结与 PDF';
+    if (finalButtonIsDownload) return '下载完整结果';
+    if (inputsChanged) return '输入已更改，请重新核对';
+    if (localMissingRemarks.length > 0) {
+      return `请填写 ${localMissingRemarks.length} 项异常原因`;
     }
-  };
+    if (
+      hasGeneratedFinal
+      && (annotationsDirty || ['stale', 'failed'].includes(finalArtifact?.status ?? ''))
+    ) {
+      return '内容已更新，重新生成总结与 PDF';
+    }
+    return job.finalizeBlockers.find(
+      blocker => blocker.code !== 'missing_remarks',
+    )?.message ?? '生成对比总结与 PDF';
+  })();
 
   return (
     <div ref={containerRef} className="flex w-full flex-col pb-20">
@@ -563,7 +692,7 @@ const AssetComparison: React.FC = () => {
         <div className="gsap-reveal flex items-center gap-3">
           <button
             onClick={handleSelectFolder}
-            disabled={isProcessing}
+            disabled={isScanning || isStartingJob || isInputLocked}
             title="选择文件夹"
             className="flex items-center justify-center gap-2 border border-border bg-secondary px-4 py-3 font-bold uppercase tracking-tight text-secondary-foreground transition-[background-color,transform] hover:bg-secondary/80 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 shrink-0"
           >
@@ -574,12 +703,13 @@ const AssetComparison: React.FC = () => {
             type="text"
             value={folderPath}
             onChange={(e) => setFolderPath(e.target.value)}
+            disabled={isInputLocked}
             placeholder="输入或粘贴文件夹路径..."
-            className="flex-1 min-w-[240px] border-b border-border bg-transparent px-2 py-2 font-mono text-sm outline-none transition-colors focus:border-primary text-foreground placeholder:text-muted-foreground/60"
+            className="flex-1 min-w-[240px] border-b border-border bg-transparent px-2 py-2 font-mono text-sm outline-none transition-colors focus:border-primary text-foreground placeholder:text-muted-foreground/60 disabled:cursor-not-allowed disabled:opacity-60"
           />
           <button
             onClick={handleScanFolder}
-            disabled={isProcessing || (!folderPath.trim() && selectedFilesRef.current.length === 0)}
+            disabled={isScanning || isStartingJob || isInputLocked || (!folderPath.trim() && selectedFilesRef.current.length === 0)}
             className="flex items-center justify-center gap-2 border border-primary bg-primary/10 px-5 py-3 font-bold uppercase tracking-tight text-primary transition-[background-color,transform] hover:bg-primary/20 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 shrink-0"
           >
             扫描解析
@@ -592,32 +722,32 @@ const AssetComparison: React.FC = () => {
         {/* Finance */}
         <div className="gsap-reveal bg-card p-6 border border-border transition-colors transition-shadow hover:border-primary/30 hover:shadow-[0_2px_16px_rgba(var(--primary-rgb),0.06)]">
           <h2 className="text-xl font-bold uppercase tracking-tight mb-8 text-primary">财务 (Finance)</h2>
-          <UnboxedFileInput label="本期财务数据" value={paths.thisFinance} onChange={(val) => handlePathChange('thisFinance', val)} />
-          <UnboxedFileInput label="上期财务数据" value={paths.lastFinance} onChange={(val) => handlePathChange('lastFinance', val)} />
+          <UnboxedFileInput label="本期财务数据" value={paths.thisFinance} onChange={(val) => handlePathChange('thisFinance', val)} disabled={isInputLocked} />
+          <UnboxedFileInput label="上期财务数据" value={paths.lastFinance} onChange={(val) => handlePathChange('lastFinance', val)} disabled={isInputLocked} />
           <ModuleProgressBar label="财务上传" progress={moduleProgress.finance} />
         </div>
 
         {/* SFC */}
         <div className="gsap-reveal bg-card p-6 border border-border transition-colors transition-shadow hover:border-primary/30 hover:shadow-[0_2px_16px_rgba(var(--primary-rgb),0.06)]">
           <h2 className="text-xl font-bold uppercase tracking-tight mb-8 text-primary">SFC (System)</h2>
-          <UnboxedFileInput label="本期SFC数据" value={paths.thisSFC} onChange={(val) => handlePathChange('thisSFC', val)} />
-          <UnboxedFileInput label="上期SFC数据" value={paths.lastSFC} onChange={(val) => handlePathChange('lastSFC', val)} />
+          <UnboxedFileInput label="本期SFC数据" value={paths.thisSFC} onChange={(val) => handlePathChange('thisSFC', val)} disabled={isInputLocked} />
+          <UnboxedFileInput label="上期SFC数据" value={paths.lastSFC} onChange={(val) => handlePathChange('lastSFC', val)} disabled={isInputLocked} />
           <ModuleProgressBar label="SFC上传" progress={moduleProgress.sfc} />
         </div>
 
         {/* Notes */}
         <div className="gsap-reveal bg-card p-6 border border-border transition-colors transition-shadow hover:border-primary/30 hover:shadow-[0_2px_16px_rgba(var(--primary-rgb),0.06)]">
           <h2 className="text-xl font-bold uppercase tracking-tight mb-8 text-primary">Notes (IT)</h2>
-          <UnboxedFileInput label="本期Notes数据" value={paths.thisNotes} onChange={(val) => handlePathChange('thisNotes', val)} />
-          <UnboxedFileInput label="上期Notes数据" value={paths.lastNotes} onChange={(val) => handlePathChange('lastNotes', val)} />
+          <UnboxedFileInput label="本期Notes数据" value={paths.thisNotes} onChange={(val) => handlePathChange('thisNotes', val)} disabled={isInputLocked} />
+          <UnboxedFileInput label="上期Notes数据" value={paths.lastNotes} onChange={(val) => handlePathChange('lastNotes', val)} disabled={isInputLocked} />
           <ModuleProgressBar label="Notes上传" progress={moduleProgress.notes} />
         </div>
 
         {/* Customer */}
         <div className="gsap-reveal bg-card p-6 border border-border transition-colors transition-shadow hover:border-primary/30 hover:shadow-[0_2px_16px_rgba(var(--primary-rgb),0.06)]">
           <h2 className="text-xl font-bold uppercase tracking-tight mb-8 text-primary">客户 (Customer)</h2>
-          <UnboxedFileInput label="本期客户数据" value={paths.thisCustomer} onChange={(val) => handlePathChange('thisCustomer', val)} />
-          <UnboxedFileInput label="上期客户数据" value={paths.lastCustomer} onChange={(val) => handlePathChange('lastCustomer', val)} />
+          <UnboxedFileInput label="本期客户数据" value={paths.thisCustomer} onChange={(val) => handlePathChange('thisCustomer', val)} disabled={isInputLocked} />
+          <UnboxedFileInput label="上期客户数据" value={paths.lastCustomer} onChange={(val) => handlePathChange('lastCustomer', val)} disabled={isInputLocked} />
           <ModuleProgressBar label="客户上传" progress={moduleProgress.customer} />
         </div>
 
@@ -625,9 +755,9 @@ const AssetComparison: React.FC = () => {
         <div className="gsap-reveal bg-card p-6 border border-border lg:col-span-2 transition-colors transition-shadow hover:border-primary/30 hover:shadow-[0_2px_16px_rgba(var(--primary-rgb),0.06)]">
           <h2 className="text-xl font-bold uppercase tracking-tight mb-8 text-primary">配置项 (Config TXT)</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8">
-            <UnboxedFileInput label="保管部门配置" value={paths.departmentData} onChange={(val) => handlePathChange('departmentData', val)} />
-            <UnboxedFileInput label="保管人配置" value={paths.custodianData} onChange={(val) => handlePathChange('custodianData', val)} />
-            <UnboxedFileInput label="客户DRI配置" value={paths.driData} onChange={(val) => handlePathChange('driData', val)} />
+            <UnboxedFileInput label="保管部门配置" value={paths.departmentData} onChange={(val) => handlePathChange('departmentData', val)} disabled={isInputLocked} />
+            <UnboxedFileInput label="保管人配置" value={paths.custodianData} onChange={(val) => handlePathChange('custodianData', val)} disabled={isInputLocked} />
+            <UnboxedFileInput label="客户DRI配置" value={paths.driData} onChange={(val) => handlePathChange('driData', val)} disabled={isInputLocked} />
           </div>
         </div>
 
@@ -636,15 +766,55 @@ const AssetComparison: React.FC = () => {
       <div className="pt-8 flex flex-col sm:flex-row gap-6 max-w-6xl justify-start gsap-reveal border-b-2 border-border pb-8 mb-8">
         <button
           onClick={handleCheck}
-          disabled={isProcessing}
+          disabled={isScanning || isStartingJob || isInputLocked}
           className="flex items-center justify-center gap-3 border-2 border-border px-10 py-4 text-lg font-bold uppercase tracking-tighter text-foreground transition-[background-color,color,transform] hover:bg-foreground hover:text-background active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <CheckSquareOffset weight="bold" className="size-6" />
-          开始核对
+          {isJobActive || isStartingJob ? (
+            <>
+              <CircleNotch weight="bold" className="size-6 animate-spin" />
+              {isStartingJob ? '正在创建任务' : `核对中 ${job?.progress.comparison?.completed ?? 0}/${job?.progress.comparison?.total ?? 7}`}
+            </>
+          ) : (
+            <>
+              <CheckSquareOffset weight="bold" className="size-6" />
+              {job ? '重新核对' : '开始核对'}
+            </>
+          )}
         </button>
-        {statusMsg && (
+        <button
+          type="button"
+          onClick={handleResetPage}
+          disabled={resetDisabled || !hasResettableState}
+          title="清空当前页面，并删除后台任务和已生成文件"
+          className="flex items-center justify-center gap-2 border border-border px-6 py-4 font-bold uppercase tracking-tight text-muted-foreground transition-[background-color,color,transform] hover:bg-secondary hover:text-foreground active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isResettingPage ? (
+            <CircleNotch weight="bold" className="size-5 animate-spin" />
+          ) : (
+            <ArrowCounterClockwise weight="bold" className="size-5" />
+          )}
+          {isResettingPage ? '正在重置' : '重置页面'}
+        </button>
+        {(statusMsg || job || jobError) && (
           <div className="flex-1 p-4 bg-primary/10 text-primary font-mono text-sm max-w-2xl flex flex-col gap-2">
-            <div>{statusMsg}</div>
+            {statusMsg && <div>{statusMsg}</div>}
+            {job && (
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                <span>文件验证</span>
+                <span>{job.progress.validation?.status === 'ready' ? '完成' : '处理中'}</span>
+                <span>资产核对</span>
+                <span>{job.progress.comparison?.completed ?? 0}/{job.progress.comparison?.total ?? 7}</span>
+                <span>模块文件</span>
+                <span>{job.progress.moduleArtifacts?.completed ?? 0}/{job.progress.moduleArtifacts?.total ?? 7}</span>
+                <span>原始数据</span>
+                <span>{job.progress.rawData?.status === 'ready' ? '完成' : job.progress.rawData?.status === 'failed' ? '失败' : '生成中'}</span>
+              </div>
+            )}
+            {(jobError || job?.error) && (
+              <div className="text-red-400">
+                <Badge variant="err">错误</Badge> {jobError || job?.error}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -658,7 +828,7 @@ const AssetComparison: React.FC = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {checkResults.map((res) => (
-              <div key={res.key} className={`p-6 border-2 ${res.has_diff ? 'border-primary bg-primary/5' : 'border-border bg-card'}`}>
+              <div key={res.key} className={`p-6 border-2 ${res.status === 'failed' ? 'border-red-500 bg-red-500/5' : res.has_diff ? 'border-primary bg-primary/5' : 'border-border bg-card'}`}>
                 <div className="flex justify-between items-start mb-4">
                   <div className="w-full">
                     <div className="flex justify-between items-center w-full mb-2">
@@ -673,7 +843,7 @@ const AssetComparison: React.FC = () => {
                         ))}
                       </select>
                     </div>
-                    <p className={`font-mono mt-1 ${res.has_diff ? 'text-primary' : 'text-muted-foreground'}`}>{res.msg}</p>
+                    <p className={`font-mono mt-1 ${res.status === 'failed' ? 'text-red-400' : res.has_diff ? 'text-primary' : 'text-muted-foreground'}`}>{res.msg}</p>
                     {res.sub_groups && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                         {res.sub_groups.map((sg) => (
@@ -702,12 +872,20 @@ const AssetComparison: React.FC = () => {
                     )}
                   </div>
                   <button
-                    onClick={() => handleExportSingle(res.key, res.label.replace(/【|】/g, ''))}
-                    disabled={isProcessing}
-                    className="p-2 border border-border hover:bg-foreground hover:text-background transition-colors flex-shrink-0 ml-4"
-                    title={`单独导出${res.label.replace(/【|】/g, '')}结果`}
+                    onClick={() => handleExportSingle(res.key)}
+                    disabled={retryingArtifact === `module_${res.key}` || !['ready', 'failed'].includes(job?.artifacts[`module_${res.key}`]?.status ?? '')}
+                    className="p-2 border border-border hover:bg-foreground hover:text-background transition-colors flex-shrink-0 ml-4 disabled:cursor-not-allowed disabled:opacity-50"
+                    title={job?.artifacts[`module_${res.key}`]?.error ?? `单独导出${res.label.replace(/【|】/g, '')}结果`}
                   >
-                    <DownloadSimple className="size-5" />
+                    {retryingArtifact === `module_${res.key}` ? (
+                      <CircleNotch className="size-5 animate-spin" />
+                    ) : job?.artifacts[`module_${res.key}`]?.status === 'failed' ? (
+                      <ArrowClockwise className="size-5" />
+                    ) : job?.artifacts[`module_${res.key}`]?.status === 'ready' ? (
+                      <DownloadSimple className="size-5" />
+                    ) : (
+                      <CircleNotch className="size-5 animate-spin" />
+                    )}
                   </button>
                 </div>
 
@@ -717,6 +895,7 @@ const AssetComparison: React.FC = () => {
                     <textarea
                       value={remarks[res.key] || ''}
                       onChange={(e) => handleRemarkChange(res.key, e.target.value)}
+                      onBlur={handleRemarkBlur}
                       className="w-full resize-none border border-border bg-background p-3 font-mono text-base outline-none transition-colors focus:border-primary focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 md:text-sm"
                       rows={2}
                       placeholder="发现差异，请备注原因..."
@@ -730,11 +909,17 @@ const AssetComparison: React.FC = () => {
           <div className="pt-8 flex justify-end">
             <button
               onClick={handleSaveAll}
-              disabled={isProcessing}
+              disabled={finalButtonDisabled}
               className="flex items-center justify-center gap-3 bg-primary px-12 py-4 text-xl font-bold uppercase tracking-tighter text-primary-foreground transition-[background-color,transform] hover:bg-primary/90 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <FloppyDisk weight="bold" className="size-6" />
-              一键汇出 (Excel + PDF)
+              {finalArtifact?.status === 'building' ? (
+                <CircleNotch weight="bold" className="size-6 animate-spin" />
+              ) : finalButtonIsDownload ? (
+                <DownloadSimple weight="bold" className="size-6" />
+              ) : (
+                <FloppyDisk weight="bold" className="size-6" />
+              )}
+              {finalButtonLabel}
             </button>
           </div>
         </div>

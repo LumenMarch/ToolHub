@@ -54,6 +54,22 @@ async def cleanup_expired_uploads() -> None:
     UploadStore().cleanup_expired(max_age_hours=24)
 
 
+@app.on_event("startup")
+async def recover_asset_comparison_jobs() -> None:
+    """恢复资产核对任务状态并清理过期产物。"""
+    from app.api.endpoints.asset_comparison import asset_comparison_job_manager
+
+    asset_comparison_job_manager.recover_interrupted()
+
+
+@app.on_event("shutdown")
+async def shutdown_asset_comparison_jobs() -> None:
+    """停止资产核对后台执行器。"""
+    from app.api.endpoints.asset_comparison import asset_comparison_job_manager
+
+    asset_comparison_job_manager.shutdown()
+
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to ToolHub API"}

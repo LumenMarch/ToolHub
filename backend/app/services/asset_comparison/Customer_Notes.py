@@ -1,33 +1,3 @@
-class pyqtSignal:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def connect(self, *args, **kwargs):
-        pass
-
-    def emit(self, *args, **kwargs):
-        pass
-
-
-class QThread:
-    pass
-
-
-class QObject:
-    pass
-
-
-class QWidget:
-    pass
-
-
-def safe_thread_run(func):  # noqa: F811
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 import os  # noqa: E402, I001, UP015, F401
 import re  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
@@ -43,18 +13,8 @@ Notes_RFID_rex_2 = re.compile(r"\S.*(A15.*)")
 No_CheckRFID = ["A1300011C5C3", "A13000103933", "A1300010E606"]
 
 
-class Customer_Notes(QThread):
-    _unlock_signal = pyqtSignal()
-    _update_check_signal = pyqtSignal(int, int, int, int)
-    _Error_signal = pyqtSignal()
-    _Save_signal = pyqtSignal(object)
-    _progress_signal = pyqtSignal(int, str)
-    _Update_Message_signal = pyqtSignal(str)
-
-    # 進度信號：進度值, 進度文本
-    def __init__(self, ui):
-        super().__init__()
-        self.ui = ui
+class Customer_Notes:
+    def __init__(self):
         self.this_Customer_path = None
         self.this_Notes_path = None
         self.this_Customer_DRI_path = None
@@ -68,34 +28,6 @@ class Customer_Notes(QThread):
 
         self.new_assets = None
         self.remove_assets = None
-
-    @safe_thread_run
-    def run(self):
-        if (
-            not self.this_Customer_path
-            or not self.this_Notes_path
-            or not self.this_Customer_DRI_path
-        ):
-            self._Update_Message_signal.emit("请选择文件")
-            return
-
-        self._Update_Message_signal.emit("Start")
-        try:
-            self._progress_signal.emit(10, "開始讀取客戶數據...")
-            self.read_this_Customer_data()
-            self._progress_signal.emit(30, "開始讀取Notes數據...")
-            self.read_this_Notes_data()
-            self._progress_signal.emit(60, "開始讀取DRI數據...")
-            self.read_Customer_DRI()
-            self._progress_signal.emit(80, "開始進行數據對比...")
-            self.Customer_Notes_Comparison()
-            self._progress_signal.emit(100, "對比完成")
-            self._unlock_signal.emit()
-        except Exception as e:
-            logger.exception(f"读取数据失败: {e}")
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
-            raise
 
     def safe_read_excel(self, path):
         """安全讀取Excel並轉為LazyFrame"""
@@ -163,8 +95,6 @@ class Customer_Notes(QThread):
 
         except Exception as e:
             logger.exception(f"读取 {os.path.basename(path)} 失败: {e}")
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
             raise
 
     def read_this_Customer_data(self):
@@ -197,8 +127,6 @@ class Customer_Notes(QThread):
             logger.exception(
                 f"读取 {os.path.basename(self.this_Customer_path)} 失败: {e}"
             )
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
             return
 
     def read_this_Notes_data(self):
@@ -238,8 +166,6 @@ class Customer_Notes(QThread):
 
         except Exception as e:
             logger.exception(f"读取 {os.path.basename(self.this_Notes_path)} 失败: {e}")
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
             return
 
     def read_Customer_DRI(self):
@@ -254,7 +180,6 @@ class Customer_Notes(QThread):
     def Customer_Notes_Comparison(self):
         """Customer與Notes數據比較（使用LazyFrame優化）"""
         if self.this_Customer_data is None or self.this_Notes_data is None:
-            self._unlock_signal.emit()
             return
         try:
             # 初始化Notes資產列表
@@ -286,21 +211,8 @@ class Customer_Notes(QThread):
                 self.this_Notes_assets
             )
 
-            if self.new_assets or self.remove_assets:
-                self._update_check_signal.emit(
-                    len(self.this_Notes_assets),
-                    len(self.this_Customer_assets),
-                    len(self.new_assets),
-                    len(self.remove_assets),
-                )
-            else:
-                self._update_check_signal.emit(
-                    len(self.this_Notes_assets), len(self.this_Customer_assets), 0, 0
-                )
-
         except Exception as e:
             logger.exception(f"Customer_Notes-读取数据对比失败: {e}")
-            self._unlock_signal.emit()
             raise
 
     def _extract_rfid_from_remarks(self):
@@ -571,9 +483,6 @@ class Customer_Notes(QThread):
                         for cell in row:
                             cell.border = thin_border
 
-                self._Save_signal.emit(self.ui.frame_7)
-
         except Exception as e:
             logger.exception(f"保存数据对比失败: {e}")
-            self._unlock_signal.emit()
             raise

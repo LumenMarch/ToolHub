@@ -21,14 +21,21 @@ architecture decisions under `docs/adr/`. See `docs/agents/domain.md`.
   or change repository settings unless the user explicitly requests that
   action.
 - Never commit directly to `main`. Create a focused branch from `origin/main`.
-  Agents should use the `codex/<short-description>` prefix unless the user
-  requests a different branch name.
 - Keep each commit and pull request limited to one coherent concern. Exclude
   unrelated working-tree changes and user-owned files.
 - Do not amend, reorder, squash, or rewrite commits created by another person
   unless the user explicitly requests it.
 - Never bypass repository rules, required checks, or review requirements with
   administrator privileges.
+
+## 2.1. Branch Naming
+
+- Use `<type>/<short-description>` for branch names.
+- Use one of the commit types from section 4.2 as `<type>`.
+- Write `<short-description>` in lowercase kebab-case and keep it focused on
+  one coherent concern.
+- For example: `feat/asset-comparison-export-workflow` or
+  `fix/upload-stream-timeout`.
 
 # 3. Language Requirements
 
@@ -127,7 +134,7 @@ Create a branch from the latest remote default branch:
 
 ```bash
 git fetch origin main
-git switch -c codex/<short-description> origin/main
+git switch -c <type>/<short-description> origin/main
 ```
 
 Before marking a pull request ready or merging it, synchronize it with `main`:

@@ -1,33 +1,3 @@
-class pyqtSignal:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def connect(self, *args, **kwargs):
-        pass
-
-    def emit(self, *args, **kwargs):
-        pass
-
-
-class QThread:
-    pass
-
-
-class QObject:
-    pass
-
-
-class QWidget:
-    pass
-
-
-def safe_thread_run(func):  # noqa: F811
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
@@ -40,21 +10,8 @@ from loguru import logger  # noqa: E402, I001, UP015, F401
 No_CheckRFID = ["A1300011C5C3", "A13000103933", "A1300010E606"]
 
 
-class Notes_Notes(QThread):
-    _This_Assets_Notes_signal = pyqtSignal(int, int, int)
-    _Last_Assets_Notes_signal = pyqtSignal(int, int, int)
-    _This_Last_Assets_Notes_signal = pyqtSignal(int, int, int, int, int, int)
-    _unlock_signal = pyqtSignal()
-    _Error_signal = pyqtSignal()
-    _Save_signal = pyqtSignal(object)
-    _Update_Message_signal = pyqtSignal(str)
-    _progress_signal = pyqtSignal(int, str)
-
-    # 進度信號：進度值, 進度文本
-
-    def __init__(self, ui):
-        super().__init__()
-        self.ui = ui
+class Notes_Notes:
+    def __init__(self):
 
         self.this_invalid_all_rows = None
         self.last_assets_filtered = None
@@ -72,25 +29,6 @@ class Notes_Notes(QThread):
 
         self.This_Notes_path = None
         self.Last_Notes_path = None
-
-    @safe_thread_run
-    def run(self):
-        if not self.This_Notes_path or not self.Last_Notes_path:
-            self.ui.this_Notes_edit.setText("请选择文件")
-            return
-        try:
-            self._Update_Message_signal.emit("Start")
-            self._progress_signal.emit(10, "開始讀取本月Notes數據...")
-            self.This_Notes_date()
-            self._progress_signal.emit(40, "開始讀取上月Notes數據...")
-            self.Last_Notes_date()
-            self._progress_signal.emit(70, "開始進行數據對比...")
-            self.Notes_Notes_Comparison()
-            self._progress_signal.emit(100, "對比完成")
-        except Exception as e:
-            logger.exception(e)
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
 
     def safe_read_excel(self, path):
         """安全讀取Excel並返回 DataFrame（不是 LazyFrame）"""
@@ -157,8 +95,6 @@ class Notes_Notes(QThread):
 
         except Exception as e:
             logger.error(f"读取 {os.path.basename(path)} 失败: {e}")
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
             raise
 
     def This_Notes_date(self):
@@ -170,8 +106,6 @@ class Notes_Notes(QThread):
             df_lazy = self.safe_read_excel(self.This_Notes_path)
             self.this_Notes_data = df_lazy
         except Exception as e:
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
             logger.error(e)
 
     def Last_Notes_date(self):
@@ -183,15 +117,12 @@ class Notes_Notes(QThread):
             df_lazy = self.safe_read_excel(self.Last_Notes_path)
             self.last_Notes_data = df_lazy
         except Exception as e:
-            self._unlock_signal.emit()
             logger.error(e)
 
     def Notes_Notes_Comparison(self):
         """Notes與Notes數據比較（使用LazyFrame優化）"""
         if self.this_Notes_data is None or self.last_Notes_data is None:
             logger.error("文件讀取錯誤，請檢查文件")
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
             return
         else:
             try:
@@ -333,37 +264,7 @@ class Notes_Notes(QThread):
                     f"Notes_Notes减少无资产记录: {len(self.removed_No_assets)} 笔"
                 )
 
-                self._This_Assets_Notes_signal.emit(
-                    len(self.this_All_Notes_),
-                    len(self.this_assets_filtered),
-                    self.this_invalid_all_rows,
-                )
-                self._Last_Assets_Notes_signal.emit(
-                    len(self.last_All_Notes_),
-                    len(self.last_assets_filtered),
-                    self.last_invalid_all_rows,
-                )
-
-                if (
-                    len(self.new_assets) > 0
-                    or len(self.removed_assets) > 0
-                    or len(self.new_No_assets) > 0
-                    or len(self.removed_No_assets) > 0
-                ):
-                    self._This_Last_Assets_Notes_signal.emit(
-                        abs(len(self.new_assets) - len(self.removed_assets)),
-                        len(self.new_assets),
-                        len(self.removed_assets),
-                        abs(len(self.new_No_assets) - len(self.removed_No_assets)),
-                        len(self.new_No_assets),
-                        len(self.removed_No_assets),
-                    )
-                else:
-                    self._This_Last_Assets_Notes_signal.emit(0, 0, 0, 0, 0, 0)
-
             except Exception as e:
-                self._unlock_signal.emit()
-                self._Error_signal.emit()
                 logger.error(e)
 
     def Save_Notes_Notes_Comparison(self):
@@ -697,8 +598,5 @@ class Notes_Notes(QThread):
                         for cell in row:
                             cell.border = thin_border
 
-                self._Save_signal.emit(self.ui.frame_3)
-
             except Exception as e:
-                self._unlock_signal.emit()
                 logger.error(e)

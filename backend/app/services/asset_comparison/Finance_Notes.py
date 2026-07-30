@@ -1,33 +1,3 @@
-class pyqtSignal:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def connect(self, *args, **kwargs):
-        pass
-
-    def emit(self, *args, **kwargs):
-        pass
-
-
-class QThread:
-    pass
-
-
-class QObject:
-    pass
-
-
-class QWidget:
-    pass
-
-
-def safe_thread_run(func):  # noqa: F811
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
@@ -38,17 +8,8 @@ from app.services.asset_comparison.const import FINANCE_NOTES_SAVE_PATH  # noqa:
 from loguru import logger  # noqa: E402, I001, UP015, F401
 
 
-class Finance_Notes(QThread):
-    _Update_Message_signal = pyqtSignal(str)
-    _new_Finance_Notes = pyqtSignal(int, int, int, int)
-    _unlock_signal = pyqtSignal()
-    _Error_signal = pyqtSignal()
-    _Save_signal = pyqtSignal(object)
-    _progress_signal = pyqtSignal(int, str)  # 進度信號：進度值, 進度文本
-
-    def __init__(self, ui):
-        super().__init__()
-        self.ui = ui
+class Finance_Notes:
+    def __init__(self):
         self.processed_notes_data = None
         self.date_Notes_assets = None
         self.Finance_path = None
@@ -63,29 +24,6 @@ class Finance_Notes(QThread):
         self.Finance_data = None
         self.Notes_data = None
         self.Custodian_txt = None
-
-    @safe_thread_run
-    def run(self):
-        if not self.Finance_path or not self.Notes_path or not self.Custodian_path:
-            self._Update_Message_signal.emit("请选择文件")
-            return
-
-        self._Update_Message_signal.emit("Start")
-        try:
-            self._progress_signal.emit(15, "讀取財務數據...")
-            self.read_Finance_data()
-            self._progress_signal.emit(35, "讀取Notes數據...")
-            self.read_Notes_data()
-            self._progress_signal.emit(55, "讀取保管人數據...")
-            self.read_Custodian_data()
-            self._progress_signal.emit(80, "開始財務與Notes對比...")
-            self.Finance_Notes_Comparison()
-            self._progress_signal.emit(100, "對比完成")
-            self._unlock_signal.emit()
-        except Exception as e:
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
-            logger.exception(e)
 
     def safe_read_excel(self, path):
         """安全讀取Excel並轉為LazyFrame"""
@@ -153,7 +91,6 @@ class Finance_Notes(QThread):
 
         except Exception as e:
             logger.error(f"读取 {os.path.basename(path)} 失败: {e}")
-            self._unlock_signal.emit()
             raise
 
     def read_Custodian_data(self):
@@ -224,21 +161,7 @@ class Finance_Notes(QThread):
                 # Notes数据已在读取时处理，直接使用
                 self.processed_notes_data = self.Notes_data
 
-                if len(self.new_assets) > 0 or len(self.removed_assets) > 0:
-                    self._new_Finance_Notes.emit(
-                        len(self.Finance_assets),
-                        len(self.date_Notes_assets),
-                        len(self.new_assets),
-                        len(self.removed_assets),
-                    )
-                else:
-                    self._new_Finance_Notes.emit(
-                        len(self.Finance_assets), len(self.date_Notes_assets), 0, 0
-                    )
-
             except Exception as e:
-                self._unlock_signal.emit()
-                self._Error_signal.emit()
                 logger.error(e)
 
     def Save_Finance_Notes_Comparison(self):
@@ -371,8 +294,5 @@ class Finance_Notes(QThread):
                         for cell in r:
                             cell.border = thin
 
-                self._Save_signal.emit(self.ui.frame_4)
-
         except Exception as e:
-            self._unlock_signal.emit()
             logger.error(e)

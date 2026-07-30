@@ -25,6 +25,7 @@ dependencies = [
     "sqlalchemy>=2.0.51",
     "uvicorn>=0.51.0",
     "xlrd>=2.0.2",
+    "xlsxwriter>=3.2.9",
 ]
 
 [dependency-groups]

@@ -1,33 +1,3 @@
-class pyqtSignal:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def connect(self, *args, **kwargs):
-        pass
-
-    def emit(self, *args, **kwargs):
-        pass
-
-
-class QThread:
-    pass
-
-
-class QObject:
-    pass
-
-
-class QWidget:
-    pass
-
-
-def safe_thread_run(func):  # noqa: F811
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
@@ -38,19 +8,8 @@ from app.services.asset_comparison.const import FINANCE_FINANCE_SAVE_PATH  # noq
 from loguru import logger  # noqa: E402, I001, UP015, F401
 
 
-class Finance_Finance(QThread):
-    _Update_Message_signal = pyqtSignal(str)
-    _Update_this_pysignal = pyqtSignal(int, int)
-    _Update_last_pysignal = pyqtSignal(int, int)
-    _update_check_signal = pyqtSignal(int, int, int, int, int, int, int, int)
-    _unlock_signal = pyqtSignal()
-    _Error_signal = pyqtSignal()
-    _Save_signal = pyqtSignal(object)
-    _progress_signal = pyqtSignal(int, str)  # 進度信號：進度值, 進度文本
-
-    def __init__(self, ui):
-        super().__init__()
-        self.ui = ui
+class Finance_Finance:
+    def __init__(self):
         self.Department_Difference = []
         self.Custodian_Difference = []
         self.check_Custodian = []
@@ -75,32 +34,6 @@ class Finance_Finance(QThread):
         self.new_Department_assets = []
         self.removed_Custodian_assets = []
         self.removed_Department_assets = []
-
-    @safe_thread_run
-    def run(self):
-        if not self.this_Finance_path or not self.last_Finance_path:
-            self._Update_Message_signal.emit("请选择文件")
-            return
-        if not self.Custodian_path and not self.Department_path:
-            self._Update_Message_signal.emit("请选择保管人或\n部门代码")
-            return
-        self._Update_Message_signal.emit("Start")
-        try:
-            self._progress_signal.emit(10, "讀取保管人數據...")
-            self.read_Custodian_data()
-            self._progress_signal.emit(20, "讀取部門數據...")
-            self.read_Department_data()
-            self._progress_signal.emit(40, "讀取本月財務數據...")
-            self.read_this_Finance_data()
-            self._progress_signal.emit(60, "讀取上月財務數據...")
-            self.read_last_Finance_data()
-            self._progress_signal.emit(80, "開始財務數據對比...")
-            self.Finance_check()
-            self._progress_signal.emit(100, "對比完成")
-        except Exception as e:
-            logger.exception(e)
-            self._unlock_signal.emit()
-            self._Error_signal.emit()
 
     def read_Custodian_data(self):
         self.Custodian_data = []
@@ -157,7 +90,6 @@ class Finance_Finance(QThread):
 
         except Exception as e:
             logger.error(f"读取 {os.path.basename(path)} 失败: {e}")
-            self._unlock_signal.emit()
             raise
 
     def read_this_Finance_data(self):
@@ -284,13 +216,6 @@ class Finance_Finance(QThread):
                 self.this_Department_assets
             )
 
-            self._Update_this_pysignal.emit(
-                len(self.this_Department_assets), len(self.this_Custodian_assets)
-            )
-            self._Update_last_pysignal.emit(
-                len(self.last_Department_assets), len(self.last_Custodian_assets)
-            )
-
             self.Custodian_Difference = abs(
                 len(self.new_Custodian_assets) - len(self.removed_Custodian_assets)
             )
@@ -298,28 +223,7 @@ class Finance_Finance(QThread):
                 len(self.new_Department_assets) - len(self.removed_Department_assets)
             )
 
-            self._update_check_signal.emit(
-                self.Custodian_Difference,
-                len(self.new_Custodian_assets),
-                len(self.removed_Custodian_assets),
-                self.Department_Difference,
-                len(self.new_Department_assets),
-                len(self.removed_Department_assets),
-                len(
-                    self.check_Custodian
-                    if isinstance(self.check_Custodian, (list, pl.Series))
-                    else 0
-                ),
-                len(
-                    self.check_Department
-                    if isinstance(self.check_Department, (list, pl.Series))
-                    else 0
-                ),
-            )
-
         except Exception as e:
-            self._Error_signal.emit()
-            self._unlock_signal.emit()
             logger.exception(e)
 
     def Save_Check(self):
@@ -486,10 +390,7 @@ class Finance_Finance(QThread):
                 for col in ["A", "B", "C", "D", "E"]:
                     worksheet.column_dimensions[col].width = 20
 
-            self._Save_signal.emit(self.ui.frame)
-
         except Exception as e:
-            self._unlock_signal.emit()
             logger.exception(e)
 
     def _add_section_to_excel(self, worksheet, df, title, start_row, section_type):

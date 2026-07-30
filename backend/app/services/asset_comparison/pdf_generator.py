@@ -8,8 +8,12 @@ PDF生成模块
 
 import logging  # noqa: E402, I001, UP015, F401
 import os  # noqa: E402, I001, UP015, F401
-import platform  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
+from pathlib import Path  # noqa: E402, I001, UP015, F401
+from threading import Lock  # noqa: E402, I001, UP015, F401
+from time import perf_counter  # noqa: E402, I001, UP015, F401
+from unicodedata import east_asian_width  # noqa: E402, I001, UP015, F401
+from xml.sax.saxutils import escape  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
 import pandas as pd  # noqa: E402, I001, UP015, F401
@@ -23,7 +27,11 @@ try:
     from PyPDF2 import PdfMerger  # noqa: E402, I001, UP015, F401
     from reportlab.lib import colors  # noqa: E402, I001, UP015, F401
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT  # noqa: E402, I001, UP015, F401
-    from reportlab.lib.pagesizes import A4, letter  # noqa: E402, I001, UP015, F401
+    from reportlab.lib.pagesizes import (  # noqa: E402, I001, UP015, F401
+        A4,
+        landscape,
+        letter,
+    )
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet  # noqa: E402, I001, UP015, F401
     from reportlab.lib.units import inch, mm  # noqa: E402, I001, UP015, F401
     from reportlab.pdfbase import pdfmetrics  # noqa: E402, I001, UP015, F401
@@ -42,6 +50,13 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
     print("Warning: reportlab not available. Install with: pip install reportlab")
 
+MAPLE_MONO_FONT_NAME = "MapleMonoCN"
+MAPLE_MONO_BOLD_FONT_NAME = "MapleMonoCN-Bold"
+FONT_DIRECTORY = Path(__file__).with_name("fonts")
+MAPLE_MONO_FONT_PATH = FONT_DIRECTORY / "MapleMono-CN-Regular.ttf"
+MAPLE_MONO_BOLD_FONT_PATH = FONT_DIRECTORY / "MapleMono-CN-Bold.ttf"
+FONT_REGISTRATION_LOCK = Lock()
+
 
 class RawDataToPDFConverter:
     """从原始数据直接生成PDF的转换器"""
@@ -56,98 +71,36 @@ class RawDataToPDFConverter:
 
     def setup_chinese_font(self):
         """设置中文字体支持"""
-        try:
-            # 尝试注册系统中文字体
-            system = platform.system()
+        missing_paths = [
+            str(font_path)
+            for font_path in (MAPLE_MONO_FONT_PATH, MAPLE_MONO_BOLD_FONT_PATH)
+            if not font_path.is_file()
+        ]
+        if missing_paths:
+            raise FileNotFoundError(
+                f"Maple Mono CN 字体文件缺失: {', '.join(missing_paths)}"
+            )
 
-            # 定义多个可能的字体路径
-            font_paths = []
+        with FONT_REGISTRATION_LOCK:
+            registered_fonts = set(pdfmetrics.getRegisteredFontNames())
+            if MAPLE_MONO_FONT_NAME not in registered_fonts:
+                pdfmetrics.registerFont(
+                    TTFont(MAPLE_MONO_FONT_NAME, str(MAPLE_MONO_FONT_PATH))
+                )
+            if MAPLE_MONO_BOLD_FONT_NAME not in registered_fonts:
+                pdfmetrics.registerFont(
+                    TTFont(MAPLE_MONO_BOLD_FONT_NAME, str(MAPLE_MONO_BOLD_FONT_PATH))
+                )
+            pdfmetrics.registerFontFamily(
+                MAPLE_MONO_FONT_NAME,
+                normal=MAPLE_MONO_FONT_NAME,
+                bold=MAPLE_MONO_BOLD_FONT_NAME,
+                italic=MAPLE_MONO_FONT_NAME,
+                boldItalic=MAPLE_MONO_BOLD_FONT_NAME,
+            )
 
-            if system == "Darwin":  # macOS
-                font_paths = [
-                    "/System/Library/Fonts/PingFang.ttc",
-                    "/System/Library/Fonts/STHeiti Light.ttc",
-                    "/System/Library/Fonts/STHeiti Medium.ttc",
-                    "/System/Library/Fonts/Arial Unicode MS.ttf",
-                    "/Library/Fonts/Arial Unicode MS.ttf",
-                    "/System/Library/Fonts/STSong.ttc",  # 繁体中文
-                    "/System/Library/Fonts/STKaiti.ttc",  # 繁体楷体
-                    "/System/Library/Fonts/STFangsong.ttc",  # 繁体仿宋
-                    "/System/Library/Fonts/STSongti.ttc",  # 繁体宋体
-                    "/System/Library/Fonts/STYuanti.ttc",  # 繁体圆体
-                ]
-            elif system == "Windows":
-                font_paths = [
-                    "C:/Windows/Fonts/simsun.ttc",
-                    "C:/Windows/Fonts/simhei.ttf",
-                    "C:/Windows/Fonts/msyh.ttc",
-                    "C:/Windows/Fonts/simkai.ttf",
-                    "C:/Windows/Fonts/msjh.ttc",  # 繁体中文
-                    "C:/Windows/Fonts/msjhbd.ttc",  # 繁体中文粗体
-                    "C:/Windows/Fonts/msjhl.ttc",  # 繁体中文细体
-                    "C:/Windows/Fonts/msjhdc.ttc",  # 繁体中文等宽
-                    "C:/Windows/Fonts/msjhdl.ttc",  # 繁体中文等宽细体
-                    "C:/Windows/Fonts/msjhs.ttc",  # 繁体中文等宽粗体
-                ]
-            else:  # Linux
-                font_paths = [
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                ]
-
-            # 尝试注册字体
-            font_registered = False
-            for font_path in font_paths:
-                if os.path.exists(font_path):
-                    try:
-                        pdfmetrics.registerFont(TTFont("ChineseFont", font_path))
-                        self.chinese_font = "ChineseFont"
-                        font_registered = True
-                        print(f"✅ 成功注册中文字体: {font_path}")
-                        break
-                    except Exception as e:
-                        print(f"⚠️ 字体注册失败: {font_path}, 错误: {e}")
-                        continue
-
-            if not font_registered:
-                # 如果所有字体都注册失败，使用reportlab内置的中文字体
-                try:
-                    from reportlab.pdfbase.cidfonts import UnicodeCIDFont  # noqa: E402, I001, UP015, F401
-
-                    # 尝试注册支持繁体中文的字体
-                    font_options = [
-                        "STSong-Light",  # 宋体
-                        "STSongStd-Light",  # 宋体标准
-                        "HeiseiMin-W3",  # 日文字体，支持繁体
-                        "HeiseiKakuGo-W5",  # 日文字体，支持繁体
-                        "HYSong",  # 华文宋体
-                        "HYGothic-Medium",  # 华文黑体
-                        "HYGothic-Extra",  # 华文黑体加粗
-                    ]
-
-                    font_registered = False
-                    for font_name in font_options:
-                        try:
-                            pdfmetrics.registerFont(UnicodeCIDFont(font_name))
-                            self.chinese_font = font_name
-                            print(f"✅ 使用reportlab内置中文字体: {font_name}")
-                            font_registered = True
-                            break
-                        except Exception:
-                            continue
-
-                    if not font_registered:
-                        self.chinese_font = "Helvetica"
-                        print("⚠️ 使用默认字体: Helvetica")
-
-                except Exception as e:
-                    print(f"❌ reportlab内置字体注册失败: {e}")
-                    self.chinese_font = "Helvetica"
-                    print("⚠️ 使用默认字体: Helvetica")
-
-        except Exception as e:
-            print(f"❌ 字体设置失败: {e}")
-            self.chinese_font = "Helvetica"
+        self.chinese_font = MAPLE_MONO_FONT_NAME
+        self.chinese_bold_font = MAPLE_MONO_BOLD_FONT_NAME
 
     def setup_custom_styles(self):
         """设置自定义样式"""
@@ -180,7 +133,47 @@ class RawDataToPDFConverter:
             fontName=self.chinese_font,
         )
 
-    def create_data_table(self, sheet_name, data):
+    @staticmethod
+    def _text_width_units(value):
+        """按字符显示宽度估算文本占用空间"""
+        text = str(value)
+        lines = text.splitlines() or [""]
+        return max(
+            sum(2 if east_asian_width(char) in {"W", "F"} else 1 for char in line)
+            for line in lines
+        )
+
+    def _calculate_column_widths(self, table_data, available_width):
+        """根据内容权重分配列宽，并确保总宽度不超过页面内容区"""
+        column_count = len(table_data[0])
+        desired_widths = []
+        for column_index in range(column_count):
+            content_width = max(
+                self._text_width_units(row[column_index]) for row in table_data
+            )
+            desired_widths.append(min(max(content_width * 4.2 + 12, 30), 100))
+
+        desired_total = sum(desired_widths)
+        if desired_total <= available_width:
+            return desired_widths
+
+        minimum_width = min(30, available_width / column_count)
+        remaining_width = available_width - minimum_width * column_count
+        flexible_widths = [max(width - minimum_width, 1) for width in desired_widths]
+        flexible_total = sum(flexible_widths)
+        return [
+            minimum_width + remaining_width * flexible_width / flexible_total
+            for flexible_width in flexible_widths
+        ]
+
+    @staticmethod
+    def _table_paragraph(value, style):
+        """将单元格内容转换为支持自动换行的安全段落"""
+        text = escape(str(value))
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        return Paragraph(text.replace("\n", "<br/>"), style)
+
+    def create_data_table(self, sheet_name, data, available_width=None):
         """创建数据表格"""
         elements = []
 
@@ -251,24 +244,70 @@ class RawDataToPDFConverter:
             )
             elements.append(Spacer(1, 5 * mm))
 
+        if available_width is None:
+            available_width = landscape(A4)[0] - 40 * mm
+
+        column_count = len(headers)
+        if column_count <= 8:
+            header_font_size, body_font_size = 9, 8
+        elif column_count <= 12:
+            header_font_size, body_font_size = 8, 7
+        elif column_count <= 18:
+            header_font_size, body_font_size = 7, 6.5
+        else:
+            header_font_size, body_font_size = 6, 5.5
+
+        header_style = ParagraphStyle(
+            "TableHeader",
+            fontName=self.chinese_font,
+            fontSize=header_font_size,
+            leading=header_font_size + 1,
+            alignment=TA_CENTER,
+            textColor=colors.whitesmoke,
+            wordWrap="CJK",
+            splitLongWords=True,
+        )
+        cell_style = ParagraphStyle(
+            "TableCell",
+            fontName=self.chinese_font,
+            fontSize=body_font_size,
+            leading=body_font_size + 1,
+            alignment=TA_CENTER,
+            wordWrap="CJK",
+            splitLongWords=True,
+        )
+        column_widths = self._calculate_column_widths(table_data, available_width)
+        wrapped_table_data = [
+            [
+                self._table_paragraph(
+                    value, header_style if row_index == 0 else cell_style
+                )
+                for value in row
+            ]
+            for row_index, row in enumerate(table_data)
+        ]
+
         # 创建表格
-        table = Table(table_data, repeatRows=1)
+        table = Table(
+            wrapped_table_data,
+            colWidths=column_widths,
+            repeatRows=1,
+            hAlign="CENTER",
+        )
 
         # 设置表格样式
         table_style = TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("FONTNAME", (0, 0), (-1, 0), self.chinese_font),
-                ("FONTSIZE", (0, 0), (-1, 0), 10),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
                 ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
                 ("GRID", (0, 0), (-1, -1), 1, colors.black),
-                ("FONTNAME", (0, 1), (-1, -1), self.chinese_font),
-                ("FONTSIZE", (0, 1), (-1, -1), 8),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ]
         )
 
@@ -362,7 +401,7 @@ class RawDataToPDFConverter:
             # 创建PDF文档
             doc = SimpleDocTemplate(
                 pdf_path,
-                pagesize=A4,
+                pagesize=landscape(A4),
                 rightMargin=20 * mm,
                 leftMargin=20 * mm,
                 topMargin=20 * mm,
@@ -386,7 +425,7 @@ class RawDataToPDFConverter:
             story.append(Spacer(1, 15 * mm))
 
             # 添加数据表格
-            story.extend(self.create_data_table(sheet_name, data))
+            story.extend(self.create_data_table(sheet_name, data, doc.width))
 
             # 生成PDF
             doc.build(story)
@@ -449,6 +488,7 @@ class RawDataToPDFConverter:
             pdf_paths = []
             for sheet_name, data in sheet_data_dict.items():
                 if data is not None:
+                    sheet_started_at = perf_counter()
                     # 检查数据是否为空
                     is_empty = False
                     if hasattr(data, "empty"):
@@ -465,6 +505,20 @@ class RawDataToPDFConverter:
 
                         success = self.create_single_sheet_pdf(
                             sheet_name, data, temp_pdf_path, sheet_title
+                        )
+                        row_count = (
+                            data.shape[0]
+                            if hasattr(data, "shape")
+                            else getattr(data, "height", None)
+                        )
+                        elapsed = perf_counter() - sheet_started_at
+                        logging.info(
+                            "pdf: stage=generate_sheet elapsed=%.3fs "
+                            "sheet=%r rows=%r ok=%r",
+                            elapsed,
+                            sheet_name,
+                            row_count,
+                            success,
                         )
                         if success:
                             pdf_paths.append(temp_pdf_path)
@@ -570,19 +624,14 @@ def excel_sheet_to_pdf(excel_path, sheet_name, pdf_path=None):
 
                 # 样式 - 字体加粗
                 if cell.font and cell.font.bold:
-                    if converter.chinese_font.startswith("STSong"):
-                        table_style_cmds.append(
-                            ("FONTNAME", (c_idx, r_idx), (c_idx, r_idx), "STSong-Black")
+                    table_style_cmds.append(
+                        (
+                            "FONTNAME",
+                            (c_idx, r_idx),
+                            (c_idx, r_idx),
+                            converter.chinese_bold_font,
                         )
-                    else:
-                        table_style_cmds.append(
-                            (
-                                "FONTNAME",
-                                (c_idx, r_idx),
-                                (c_idx, r_idx),
-                                f"{converter.chinese_font}-Bold",
-                            )
-                        )
+                    )
 
                 # 样式 - 字体颜色
                 if cell.font and cell.font.color and cell.font.color.type == "rgb":
