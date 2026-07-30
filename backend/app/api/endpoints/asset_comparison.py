@@ -1401,16 +1401,10 @@ def _build_raw_data_xlsx(
         normalized_df = _normalize_raw_data_line_breaks(df)
         sheet_dfs.append((safe_name, normalized_df))
 
-    wb = Workbook()
-    first = True
+    wb = Workbook(write_only=True)
     for safe_name, df in sheet_dfs:
         sheet_started_at = perf_counter()
-        if first:
-            ws = wb.active
-            ws.title = safe_name
-            first = False
-        else:
-            ws = wb.create_sheet(title=safe_name)
+        ws = wb.create_sheet(title=safe_name)
         ws.append(list(df.columns))
         for row in df.iter_rows(named=False):
             ws.append(["" if v is None else str(v) for v in row])
