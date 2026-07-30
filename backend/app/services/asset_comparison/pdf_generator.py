@@ -16,7 +16,6 @@ from unicodedata import east_asian_width  # noqa: E402, I001, UP015, F401
 from xml.sax.saxutils import escape  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
-import pandas as pd  # noqa: E402, I001, UP015, F401
 from PyPDF2 import PdfMerger  # noqa: E402, I001, UP015, F401
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT  # noqa: E402, I001, UP015, F401
 from reportlab.pdfbase import pdfmetrics  # noqa: E402, I001, UP015, F401
@@ -173,7 +172,9 @@ class RawDataToPDFConverter:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
         return Paragraph(text.replace("\n", "<br/>"), style)
 
-    def create_data_table(self, sheet_name, data, available_width=None):
+    def create_data_table(
+        self, sheet_name, data, available_width=None, comment: str = ""
+    ):
         """创建数据表格"""
         elements = []
 
@@ -182,32 +183,16 @@ class RawDataToPDFConverter:
         elements.append(Paragraph(stats_title, self.subtitle_style))
         elements.append(Spacer(1, 10 * mm))
 
-        # 检查是否有注释信息
-        comment = None
-        if hasattr(data, "attrs") and "comment" in data.attrs:
-            comment = data.attrs["comment"]
-
         # 如果有注释，在统计信息下面显示
         if comment and comment.strip():
             elements.append(Paragraph(f"注释：{comment.strip()}", self.body_style))
             elements.append(Spacer(1, 10 * mm))
 
         # 处理数据
-        if hasattr(data, "collect"):  # polars LazyFrame
-            df = data.collect().to_pandas()
-        elif hasattr(data, "to_pandas"):  # polars DataFrame
-            df = data.to_pandas()
-        else:
-            df = data
+        df = data.collect() if hasattr(data, "collect") else data
 
         # 检查数据是否为空
-        is_empty = False
-        if hasattr(df, "empty"):
-            is_empty = df.empty
-        elif hasattr(df, "shape"):
-            is_empty = df.shape[0] == 0
-        elif hasattr(df, "height"):
-            is_empty = df.height == 0
+        is_empty = df is None or df.is_empty()
 
         if is_empty:
             elements.append(Paragraph("暂无数据", self.body_style))
@@ -222,10 +207,10 @@ class RawDataToPDFConverter:
 
         # 添加数据行（限制行数以避免PDF过大）
         max_rows = 99999  # 每个表格最多显示100行
-        for _idx, row in df.head(max_rows).iterrows():
+        for row_dict in df.head(max_rows).iter_rows(named=True):
             row_data = []
-            for value in row:
-                if pd.isna(value):
+            for value in row_dict.values():
+                if value is None:
                     row_data.append("")
                 else:
                     # 处理长文本
@@ -320,21 +305,10 @@ class RawDataToPDFConverter:
         """生成统计信息标题"""
         try:
             # 处理数据
-            if hasattr(data, "collect"):  # polars LazyFrame
-                df = data.collect().to_pandas()
-            elif hasattr(data, "to_pandas"):  # polars DataFrame
-                df = data.to_pandas()
-            else:
-                df = data
+            df = data.collect() if hasattr(data, "collect") else data
 
             # 检查数据是否为空
-            is_empty = False
-            if hasattr(df, "empty"):
-                is_empty = df.empty
-            elif hasattr(df, "shape"):
-                is_empty = df.shape[0] == 0
-            elif hasattr(df, "height"):
-                is_empty = df.height == 0
+            is_empty = df is None or df.is_empty()
 
             if is_empty:
                 return "暂无数据"
@@ -345,7 +319,7 @@ class RawDataToPDFConverter:
 
                 # 构建统计信息
                 stats_parts = []
-                for category, count in category_counts.items():
+                for category, count in category_counts.iter_rows():
                     # 跳过注释分类，不显示"注释多少笔"
                     if category == "注释":
                         continue
@@ -391,7 +365,9 @@ class RawDataToPDFConverter:
         }
         return translations.get(sheet_name, sheet_name)
 
-    def create_single_sheet_pdf(self, sheet_name, data, pdf_path, title=None):
+    def create_single_sheet_pdf(
+        self, sheet_name, data, pdf_path, title=None, comment: str = ""
+    ):
         """为单个sheet创建PDF"""
         if not REPORTLAB_AVAILABLE:
             logging.error("reportlab库未安装，无法生成PDF")
@@ -425,7 +401,9 @@ class RawDataToPDFConverter:
             story.append(Spacer(1, 15 * mm))
 
             # 添加数据表格
-            story.extend(self.create_data_table(sheet_name, data, doc.width))
+            story.extend(
+                self.create_data_table(sheet_name, data, doc.width, comment=comment)
+            )
 
             # 生成PDF
             doc.build(story)
@@ -486,15 +464,13 @@ class RawDataToPDFConverter:
 
             # 生成每个sheet的PDF
             pdf_paths = []
-            for sheet_name, data in sheet_data_dict.items():
+            for sheet_name, (data, comment) in sheet_data_dict.items():
                 if data is not None:
                     sheet_started_at = perf_counter()
                     # 检查数据是否为空
                     is_empty = False
-                    if hasattr(data, "empty"):
-                        is_empty = data.empty
-                    elif hasattr(data, "shape"):
-                        is_empty = data.shape[0] == 0
+                    if hasattr(data, "is_empty"):
+                        is_empty = data.is_empty()
                     elif hasattr(data, "height"):
                         is_empty = data.height == 0
 
@@ -504,11 +480,15 @@ class RawDataToPDFConverter:
                         sheet_title = self.translate_sheet_name(sheet_name)
 
                         success = self.create_single_sheet_pdf(
-                            sheet_name, data, temp_pdf_path, sheet_title
+                            sheet_name,
+                            data,
+                            temp_pdf_path,
+                            sheet_title,
+                            comment=comment,
                         )
                         row_count = (
-                            data.shape[0]
-                            if hasattr(data, "shape")
+                            len(data)
+                            if hasattr(data, "__len__")
                             else getattr(data, "height", None)
                         )
                         elapsed = perf_counter() - sheet_started_at
