@@ -8,8 +8,9 @@ PDF生成模块
 
 import logging  # noqa: E402, I001, UP015, F401
 import os  # noqa: E402, I001, UP015, F401
-import platform  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
+from pathlib import Path  # noqa: E402, I001, UP015, F401
+from threading import Lock  # noqa: E402, I001, UP015, F401
 from time import perf_counter  # noqa: E402, I001, UP015, F401
 from unicodedata import east_asian_width  # noqa: E402, I001, UP015, F401
 from xml.sax.saxutils import escape  # noqa: E402, I001, UP015, F401
@@ -49,6 +50,13 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
     print("Warning: reportlab not available. Install with: pip install reportlab")
 
+MAPLE_MONO_FONT_NAME = "MapleMonoCN"
+MAPLE_MONO_BOLD_FONT_NAME = "MapleMonoCN-Bold"
+FONT_DIRECTORY = Path(__file__).with_name("fonts")
+MAPLE_MONO_FONT_PATH = FONT_DIRECTORY / "MapleMono-CN-Regular.ttf"
+MAPLE_MONO_BOLD_FONT_PATH = FONT_DIRECTORY / "MapleMono-CN-Bold.ttf"
+FONT_REGISTRATION_LOCK = Lock()
+
 
 class RawDataToPDFConverter:
     """从原始数据直接生成PDF的转换器"""
@@ -63,98 +71,36 @@ class RawDataToPDFConverter:
 
     def setup_chinese_font(self):
         """设置中文字体支持"""
-        try:
-            # 尝试注册系统中文字体
-            system = platform.system()
+        missing_paths = [
+            str(font_path)
+            for font_path in (MAPLE_MONO_FONT_PATH, MAPLE_MONO_BOLD_FONT_PATH)
+            if not font_path.is_file()
+        ]
+        if missing_paths:
+            raise FileNotFoundError(
+                f"Maple Mono CN 字体文件缺失: {', '.join(missing_paths)}"
+            )
 
-            # 定义多个可能的字体路径
-            font_paths = []
+        with FONT_REGISTRATION_LOCK:
+            registered_fonts = set(pdfmetrics.getRegisteredFontNames())
+            if MAPLE_MONO_FONT_NAME not in registered_fonts:
+                pdfmetrics.registerFont(
+                    TTFont(MAPLE_MONO_FONT_NAME, str(MAPLE_MONO_FONT_PATH))
+                )
+            if MAPLE_MONO_BOLD_FONT_NAME not in registered_fonts:
+                pdfmetrics.registerFont(
+                    TTFont(MAPLE_MONO_BOLD_FONT_NAME, str(MAPLE_MONO_BOLD_FONT_PATH))
+                )
+            pdfmetrics.registerFontFamily(
+                MAPLE_MONO_FONT_NAME,
+                normal=MAPLE_MONO_FONT_NAME,
+                bold=MAPLE_MONO_BOLD_FONT_NAME,
+                italic=MAPLE_MONO_FONT_NAME,
+                boldItalic=MAPLE_MONO_BOLD_FONT_NAME,
+            )
 
-            if system == "Darwin":  # macOS
-                font_paths = [
-                    "/System/Library/Fonts/PingFang.ttc",
-                    "/System/Library/Fonts/STHeiti Light.ttc",
-                    "/System/Library/Fonts/STHeiti Medium.ttc",
-                    "/System/Library/Fonts/Arial Unicode MS.ttf",
-                    "/Library/Fonts/Arial Unicode MS.ttf",
-                    "/System/Library/Fonts/STSong.ttc",  # 繁体中文
-                    "/System/Library/Fonts/STKaiti.ttc",  # 繁体楷体
-                    "/System/Library/Fonts/STFangsong.ttc",  # 繁体仿宋
-                    "/System/Library/Fonts/STSongti.ttc",  # 繁体宋体
-                    "/System/Library/Fonts/STYuanti.ttc",  # 繁体圆体
-                ]
-            elif system == "Windows":
-                font_paths = [
-                    "C:/Windows/Fonts/simsun.ttc",
-                    "C:/Windows/Fonts/simhei.ttf",
-                    "C:/Windows/Fonts/msyh.ttc",
-                    "C:/Windows/Fonts/simkai.ttf",
-                    "C:/Windows/Fonts/msjh.ttc",  # 繁体中文
-                    "C:/Windows/Fonts/msjhbd.ttc",  # 繁体中文粗体
-                    "C:/Windows/Fonts/msjhl.ttc",  # 繁体中文细体
-                    "C:/Windows/Fonts/msjhdc.ttc",  # 繁体中文等宽
-                    "C:/Windows/Fonts/msjhdl.ttc",  # 繁体中文等宽细体
-                    "C:/Windows/Fonts/msjhs.ttc",  # 繁体中文等宽粗体
-                ]
-            else:  # Linux
-                font_paths = [
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                ]
-
-            # 尝试注册字体
-            font_registered = False
-            for font_path in font_paths:
-                if os.path.exists(font_path):
-                    try:
-                        pdfmetrics.registerFont(TTFont("ChineseFont", font_path))
-                        self.chinese_font = "ChineseFont"
-                        font_registered = True
-                        print(f"✅ 成功注册中文字体: {font_path}")
-                        break
-                    except Exception as e:
-                        print(f"⚠️ 字体注册失败: {font_path}, 错误: {e}")
-                        continue
-
-            if not font_registered:
-                # 如果所有字体都注册失败，使用reportlab内置的中文字体
-                try:
-                    from reportlab.pdfbase.cidfonts import UnicodeCIDFont  # noqa: E402, I001, UP015, F401
-
-                    # 尝试注册支持繁体中文的字体
-                    font_options = [
-                        "STSong-Light",  # 宋体
-                        "STSongStd-Light",  # 宋体标准
-                        "HeiseiMin-W3",  # 日文字体，支持繁体
-                        "HeiseiKakuGo-W5",  # 日文字体，支持繁体
-                        "HYSong",  # 华文宋体
-                        "HYGothic-Medium",  # 华文黑体
-                        "HYGothic-Extra",  # 华文黑体加粗
-                    ]
-
-                    font_registered = False
-                    for font_name in font_options:
-                        try:
-                            pdfmetrics.registerFont(UnicodeCIDFont(font_name))
-                            self.chinese_font = font_name
-                            print(f"✅ 使用reportlab内置中文字体: {font_name}")
-                            font_registered = True
-                            break
-                        except Exception:
-                            continue
-
-                    if not font_registered:
-                        self.chinese_font = "Helvetica"
-                        print("⚠️ 使用默认字体: Helvetica")
-
-                except Exception as e:
-                    print(f"❌ reportlab内置字体注册失败: {e}")
-                    self.chinese_font = "Helvetica"
-                    print("⚠️ 使用默认字体: Helvetica")
-
-        except Exception as e:
-            print(f"❌ 字体设置失败: {e}")
-            self.chinese_font = "Helvetica"
+        self.chinese_font = MAPLE_MONO_FONT_NAME
+        self.chinese_bold_font = MAPLE_MONO_BOLD_FONT_NAME
 
     def setup_custom_styles(self):
         """设置自定义样式"""
@@ -678,19 +624,14 @@ def excel_sheet_to_pdf(excel_path, sheet_name, pdf_path=None):
 
                 # 样式 - 字体加粗
                 if cell.font and cell.font.bold:
-                    if converter.chinese_font.startswith("STSong"):
-                        table_style_cmds.append(
-                            ("FONTNAME", (c_idx, r_idx), (c_idx, r_idx), "STSong-Black")
+                    table_style_cmds.append(
+                        (
+                            "FONTNAME",
+                            (c_idx, r_idx),
+                            (c_idx, r_idx),
+                            converter.chinese_bold_font,
                         )
-                    else:
-                        table_style_cmds.append(
-                            (
-                                "FONTNAME",
-                                (c_idx, r_idx),
-                                (c_idx, r_idx),
-                                f"{converter.chinese_font}-Bold",
-                            )
-                        )
+                    )
 
                 # 样式 - 字体颜色
                 if cell.font and cell.font.color and cell.font.color.type == "rgb":

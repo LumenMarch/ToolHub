@@ -1,0 +1,5 @@
+Maple Mono CN
+Version: 7.9
+Source: https://github.com/subframe7536/maple-font/releases/tag/v7.9
+Files: MapleMono-CN-Regular.ttf, MapleMono-CN-Bold.ttf
+License: SIL Open Font License 1.1 (see LICENSE.txt)
