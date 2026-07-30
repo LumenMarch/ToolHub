@@ -181,7 +181,10 @@ collaborator commits would be overwritten.
   fully resolves it. Use `Refs #<number>` when it does not.
 - Do not include secrets, credentials, private URLs, temporary debug output, or
   unrelated logs in the pull request body.
-
+- When pushing subsequent commits to an existing Pull Request branch, update
+  the PR title and body (`gh pr edit`) whenever the scope, summary, or
+  validation details change, ensuring the PR description remains evergreen and
+  accurately reflects the entire branch content.
 ## 6.4. Review and Merge
 
 - Before requesting final review, inspect the complete diff against
