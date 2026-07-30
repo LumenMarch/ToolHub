@@ -3,6 +3,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.worksheet.worksheet import Worksheet
 
+from app.services.excel_safety import safe_openpyxl_value
+
 SECTION_FILL = {
     "new": PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid"),
     "removed": PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid"),
@@ -47,7 +49,11 @@ def write_section(
     headers = ["No."] + list(df.columns)
     fill = SECTION_FILL.get(section_type)
     for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=start_row, column=col_idx, value=header)
+        cell = ws.cell(
+            row=start_row,
+            column=col_idx,
+            value=safe_openpyxl_value(str(header)),
+        )
         cell.font = Font(bold=True)
         if fill:
             cell.fill = fill
@@ -60,7 +66,7 @@ def write_section(
         no_cell.border = THIN_BORDER
 
         for col_idx, value in enumerate(row_values, 2):
-            val_str = "" if value is None else str(value)
+            val_str = safe_openpyxl_value("" if value is None else str(value))
             cell = ws.cell(row=start_row, column=col_idx, value=val_str)
             cell.border = THIN_BORDER
 
@@ -73,4 +79,5 @@ def safe_cell(
     ws: Worksheet, row: int, col: int, value: str | int | float | None
 ) -> None:
     """寫入單元格，value 為 None 時寫空字串。"""
-    ws.cell(row=row, column=col, value="" if value is None else str(value))
+    text = "" if value is None else str(value)
+    ws.cell(row=row, column=col, value=safe_openpyxl_value(text))

@@ -16,6 +16,11 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from app.services.excel_safety import (
+    XLSXWRITER_SAFE_OPTIONS,
+    safe_openpyxl_value,
+)
+
 ATTENDANCE_HEADERS = (
     "编号",
     "姓名",
@@ -714,7 +719,13 @@ class AttendanceService:
         sheets: tuple[AttendanceOutputSheet, ...],
     ) -> bytes:
         output = BytesIO()
-        workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+        workbook = xlsxwriter.Workbook(
+            output,
+            {
+                **XLSXWRITER_SAFE_OPTIONS,
+                "in_memory": True,
+            },
+        )
 
         title_format = workbook.add_format({"bold": True, "font_size": 12})
         header_format = workbook.add_format(
@@ -777,7 +788,7 @@ class AttendanceService:
                     cell = worksheet.cell(
                         row=output_row_number,
                         column=column,
-                        value=value,
+                        value=safe_openpyxl_value(value),
                     )
                     if output_row.tone == "success":
                         cell.fill = PatternFill(

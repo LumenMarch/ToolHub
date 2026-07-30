@@ -43,7 +43,16 @@ from app.services.asset_comparison.job_manager import (
 from app.services.asset_comparison.Notes_Notes import Notes_Notes
 from app.services.asset_comparison.Notes_SFC import Notes_SFC
 from app.services.asset_comparison.SFC_SFC import SFC_SFC
-from app.services.upload.store import UploadStore
+from app.services.excel_safety import (
+    XLSXWRITER_SAFE_OPTIONS,
+    safe_openpyxl_value,
+)
+from app.services.upload.store import (
+    UploadNotCompleteError,
+    UploadNotFoundError,
+    UploadOwnershipError,
+    UploadStore,
+)
 
 try:
     from app.services.asset_comparison.mod import create_excel_template
@@ -228,20 +237,42 @@ async def scan_uploaded_files_by_ids(
         f"user={current_user.username}"
     )
 
-    # 将上传文件复制到工作目录
-    for upload_id in req.upload_ids:
-        info = store.get_info(upload_id)
-        src = store.get_file_path(upload_id)
-        safe_name = Path(info["filename"]).name
-        if not safe_name:
-            logger.warning(f"[scan] 跳过空文件名: upload_id={upload_id}")
-            continue
-        dst = work_dir / safe_name
-        shutil.copy2(src, dst)
-        logger.info(f"[scan] 复制 {info['filename']} -> {dst}")
-    # 文件已复制到工作目录，删除源上传避免磁盘泄漏
-    for upload_id in req.upload_ids:
-        store.delete(upload_id)
+    upload_ids = list(dict.fromkeys(req.upload_ids))
+    try:
+        owned_uploads = [
+            (
+                upload_id,
+                store.get_owned_info(upload_id, current_user.id),
+                store.get_owned_file_path(upload_id, current_user.id),
+            )
+            for upload_id in upload_ids
+        ]
+
+        # 将上传文件复制到工作目录
+        for upload_id, info, src in owned_uploads:
+            safe_name = Path(info["filename"]).name
+            if not safe_name:
+                logger.warning(f"[scan] 跳过空文件名: upload_id={upload_id}")
+                continue
+            dst = work_dir / safe_name
+            shutil.copy2(src, dst)
+            logger.info(f"[scan] 复制 {info['filename']} -> {dst}")
+
+        # 文件已复制到工作目录，删除源上传避免磁盘泄漏
+        for upload_id in upload_ids:
+            store.delete_owned(upload_id, current_user.id)
+    except UploadOwnershipError as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise HTTPException(status_code=403, detail="无权访问此上传") from exc
+    except UploadNotFoundError as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise HTTPException(status_code=404, detail="上传不存在") from exc
+    except UploadNotCompleteError as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise HTTPException(status_code=409, detail="上传尚未完成") from exc
+    except Exception:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise
 
     # 扫描匹配
     current_date = datetime.now()
@@ -1233,7 +1264,11 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
                 end_row=row,
                 end_column=start_col + 3,
             )
-            cell = ws.cell(row=row, column=start_col + 1, value=comment.strip())
+            cell = ws.cell(
+                row=row,
+                column=start_col + 1,
+                value=safe_openpyxl_value(comment.strip()),
+            )
             cell.font = font
             cell.alignment = Alignment(
                 horizontal="center", vertical="center", wrap_text=True
@@ -1261,7 +1296,11 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
         )
 
         for col_idx, col_name in enumerate(df.columns, start=start_col + 1):
-            cell = ws.cell(row=row, column=col_idx, value=col_name)
+            cell = ws.cell(
+                row=row,
+                column=col_idx,
+                value=safe_openpyxl_value(str(col_name)),
+            )
             cell.font = font
             cell.alignment = align_center
             cell.border = border
@@ -1283,7 +1322,11 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
 
             for col_idx, value in enumerate(row_vals, start=start_col + 1):
                 value_str = str(value)
-                cell = ws.cell(row=row, column=col_idx, value=value_str)
+                cell = ws.cell(
+                    row=row,
+                    column=col_idx,
+                    value=safe_openpyxl_value(value_str),
+                )
                 cell.font = font
                 cell.alignment = align_center
                 cell.border = border
@@ -1440,7 +1483,13 @@ def _build_raw_data_xlsx(
         sheet_dfs.append((safe_name, normalized_df))
 
     buf = io.BytesIO()
-    workbook = xlsxwriter.Workbook(buf, {"constant_memory": True})
+    workbook = xlsxwriter.Workbook(
+        buf,
+        {
+            **XLSXWRITER_SAFE_OPTIONS,
+            "constant_memory": True,
+        },
+    )
     for safe_name, df in sheet_dfs:
         worksheet = workbook.add_worksheet(safe_name)
         worksheet.write_row(0, 0, list(df.columns))
@@ -1598,7 +1647,7 @@ def _build_complete_export(
         for row_idx, r_key in remark_mapping:
             ws.merge_cells(f"B{row_idx}:G{row_idx}")
             cell = ws.cell(row=row_idx, column=2)
-            cell.value = req.remarks.get(r_key, "")
+            cell.value = safe_openpyxl_value(req.remarks.get(r_key, ""))
             cell.alignment = Alignment(
                 horizontal="left", vertical="top", wrap_text=True
             )

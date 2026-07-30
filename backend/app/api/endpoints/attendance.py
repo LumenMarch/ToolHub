@@ -28,7 +28,12 @@ from app.services.attendance import (
     validate_upload_extensions,
 )
 from app.services.audit import log_action
-from app.services.upload.store import UploadStore
+from app.services.upload.store import (
+    UploadNotCompleteError,
+    UploadNotFoundError,
+    UploadOwnershipError,
+    UploadStore,
+)
 
 router = APIRouter()
 
@@ -43,6 +48,29 @@ class AttendanceUploadRequest(BaseModel):
 
     attendance_upload_id: str = Field(..., min_length=1, description="通行记录上传 ID")
     shift_upload_id: str = Field(..., min_length=1, description="班别文件上传 ID")
+
+
+def _read_owned_uploads(
+    req: AttendanceUploadRequest,
+    user_id: int,
+) -> tuple[dict, dict, bytes, bytes]:
+    try:
+        attendance_info = store.get_owned_info(req.attendance_upload_id, user_id)
+        shift_info = store.get_owned_info(req.shift_upload_id, user_id)
+        attendance_content = store.read_owned_bytes(req.attendance_upload_id, user_id)
+        shift_content = store.read_owned_bytes(req.shift_upload_id, user_id)
+    except UploadOwnershipError as exc:
+        raise HTTPException(status_code=403, detail="无权访问此上传") from exc
+    except UploadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="上传不存在") from exc
+    except UploadNotCompleteError as exc:
+        raise HTTPException(status_code=409, detail="上传尚未完成") from exc
+    return attendance_info, shift_info, attendance_content, shift_content
+
+
+def _delete_owned_uploads(req: AttendanceUploadRequest, user_id: int) -> None:
+    for upload_id in dict.fromkeys((req.attendance_upload_id, req.shift_upload_id)):
+        store.delete_owned(upload_id, user_id)
 
 
 def _build_download_response(content: bytes, filename: str) -> Response:
@@ -70,14 +98,13 @@ def process_attendance(
     start_time = perf_counter()
     logger.info("考勤整理 process 开始")
     try:
-        attendance_info = store.get_info(req.attendance_upload_id)
-        shift_info = store.get_info(req.shift_upload_id)
+        attendance_info, shift_info, attendance_content, shift_content = (
+            _read_owned_uploads(req, current_user.id)
+        )
         attendance_suffix = validate_upload_extensions(
             attendance_info["filename"],
             shift_info["filename"],
         )
-        attendance_content = store.read_bytes(req.attendance_upload_id)
-        shift_content = store.read_bytes(req.shift_upload_id)
         output = AttendanceService().process(
             attendance_content,
             attendance_suffix,
@@ -97,8 +124,7 @@ def process_attendance(
         target_id="attendance",
     )
     # 处理完成后删除源上传，避免磁盘泄漏
-    store.delete(req.attendance_upload_id)
-    store.delete(req.shift_upload_id)
+    _delete_owned_uploads(req, current_user.id)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"出勤整理_完整_{timestamp}.xlsx"
@@ -116,14 +142,13 @@ def analyze_attendance(
     start_time = perf_counter()
     logger.info("考勤整理 analyze 开始")
     try:
-        attendance_info = store.get_info(req.attendance_upload_id)
-        shift_info = store.get_info(req.shift_upload_id)
+        attendance_info, shift_info, attendance_content, shift_content = (
+            _read_owned_uploads(req, current_user.id)
+        )
         attendance_suffix = validate_upload_extensions(
             attendance_info["filename"],
             shift_info["filename"],
         )
-        attendance_content = store.read_bytes(req.attendance_upload_id)
-        shift_content = store.read_bytes(req.shift_upload_id)
         service = AttendanceService()
         analysis = service.analyze(
             attendance_content,
@@ -154,8 +179,7 @@ def analyze_attendance(
         detail={"result_id": cached_result.result_id},
     )
     # 处理完成后删除源上传，避免磁盘泄漏
-    store.delete(req.attendance_upload_id)
-    store.delete(req.shift_upload_id)
+    _delete_owned_uploads(req, current_user.id)
 
     return AttendanceAnalyzeResponse(
         result_id=cached_result.result_id,

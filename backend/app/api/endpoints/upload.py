@@ -56,7 +56,7 @@ def _parse_metadata(raw: str | None) -> dict[str, str]:
 def _check_ownership(info: dict, current_user: User) -> None:
     """校验当前用户是上传的创建者。"""
     owner_id = info.get("user_id")
-    if owner_id is not None and owner_id != current_user.id:
+    if owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权访问此上传")
 
 
