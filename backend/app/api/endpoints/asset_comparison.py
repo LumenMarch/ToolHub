@@ -11,6 +11,7 @@ from pathlib import Path
 from time import perf_counter
 from urllib.parse import quote
 
+import polars as pl
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -1103,36 +1104,25 @@ def purge_asset_comparison_job(
         _raise_job_http_error(exc)
 
 
-def _safe_to_pandas(df):
-    if df is None:
-        import pandas as pd
-
-        return pd.DataFrame()
-    if hasattr(df, "collect"):
-        return df.collect().to_pandas()
-    if hasattr(df, "to_pandas"):
-        return df.to_pandas()
-    return df
-
-
 def _convert_diff_dict_to_dataframe(diff_dict, comment: str = "", sheet_name: str = ""):
     """将 diff_dict 转换为 DataFrame 格式，用于 PDF 生成"""
     try:
-        import pandas as pd
-
         all_data = []
         for category, df in diff_dict.items():
             if df is None:
                 continue
 
-            df = _safe_to_pandas(df)
+            if hasattr(df, "collect"):
+                df = df.collect()
 
-            if df is None or getattr(df, "empty", True):
+            if df is None or df.is_empty():
                 continue
 
             # 添加分类列
-            df_copy = df.copy()
-            df_copy.insert(0, "分类", category)
+            df_copy = df.with_columns(pl.lit(category).alias("分类"))
+            df_copy = df_copy.select(
+                ["分类", *[c for c in df_copy.columns if c != "分类"]]
+            )
 
             # 检查是否为"7-Notes客户资产 VS 客户系统资产"模块，如果是则去掉"Model Number"和"资产编号"列
             if (
@@ -1140,18 +1130,18 @@ def _convert_diff_dict_to_dataframe(diff_dict, comment: str = "", sheet_name: st
                 or "7-Notes客户资产" in sheet_name
                 or "Notes客户资产" in sheet_name
             ):
-                for col in ["Model Number", "资产编号", "資產編號"]:
-                    if col in df_copy.columns:
-                        df_copy = df_copy.drop(columns=[col])
+                cols_to_drop = [
+                    col
+                    for col in ["Model Number", "资产编号", "資產編號"]
+                    if col in df_copy.columns
+                ]
+                if cols_to_drop:
+                    df_copy = df_copy.drop(cols_to_drop)
 
             all_data.append(df_copy)
 
         if all_data:
-            combined_df = pd.concat(all_data, ignore_index=True)
-            if hasattr(combined_df, "attrs"):
-                combined_df.attrs["comment"] = comment
-            else:
-                combined_df.attrs = {"comment": comment}
+            combined_df = pl.concat(all_data, how="diagonal")
             return combined_df, comment
         else:
             logger.warning(f"没有任何有效数据可以合并: {sheet_name}")
@@ -1207,7 +1197,7 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
 
     for idx, category in enumerate(categories):
         df = diff_dict[category]
-        if df is None or df.empty:
+        if df is None or df.is_empty():
             continue
 
         title_text = f"【{category}】（{len(df)}笔）"
@@ -1288,7 +1278,7 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
             )
         row += 1
 
-        for i, (_, row_series) in enumerate(df.iterrows(), start=1):
+        for i, row_vals in enumerate(df.iter_rows(named=False), start=1):
             cell = ws.cell(row=row, column=start_col, value=i)
             cell.font = font
             cell.alignment = align_center
@@ -1298,7 +1288,7 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
                 estimate_width_by_font(str(i), font.size),
             )
 
-            for col_idx, value in enumerate(row_series, start=start_col + 1):
+            for col_idx, value in enumerate(row_vals, start=start_col + 1):
                 value_str = str(value)
                 cell = ws.cell(row=row, column=col_idx, value=value_str)
                 cell.font = font
@@ -1325,23 +1315,10 @@ def write_comparison_to_sheet(diff_dict, comment: str, ws):
         ws.column_dimensions[col_letter].width = adjusted_width
 
 
-def _df_to_pandas(df):
-    """将 polars DataFrame/LazyFrame 转为 pandas DataFrame，失败返回 None"""
-    if df is None:
-        return None
-    try:
-        if hasattr(df, "collect"):  # LazyFrame
-            return df.collect().to_pandas()
-        elif hasattr(df, "to_pandas"):  # polars DataFrame
-            return df.to_pandas()
-        elif hasattr(df, "iterrows"):  # 已经是 pandas DataFrame
-            return df
-    except Exception:
-        return None
-
-
-def _normalize_raw_data_line_breaks(df):
+def _normalize_raw_data_line_breaks(df: pl.DataFrame) -> pl.DataFrame:
     """规范化备注说明列的换行符，避免导出后显示 OOXML 控制字符转义"""
+    if df is None or df.is_empty():
+        return df
     remark_columns = {
         "备注说明",
         "备注説明",
@@ -1354,84 +1331,99 @@ def _normalize_raw_data_line_breaks(df):
     if not target_columns:
         return df
 
-    normalized_df = df.copy(deep=False)
-    for column in target_columns:
-        normalized_df[column] = normalized_df[column].map(
-            lambda value: (
-                value.replace("\r\n", "\n").replace("\r", "\n")
-                if isinstance(value, str)
-                else value
-            )
-        )
-    return normalized_df
+    exprs = [
+        pl.col(column).str.replace_all("\r\n", "\n").str.replace_all("\r", "\n")
+        for column in target_columns
+    ]
+    return df.with_columns(exprs)
 
 
 def _build_raw_data_xlsx(
     summary: dict, this_month_str: str, last_month_str: str
 ) -> io.BytesIO | None:
     """从比对结果中提取原始数据，生成原始数据.xlsx 到 BytesIO 缓冲"""
-    import pandas as pd
-
     data_sheets = {}
+
+    def _get_df(obj, attr_name):
+        val = getattr(obj, attr_name, None)
+        if val is None:
+            return None
+        if hasattr(val, "collect"):
+            val = val.collect()
+        return val
 
     # 财务数据
     ff = summary.get("ff")
     if ff:
-        df_this = _df_to_pandas(getattr(ff, "this_Finance_data", None))
-        df_last = _df_to_pandas(getattr(ff, "last_Finance_data", None))
-        if df_this is not None and not df_this.empty:
+        df_this = _get_df(ff, "this_Finance_data")
+        df_last = _get_df(ff, "last_Finance_data")
+        if df_this is not None and not df_this.is_empty():
             data_sheets[f"{this_month_str}-财务"] = df_this
-        if df_last is not None and not df_last.empty:
+        if df_last is not None and not df_last.is_empty():
             data_sheets[f"{last_month_str}-财务"] = df_last
 
     # Notes数据
     nn = summary.get("nn")
     if nn:
-        df_this = _df_to_pandas(getattr(nn, "this_Notes_data", None))
-        df_last = _df_to_pandas(getattr(nn, "last_Notes_data", None))
-        if df_this is not None and not df_this.empty:
+        df_this = _get_df(nn, "this_Notes_data")
+        df_last = _get_df(nn, "last_Notes_data")
+        if df_this is not None and not df_this.is_empty():
             data_sheets[f"{this_month_str}-Notes"] = df_this
-        if df_last is not None and not df_last.empty:
+        if df_last is not None and not df_last.is_empty():
             data_sheets[f"{last_month_str}-Notes"] = df_last
 
     # SFC数据
     sfc = summary.get("sfc")
     if sfc:
-        df_this = _df_to_pandas(getattr(sfc, "this_SFC_data", None))
-        df_last = _df_to_pandas(getattr(sfc, "last_SFC_data", None))
-        if df_this is not None and not df_this.empty:
+        df_this = _get_df(sfc, "this_SFC_data")
+        df_last = _get_df(sfc, "last_SFC_data")
+        if df_this is not None and not df_this.is_empty():
             data_sheets[f"{this_month_str}-SFC"] = df_this
-        if df_last is not None and not df_last.empty:
+        if df_last is not None and not df_last.is_empty():
             data_sheets[f"{last_month_str}-SFC"] = df_last
 
     # 客户数据
     cc = summary.get("cc")
     if cc:
-        df_this = _df_to_pandas(getattr(cc, "this_Customer_data", None))
-        df_last = _df_to_pandas(getattr(cc, "last_Customer_data", None))
-        if df_this is not None and not df_this.empty:
+        df_this = _get_df(cc, "this_Customer_data")
+        df_last = _get_df(cc, "last_Customer_data")
+        if df_this is not None and not df_this.is_empty():
             data_sheets[f"{this_month_str}-客户"] = df_this
-        if df_last is not None and not df_last.empty:
+        if df_last is not None and not df_last.is_empty():
             data_sheets[f"{last_month_str}-客户"] = df_last
 
     if not data_sheets:
         return None
 
+    sheet_dfs = []
+    for sheet_name, df in data_sheets.items():
+        safe_name = sheet_name[:31]
+        normalized_df = _normalize_raw_data_line_breaks(df)
+        sheet_dfs.append((safe_name, normalized_df))
+
+    wb = Workbook()
+    first = True
+    for safe_name, df in sheet_dfs:
+        sheet_started_at = perf_counter()
+        if first:
+            ws = wb.active
+            ws.title = safe_name
+            first = False
+        else:
+            ws = wb.create_sheet(title=safe_name)
+        ws.append(list(df.columns))
+        for row in df.iter_rows(named=False):
+            ws.append(["" if v is None else str(v) for v in row])
+        _log_save_stage(
+            "write_raw_data_sheet",
+            sheet_started_at,
+            sheet=safe_name,
+            rows=len(df),
+            columns=len(df.columns),
+        )
+
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-        for sheet_name, df in data_sheets.items():
-            sheet_started_at = perf_counter()
-            # Excel 工作表名称最长 31 个字符
-            safe_name = sheet_name[:31]
-            normalized_df = _normalize_raw_data_line_breaks(df)
-            normalized_df.to_excel(writer, sheet_name=safe_name, index=False)
-            _log_save_stage(
-                "write_raw_data_sheet",
-                sheet_started_at,
-                sheet=safe_name,
-                rows=len(df),
-                columns=len(df.columns),
-            )
+    wb.save(buf)
     buf.seek(0)
     return buf
 
@@ -1605,33 +1597,53 @@ def _build_complete_export(
         if ff:
             ff_dict = {}
             if getattr(ff, "new_Custodian_assets", []):
-                df = _safe_to_pandas(ff.this_Finance_data)
-                ff_dict["依保管人新增"] = df[
-                    df["資產編號"].isin(list(ff.new_Custodian_assets))
-                ][["資產名稱", "資產編號", "保管人員"]].drop_duplicates(
-                    subset=["資產編號"]
-                )
+                df = ff.this_Finance_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    ff_dict["依保管人新增"] = (
+                        df.filter(
+                            pl.col("資產編號").is_in(list(ff.new_Custodian_assets))
+                        )
+                        .select(["資產名稱", "資產編號", "保管人員"])
+                        .unique(subset=["資產編號"])
+                    )
             if getattr(ff, "removed_Custodian_assets", []):
-                df = _safe_to_pandas(ff.last_Finance_data)
-                ff_dict["依保管人减少"] = df[
-                    df["資產編號"].isin(list(ff.removed_Custodian_assets))
-                ][["資產名稱", "資產編號", "保管人員"]].drop_duplicates(
-                    subset=["資產編號"]
-                )
+                df = ff.last_Finance_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    ff_dict["依保管人减少"] = (
+                        df.filter(
+                            pl.col("資產編號").is_in(list(ff.removed_Custodian_assets))
+                        )
+                        .select(["資產名稱", "資產編號", "保管人員"])
+                        .unique(subset=["資產編號"])
+                    )
             if getattr(ff, "new_Department_assets", []):
-                df = _safe_to_pandas(ff.this_Finance_data)
-                ff_dict["依部门新增"] = df[
-                    df["資產編號"].isin(list(ff.new_Department_assets))
-                ][["資產名稱", "資產編號", "資產所屬部門代號"]].drop_duplicates(
-                    subset=["資產編號"]
-                )
+                df = ff.this_Finance_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    ff_dict["依部门新增"] = (
+                        df.filter(
+                            pl.col("資產編號").is_in(list(ff.new_Department_assets))
+                        )
+                        .select(["資產名稱", "資產編號", "資產所屬部門代號"])
+                        .unique(subset=["資產編號"])
+                    )
             if getattr(ff, "removed_Department_assets", []):
-                df = _safe_to_pandas(ff.last_Finance_data)
-                ff_dict["依部门减少"] = df[
-                    df["資產編號"].isin(list(ff.removed_Department_assets))
-                ][["資產名稱", "資產編號", "資產所屬部門代號"]].drop_duplicates(
-                    subset=["資產編號"]
-                )
+                df = ff.last_Finance_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    ff_dict["依部门减少"] = (
+                        df.filter(
+                            pl.col("資產編號").is_in(list(ff.removed_Department_assets))
+                        )
+                        .select(["資產名稱", "資產編號", "資產所屬部門代號"])
+                        .unique(subset=["資產編號"])
+                    )
             if ff_dict:
                 comparisons.append(
                     ("1-财务 VS 财务", ff_dict, req.remarks.get("ff", ""))
@@ -1641,31 +1653,47 @@ def _build_complete_export(
         if nn:
             nn_dict = {}
             if getattr(nn, "new_assets", []):
-                df = _safe_to_pandas(nn.this_Notes_data)
-                nn_dict["本月新增"] = df[df["資產編號"].isin(list(nn.new_assets))][
-                    ["資產名稱", "資產編號", "保管人"]
-                ].drop_duplicates()
+                df = nn.this_Notes_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    nn_dict["本月新增"] = (
+                        df.filter(pl.col("資產編號").is_in(list(nn.new_assets)))
+                        .select(["資產名稱", "資產編號", "保管人"])
+                        .unique()
+                    )
             if getattr(nn, "removed_assets", []):
-                df = _safe_to_pandas(nn.last_Notes_data)
-                nn_dict["本月减少"] = df[df["資產編號"].isin(list(nn.removed_assets))][
-                    ["資產名稱", "資產編號", "保管人"]
-                ].drop_duplicates()
+                df = nn.last_Notes_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    nn_dict["本月减少"] = (
+                        df.filter(pl.col("資產編號").is_in(list(nn.removed_assets)))
+                        .select(["資產名稱", "資產編號", "保管人"])
+                        .unique()
+                    )
             if getattr(nn, "new_No_assets", []):
-                df = _safe_to_pandas(nn.this_Notes_data)
-                try:
-                    nn_dict["无资产记录-本月新增"] = df[
-                        df["機身SN"].isin(list(nn.new_No_assets))
-                    ]
-                except Exception:
-                    pass
+                df = nn.this_Notes_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    try:
+                        nn_dict["无资产记录-本月新增"] = df.filter(
+                            pl.col("機身SN").is_in(list(nn.new_No_assets))
+                        )
+                    except Exception:
+                        pass
             if getattr(nn, "removed_No_assets", []):
-                df = _safe_to_pandas(nn.last_Notes_data)
-                try:
-                    nn_dict["无资产记录-本月减少"] = df[
-                        df["機身SN"].isin(list(nn.removed_No_assets))
-                    ]
-                except Exception:
-                    pass
+                df = nn.last_Notes_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    try:
+                        nn_dict["无资产记录-本月减少"] = df.filter(
+                            pl.col("機身SN").is_in(list(nn.removed_No_assets))
+                        )
+                    except Exception:
+                        pass
             if nn_dict:
                 comparisons.append(
                     ("2-Notes VS Notes", nn_dict, req.remarks.get("nn", ""))
@@ -1675,15 +1703,25 @@ def _build_complete_export(
         if sfc:
             ss_dict = {}
             if getattr(sfc, "new_assets", []):
-                df = _safe_to_pandas(sfc.this_SFC_data)
-                ss_dict["本月新增"] = df[df["资产编号"].isin(list(sfc.new_assets))][
-                    ["设备名称", "资产编号", "保管人"]
-                ].drop_duplicates()
+                df = sfc.this_SFC_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    ss_dict["本月新增"] = (
+                        df.filter(pl.col("资产编号").is_in(list(sfc.new_assets)))
+                        .select(["设备名称", "资产编号", "保管人"])
+                        .unique()
+                    )
             if getattr(sfc, "removed_assets", []):
-                df = _safe_to_pandas(sfc.last_SFC_data)
-                ss_dict["本月减少"] = df[df["资产编号"].isin(list(sfc.removed_assets))][
-                    ["设备名称", "资产编号", "保管人"]
-                ].drop_duplicates()
+                df = sfc.last_SFC_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    ss_dict["本月减少"] = (
+                        df.filter(pl.col("资产编号").is_in(list(sfc.removed_assets)))
+                        .select(["设备名称", "资产编号", "保管人"])
+                        .unique()
+                    )
             if ss_dict:
                 comparisons.append(
                     ("3-SFC VS SFC", ss_dict, req.remarks.get("sfc", ""))
@@ -1693,15 +1731,29 @@ def _build_complete_export(
         if cc:
             cc_dict = {}
             if getattr(cc, "new_Customer_assets", []):
-                df = _safe_to_pandas(cc.this_Customer_data)
-                cc_dict["本月新增"] = df[
-                    df["Asset ID"].isin(list(cc.new_Customer_assets))
-                ][["DRI", "Asset ID", "RFID"]].drop_duplicates()
+                df = cc.this_Customer_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    cc_dict["本月新增"] = (
+                        df.filter(
+                            pl.col("Asset ID").is_in(list(cc.new_Customer_assets))
+                        )
+                        .select(["DRI", "Asset ID", "RFID"])
+                        .unique()
+                    )
             if getattr(cc, "removed_Customer_assets", []):
-                df = _safe_to_pandas(cc.last_Customer_data)
-                cc_dict["本月减少"] = df[
-                    df["Asset ID"].isin(list(cc.removed_Customer_assets))
-                ][["DRI", "Asset ID", "RFID"]].drop_duplicates()
+                df = cc.last_Customer_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    cc_dict["本月减少"] = (
+                        df.filter(
+                            pl.col("Asset ID").is_in(list(cc.removed_Customer_assets))
+                        )
+                        .select(["DRI", "Asset ID", "RFID"])
+                        .unique()
+                    )
             if cc_dict:
                 comparisons.append(
                     ("4-客户资产 VS 客户资产", cc_dict, req.remarks.get("cc", ""))
@@ -1711,15 +1763,25 @@ def _build_complete_export(
         if fn:
             fn_dict = {}
             if getattr(fn, "new_assets", []):
-                df = _safe_to_pandas(fn.Notes_data)
-                fn_dict["Notes比财务新增资产"] = df[
-                    df["資產編號"].isin(list(fn.new_assets))
-                ][["資產名稱", "資產編號", "保管人"]].drop_duplicates()
+                df = fn.Notes_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    fn_dict["Notes比财务新增资产"] = (
+                        df.filter(pl.col("資產編號").is_in(list(fn.new_assets)))
+                        .select(["資產名稱", "資產編號", "保管人"])
+                        .unique()
+                    )
             if getattr(fn, "removed_assets", []):
-                df = _safe_to_pandas(fn.Finance_data)
-                fn_dict["Notes比财务减少资产"] = df[
-                    df["資產編號"].isin(list(fn.removed_assets))
-                ][["資產名稱", "資產編號", "保管人員"]].drop_duplicates()
+                df = fn.Finance_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    fn_dict["Notes比财务减少资产"] = (
+                        df.filter(pl.col("資產編號").is_in(list(fn.removed_assets)))
+                        .select(["資產名稱", "資產編號", "保管人員"])
+                        .unique()
+                    )
             if fn_dict:
                 comparisons.append(
                     ("5-财务 VS Notes", fn_dict, req.remarks.get("fn", ""))
@@ -1729,15 +1791,27 @@ def _build_complete_export(
         if ns:
             ns_dict = {}
             if getattr(ns, "Notes_new_assets", []):
-                df = _safe_to_pandas(ns.this_Notes_data)
-                ns_dict["Notes有且SFC无"] = df[
-                    df["資產編號"].isin(list(ns.Notes_new_assets))
-                ][["資產名稱", "資產編號", "保管人"]].drop_duplicates()
+                df = ns.this_Notes_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    ns_dict["Notes有且SFC无"] = (
+                        df.filter(pl.col("資產編號").is_in(list(ns.Notes_new_assets)))
+                        .select(["資產名稱", "資產編號", "保管人"])
+                        .unique()
+                    )
             if getattr(ns, "Notes_removed_assets", []):
-                df = _safe_to_pandas(ns.this_SFC_data)
-                ns_dict["SFC有且Notes无"] = df[
-                    df["资产编号"].isin(list(ns.Notes_removed_assets))
-                ][["设备名称", "资产编号", "保管人"]].drop_duplicates()
+                df = ns.this_SFC_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    ns_dict["SFC有且Notes无"] = (
+                        df.filter(
+                            pl.col("资产编号").is_in(list(ns.Notes_removed_assets))
+                        )
+                        .select(["设备名称", "资产编号", "保管人"])
+                        .unique()
+                    )
             if ns_dict:
                 comparisons.append(
                     ("6-Notes VS SFC", ns_dict, req.remarks.get("ns", ""))
@@ -1747,15 +1821,23 @@ def _build_complete_export(
         if cn:
             cn_dict = {}
             if getattr(cn, "remove_assets", []):
-                df = _safe_to_pandas(cn.this_Customer_data)
-                cn_dict["客户有且Notes无"] = df[
-                    df["RFID"].isin(list(cn.remove_assets))
-                ][["DRI", "Asset ID", "RFID"]].drop_duplicates()
+                df = cn.this_Customer_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    cn_dict["客户有且Notes无"] = (
+                        df.filter(pl.col("RFID").is_in(list(cn.remove_assets)))
+                        .select(["DRI", "Asset ID", "RFID"])
+                        .unique()
+                    )
             if getattr(cn, "new_assets", []):
-                df = _safe_to_pandas(cn.this_Notes_data)
-                cn_dict["Notes有且客户无"] = df[
-                    df["RFID（Tag）"].isin(list(cn.new_assets))
-                ]
+                df = cn.this_Notes_data
+                if hasattr(df, "collect"):
+                    df = df.collect()
+                if df is not None and not df.is_empty():
+                    cn_dict["Notes有且客户无"] = df.filter(
+                        pl.col("RFID（Tag）").is_in(list(cn.new_assets))
+                    )
             if cn_dict:
                 comparisons.append(
                     (
@@ -1796,8 +1878,8 @@ def _build_complete_export(
                 merged_df, comment_text = _convert_diff_dict_to_dataframe(
                     diff_dict, comment, sheet_name
                 )
-                if merged_df is not None and not getattr(merged_df, "empty", True):
-                    sheet_data_dict[sheet_name] = merged_df
+                if merged_df is not None and not merged_df.is_empty():
+                    sheet_data_dict[sheet_name] = (merged_df, comment_text)
             _log_save_stage("write_detail_sheet", sheet_started_at, sheet=sheet_name)
 
         wb.save(save_all_path)

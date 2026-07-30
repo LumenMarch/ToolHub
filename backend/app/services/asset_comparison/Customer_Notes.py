@@ -3,9 +3,9 @@ import re  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
-import pandas as pd  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.const import CUSTOMER_NOTES_SAVE_PATH  # noqa: E402, I001, UP015, F401
+from app.services.asset_comparison.excel_writer import new_workbook, safe_cell
 from loguru import logger  # noqa: E402, I001, UP015, F401
 
 Notes_RFID_rex = re.compile(r"(A15.*)")
@@ -271,218 +271,179 @@ class Customer_Notes:
                 return
             else:
                 # 創建Excel寫入器
-                excel_path = CUSTOMER_NOTES_SAVE_PATH
-                with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-                    # 構建新增資產的DataFrame
-                    new_assets_list = list(self.new_assets)
-                    new_df_rows = []
+                wb, worksheet = new_workbook("對比結果")
 
-                    for rfid in new_assets_list:
-                        # 查找該RFID在Notes數據中的記錄
-                        matching_rows = self.this_Notes_data.filter(
-                            pl.col("RFID（Tag）") == rfid
+                # 構建新增資產的DataFrame
+                new_assets_list = list(self.new_assets)
+                new_df_rows = []
+
+                for rfid in new_assets_list:
+                    # 查找該RFID在Notes數據中的記錄
+                    matching_rows = self.this_Notes_data.filter(
+                        pl.col("RFID（Tag）") == rfid
+                    )
+
+                    if not matching_rows.is_empty():
+                        # 如果RFID在RFID列中找到
+                        row = matching_rows.select(
+                            [
+                                "資產名稱",
+                                "資產編號",
+                                "RFID（Tag）",
+                                "保管人",
+                                "備注説明",
+                            ]
+                        ).row(0)
+                        new_df_rows.append(
+                            {
+                                "資產名稱": row[0] if len(row) > 0 else "",
+                                "資產編號": row[1] if len(row) > 1 else "",
+                                "RFID（Tag）": row[2] if len(row) > 2 else "",
+                                "保管人": row[3] if len(row) > 3 else "",
+                                "備注説明": row[4] if len(row) > 4 else "",
+                            }
                         )
-
-                        if not matching_rows.is_empty():
-                            # 如果RFID在RFID列中找到
-                            row = matching_rows.select(
-                                [
-                                    "資產名稱",
-                                    "資產編號",
-                                    "RFID（Tag）",
-                                    "保管人",
-                                    "備注説明",
-                                ]
-                            ).row(0)
-                            new_df_rows.append(
-                                {
-                                    "資產名稱": row[0] if len(row) > 0 else "",
-                                    "資產編號": row[1] if len(row) > 1 else "",
-                                    "RFID（Tag）": row[2] if len(row) > 2 else "",
-                                    "保管人": row[3] if len(row) > 3 else "",
-                                    "備注説明": row[4] if len(row) > 4 else "",
-                                }
-                            )
-                        else:
-                            # 如果RFID是從備注説明列提取的，創建一個特殊記錄
-                            new_df_rows.append(
-                                {
-                                    "資產名稱": "從備注提取",
-                                    "資產編號": "",
-                                    "RFID（Tag）": rfid,
-                                    "保管人": "",
-                                    "備注説明": f"從備注説明列提取的RFID: {rfid}",
-                                }
-                            )
-
-                    # 創建新增資產DataFrame
-                    if new_df_rows:
-                        new_df = pd.DataFrame(new_df_rows)
                     else:
-                        new_df = pd.DataFrame()
-
-                    # 構建減少資產的DataFrame
-                    remove_df = self.this_Customer_data.filter(
-                        pl.col("RFID").is_in(list(self.remove_assets))
-                    ).select(["Model Number", "Serial Number", "RFID", "DRI"])
-
-                    remove_df_pandas = remove_df.to_pandas()
-
-                    # 創建一個空的DataFrame來初始化工作表
-                    empty_df = pd.DataFrame()
-                    empty_df.to_excel(writer, sheet_name="對比結果", index=False)
-
-                    # 獲取工作表
-                    worksheet = writer.sheets["對比結果"]
-
-                    # 寫入標題信息
-                    worksheet.merge_cells("A1:F1")
-                    worksheet["A1"] = (
-                        f"本月Notes客户资产_VS_本月系统客户资产 (对比时间{current_time})"
-                    )
-                    worksheet["A1"].font = openpyxl.styles.Font(bold=True, size=14)
-                    worksheet["A1"].alignment = openpyxl.styles.Alignment(
-                        horizontal="center"
-                    )
-                    # 合并并居中 A2:D2 和 A3:D3
-                    worksheet.merge_cells("A2:D2")
-                    worksheet.merge_cells("A3:D3")
-                    worksheet["A2"].alignment = openpyxl.styles.Alignment(
-                        horizontal="center"
-                    )
-                    worksheet["A3"].alignment = openpyxl.styles.Alignment(
-                        horizontal="center"
-                    )
-
-                    # 寫入新增資產數據
-                    if not new_df.empty:
-                        # 新增資產標題
-                        worksheet["A3"] = (
-                            f"本月Notes比系统新增资产 {len(self.new_assets)}笔"
-                        )
-                        worksheet["A3"].font = openpyxl.styles.Font(bold=True, size=12)
-
-                        # 添加列標題
-                        headers = [
-                            "No.",
-                            "資產名稱",
-                            "資產編號",
-                            "RFID（Tag）",
-                            "保管人",
-                            "備注説明",
-                        ]
-                        for i, header in enumerate(headers, 1):
-                            cell = worksheet.cell(row=4, column=i, value=header)
-                            cell.font = openpyxl.styles.Font(bold=True)
-                            cell.fill = openpyxl.styles.PatternFill(
-                                start_color="E6F3FF",
-                                end_color="E6F3FF",
-                                fill_type="solid",
-                            )
-
-                        # 寫入數據
-                        for i in range(len(new_df)):
-                            worksheet.cell(row=i + 5, column=1, value=i + 1)  # No.
-                            worksheet.cell(
-                                row=i + 5, column=2, value=new_df.iloc[i]["資產名稱"]
-                            )
-                            worksheet.cell(
-                                row=i + 5, column=3, value=new_df.iloc[i]["資產編號"]
-                            )
-                            worksheet.cell(
-                                row=i + 5, column=4, value=new_df.iloc[i]["RFID（Tag）"]
-                            )
-                            worksheet.cell(
-                                row=i + 5, column=5, value=new_df.iloc[i]["保管人"]
-                            )
-                            worksheet.cell(
-                                row=i + 5, column=6, value=new_df.iloc[i]["備注説明"]
-                            )
-
-                    # 寫入減少資產數據
-                    if not remove_df_pandas.empty:
-                        start_row = len(new_df) + 7 if not new_df.empty else 5
-
-                        # 減少資產標題
-                        worksheet[f"A{start_row}"] = (
-                            f"本月Notes比系统减少资产 {len(self.remove_assets)}笔"
-                        )
-                        worksheet[f"A{start_row}"].font = openpyxl.styles.Font(
-                            bold=True, size=12
+                        # 如果RFID是從備注説明列提取的，創建一個特殊記錄
+                        new_df_rows.append(
+                            {
+                                "資產名稱": "從備注提取",
+                                "資產編號": "",
+                                "RFID（Tag）": rfid,
+                                "保管人": "",
+                                "備注説明": f"從備注説明列提取的RFID: {rfid}",
+                            }
                         )
 
-                        # 添加列標題
-                        headers = [
-                            "No.",
-                            "Model Number",
-                            "Serial Number",
-                            "RFID",
-                            "DRI",
-                        ]
-                        for i, header in enumerate(headers, 1):
-                            cell = worksheet.cell(
-                                row=start_row + 1, column=i, value=header
-                            )
-                            cell.font = openpyxl.styles.Font(bold=True)
-                            cell.fill = openpyxl.styles.PatternFill(
-                                start_color="FFE6E6",
-                                end_color="FFE6E6",
-                                fill_type="solid",
-                            )
+                # 創建新增資產DataFrame
+                if new_df_rows:
+                    new_df = pl.DataFrame(new_df_rows)
+                else:
+                    new_df = pl.DataFrame()
 
-                        # 寫入數據
-                        for i in range(len(remove_df_pandas)):
-                            worksheet.cell(
-                                row=start_row + 2 + i, column=1, value=i + 1
-                            )  # No.
-                            worksheet.cell(
-                                row=start_row + 2 + i,
-                                column=2,
-                                value=remove_df_pandas.iloc[i]["Model Number"],
-                            )
-                            worksheet.cell(
-                                row=start_row + 2 + i,
-                                column=3,
-                                value=remove_df_pandas.iloc[i]["Serial Number"],
-                            )
-                            worksheet.cell(
-                                row=start_row + 2 + i,
-                                column=4,
-                                value=remove_df_pandas.iloc[i]["RFID"],
-                            )
-                            worksheet.cell(
-                                row=start_row + 2 + i,
-                                column=5,
-                                value=remove_df_pandas.iloc[i]["DRI"],
-                            )
+                # 構建減少資產的DataFrame
+                remove_df = self.this_Customer_data.filter(
+                    pl.col("RFID").is_in(list(self.remove_assets))
+                ).select(["Model Number", "Serial Number", "RFID", "DRI"])
+                # 寫入標題信息
+                worksheet.merge_cells("A1:F1")
+                worksheet["A1"] = (
+                    f"本月Notes客户资产_VS_本月系统客户资产 (对比时间{current_time})"
+                )
+                worksheet["A1"].font = openpyxl.styles.Font(bold=True, size=14)
+                worksheet["A1"].alignment = openpyxl.styles.Alignment(
+                    horizontal="center"
+                )
+                # 合并并居中 A2:D2 和 A3:D3
+                worksheet.merge_cells("A2:D2")
+                worksheet.merge_cells("A3:D3")
+                worksheet["A2"].alignment = openpyxl.styles.Alignment(
+                    horizontal="center"
+                )
+                worksheet["A3"].alignment = openpyxl.styles.Alignment(
+                    horizontal="center"
+                )
 
-                    # 設置列寬和邊框
-                    from openpyxl.styles import Border, Side  # noqa: E402, I001, UP015, F401
+                # 寫入新增資產數據
+                if not new_df.is_empty():
+                    # 新增資產標題
+                    worksheet["A3"] = (
+                        f"本月Notes比系统新增资产 {len(self.new_assets)}笔"
+                    )
+                    worksheet["A3"].font = openpyxl.styles.Font(bold=True, size=12)
 
-                    thin_border = Border(
-                        left=Side(style="thin"),
-                        right=Side(style="thin"),
-                        top=Side(style="thin"),
-                        bottom=Side(style="thin"),
+                    # 添加列標題
+                    headers = [
+                        "No.",
+                        "資產名稱",
+                        "資產編號",
+                        "RFID（Tag）",
+                        "保管人",
+                        "備注説明",
+                    ]
+                    for i, header in enumerate(headers, 1):
+                        cell = worksheet.cell(row=4, column=i, value=header)
+                        cell.font = openpyxl.styles.Font(bold=True)
+                        cell.fill = openpyxl.styles.PatternFill(
+                            start_color="E6F3FF",
+                            end_color="E6F3FF",
+                            fill_type="solid",
+                        )
+
+                    # 寫入數據
+                    for i, row_dict in enumerate(new_df.iter_rows(named=True), 1):
+                        worksheet.cell(row=i + 4, column=1, value=i)  # No.
+                        safe_cell(worksheet, i + 4, 2, row_dict["資產名稱"])
+                        safe_cell(worksheet, i + 4, 3, row_dict["資產編號"])
+                        safe_cell(worksheet, i + 4, 4, row_dict["RFID（Tag）"])
+                        safe_cell(worksheet, i + 4, 5, row_dict["保管人"])
+                        safe_cell(worksheet, i + 4, 6, row_dict["備注説明"])
+
+                # 寫入減少資產數據
+                if not remove_df.is_empty():
+                    start_row = len(new_df) + 7 if not new_df.is_empty() else 5
+
+                    # 減少資產標題
+                    worksheet[f"A{start_row}"] = (
+                        f"本月Notes比系统减少资产 {len(self.remove_assets)}笔"
+                    )
+                    worksheet[f"A{start_row}"].font = openpyxl.styles.Font(
+                        bold=True, size=12
                     )
 
-                    # 設置列寬
-                    column_widths = [8, 30, 20, 25, 15, 40]  # 根據內容調整
-                    for i, width in enumerate(column_widths, 1):
-                        worksheet.column_dimensions[
-                            openpyxl.utils.get_column_letter(i)
-                        ].width = width
+                    # 添加列標題
+                    headers = [
+                        "No.",
+                        "Model Number",
+                        "Serial Number",
+                        "RFID",
+                        "DRI",
+                    ]
+                    for i, header in enumerate(headers, 1):
+                        cell = worksheet.cell(row=start_row + 1, column=i, value=header)
+                        cell.font = openpyxl.styles.Font(bold=True)
+                        cell.fill = openpyxl.styles.PatternFill(
+                            start_color="FFE6E6",
+                            end_color="FFE6E6",
+                            fill_type="solid",
+                        )
 
-                    # 添加邊框
-                    for row in worksheet.iter_rows(
-                        min_row=1,
-                        max_row=worksheet.max_row,
-                        min_col=1,
-                        max_col=worksheet.max_column,
-                    ):
-                        for cell in row:
-                            cell.border = thin_border
+                    # 寫入數據
+                    for i, row_dict in enumerate(remove_df.iter_rows(named=True), 1):
+                        r = start_row + 1 + i
+                        worksheet.cell(row=r, column=1, value=i)  # No.
+                        safe_cell(worksheet, r, 2, row_dict["Model Number"])
+                        safe_cell(worksheet, r, 3, row_dict["Serial Number"])
+                        safe_cell(worksheet, r, 4, row_dict["RFID"])
+                        safe_cell(worksheet, r, 5, row_dict["DRI"])
 
+                # 設置列寬和邊框
+                from openpyxl.styles import Border, Side  # noqa: E402, I001, UP015, F401
+
+                thin_border = Border(
+                    left=Side(style="thin"),
+                    right=Side(style="thin"),
+                    top=Side(style="thin"),
+                    bottom=Side(style="thin"),
+                )
+
+                # 設置列寬
+                column_widths = [8, 30, 20, 25, 15, 40]  # 根據內容調整
+                for i, width in enumerate(column_widths, 1):
+                    worksheet.column_dimensions[
+                        openpyxl.utils.get_column_letter(i)
+                    ].width = width
+
+                # 添加邊框
+                for row in worksheet.iter_rows(
+                    min_row=1,
+                    max_row=worksheet.max_row,
+                    min_col=1,
+                    max_col=worksheet.max_column,
+                ):
+                    for cell in row:
+                        cell.border = thin_border
+                wb.save(CUSTOMER_NOTES_SAVE_PATH)
         except Exception as e:
             logger.exception(f"保存数据对比失败: {e}")
             raise

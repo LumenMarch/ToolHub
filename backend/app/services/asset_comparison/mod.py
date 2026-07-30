@@ -1,8 +1,8 @@
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
-import pandas as pd  # noqa: E402, I001, UP015, F401
 from dateutil.relativedelta import relativedelta  # noqa: E402, I001, UP015, F401
-from openpyxl.reader.excel import load_workbook  # noqa: E402, I001, UP015, F401
+from openpyxl import Workbook
+from openpyxl.reader.excel import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side  # noqa: E402, I001, UP015, F401
 
 current_date = datetime.now()
@@ -42,8 +42,13 @@ def create_excel_template(SAVE_ALL_PATH):
         ["7-Notes客户资产 VS 客户系统资产", "", "", "", "", "", ""],
     ]
 
-    df = pd.DataFrame(Default_data, columns=columnes_a)
-    df.to_excel(SAVE_ALL_PATH, index=False, sheet_name="差异总结")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "差异总结"
+    ws.append(columnes_a)
+    for row in Default_data:
+        ws.append(row)
+    wb.save(SAVE_ALL_PATH)
 
     wb = load_workbook(SAVE_ALL_PATH)
     ws = wb.active

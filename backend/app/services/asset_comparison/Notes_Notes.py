@@ -2,9 +2,9 @@ import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
-import pandas as pd  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.const import NOTES_NOTES_SAVE_PATH  # noqa: E402, I001, UP015, F401
+from app.services.asset_comparison.excel_writer import new_workbook, safe_cell
 from loguru import logger  # noqa: E402, I001, UP015, F401
 
 No_CheckRFID = ["A1300011C5C3", "A13000103933", "A1300010E606"]
@@ -280,67 +280,149 @@ class Notes_Notes:
         else:
             try:
                 # 創建Excel寫入器
-                with pd.ExcelWriter(NOTES_NOTES_SAVE_PATH, engine="openpyxl") as writer:
-                    # 使用 DataFrame 構建查詢
-                    new_df = (
+                wb, worksheet = new_workbook("對比結果")
+                # 使用 DataFrame 構建查詢
+                new_df = (
+                    self.this_Notes_data.filter(
+                        pl.col("資產編號").is_in(list(self.new_assets))
+                    )
+                    .select(["資產名稱", "資產編號", "保管人"])
+                    .unique()
+                )
+
+                removed_df = (
+                    self.last_Notes_data.filter(
+                        pl.col("資產編號").is_in(list(self.removed_assets))
+                    )
+                    .select(["資產名稱", "資產編號", "保管人"])
+                    .unique()
+                )
+
+                # 寫入標題信息
+                worksheet.merge_cells("A1:D1")
+                worksheet["A1"] = f"本月Notes_VS_上月Notes (对比时间{current_time})"
+                worksheet["A1"].font = openpyxl.styles.Font(bold=True, size=14)
+                worksheet["A1"].alignment = openpyxl.styles.Alignment(
+                    horizontal="center"
+                )
+                # 合并并居中 A2:D2 和 A3:D3
+                worksheet.merge_cells("A2:D2")
+                worksheet.merge_cells("A3:D3")
+                worksheet["A2"].alignment = openpyxl.styles.Alignment(
+                    horizontal="center"
+                )
+                worksheet["A3"].alignment = openpyxl.styles.Alignment(
+                    horizontal="center"
+                )
+
+                current_row = 3
+
+                # 寫入新增資產數據
+                if not new_df.is_empty():
+                    # 標題
+                    worksheet[f"A{current_row}"] = (
+                        f"本月比上月新增资产 {len(self.new_assets)}笔"
+                    )
+                    worksheet[f"A{current_row}"].font = openpyxl.styles.Font(
+                        bold=True, size=12
+                    )
+                    current_row += 1
+
+                    # 列標題
+                    headers = ["No.", "資產名稱", "資產編號", "保管人"]
+                    for i, header in enumerate(headers, 1):
+                        cell = worksheet.cell(row=current_row, column=i, value=header)
+                        cell.font = openpyxl.styles.Font(bold=True)
+                        cell.fill = openpyxl.styles.PatternFill(
+                            start_color="E6F3FF",
+                            end_color="E6F3FF",
+                            fill_type="solid",
+                        )
+                    current_row += 1
+
+                    # 數據
+                    for i, row_dict in enumerate(new_df.iter_rows(named=True), 1):
+                        worksheet.cell(row=current_row, column=1, value=i)
+                        safe_cell(worksheet, current_row, 2, row_dict["資產名稱"])
+                        safe_cell(worksheet, current_row, 3, row_dict["資產編號"])
+                        safe_cell(worksheet, current_row, 4, row_dict["保管人"])
+                        current_row += 1
+                    current_row += 1
+
+                # 寫入減少資產數據
+                if not removed_df.is_empty():
+                    worksheet[f"A{current_row}"] = (
+                        f"本月比上月减少资产 {len(self.removed_assets)}笔"
+                    )
+                    worksheet[f"A{current_row}"].font = openpyxl.styles.Font(
+                        bold=True, size=12
+                    )
+                    current_row += 1
+
+                    headers = ["No.", "資產名稱", "資產編號", "保管人"]
+                    for i, header in enumerate(headers, 1):
+                        cell = worksheet.cell(row=current_row, column=i, value=header)
+                        cell.font = openpyxl.styles.Font(bold=True)
+                        cell.fill = openpyxl.styles.PatternFill(
+                            start_color="FFE6E6",
+                            end_color="FFE6E6",
+                            fill_type="solid",
+                        )
+                    current_row += 1
+
+                    for i, row_dict in enumerate(removed_df.iter_rows(named=True), 1):
+                        worksheet.cell(row=current_row, column=1, value=i)
+                        safe_cell(worksheet, current_row, 2, row_dict["資產名稱"])
+                        safe_cell(worksheet, current_row, 3, row_dict["資產編號"])
+                        safe_cell(worksheet, current_row, 4, row_dict["保管人"])
+                        current_row += 1
+                    current_row += 1
+
+                # 處理無資產記錄的變化
+                if len(self.new_No_assets) > 0:
+                    # 根据key列表过滤出新增的无资产记录
+                    new_No_df = (
                         self.this_Notes_data.filter(
-                            pl.col("資產編號").is_in(list(self.new_assets))
+                            pl.col("資產編號").is_null()
+                            | (
+                                pl.col("資產編號")
+                                .cast(pl.String)
+                                .str.strip_chars()
+                                .str.len_chars()
+                                == 0
+                            )
+                            | (
+                                ~(
+                                    pl.col("資產編號")
+                                    .cast(pl.String)
+                                    .str.starts_with("18-")
+                                    | pl.col("資產編號")
+                                    .cast(pl.String)
+                                    .str.starts_with("13-")
+                                )
+                            )
                         )
-                        .select(["資產名稱", "資產編號", "保管人"])
-                        .unique()
-                    )
-
-                    removed_df = (
-                        self.last_Notes_data.filter(
-                            pl.col("資產編號").is_in(list(self.removed_assets))
+                        .select(["資產名稱", "機身SN", "保管人"])
+                        .with_columns(
+                            pl.concat_str(
+                                [pl.col("資產名稱"), pl.col("機身SN")],
+                                separator="||",
+                            ).alias("key")
                         )
-                        .select(["資產名稱", "資產編號", "保管人"])
-                        .unique()
+                        .filter(pl.col("key").is_in(self.new_No_assets))
+                        .drop("key")
                     )
 
-                    # 轉換為pandas DataFrame
-                    new_df_pandas = new_df.to_pandas()
-                    removed_df_pandas = removed_df.to_pandas()
-
-                    # 創建一個空的DataFrame來初始化工作表
-                    empty_df = pd.DataFrame()
-                    empty_df.to_excel(writer, sheet_name="對比結果", index=False)
-
-                    # 獲取工作表
-                    worksheet = writer.sheets["對比結果"]
-
-                    # 寫入標題信息
-                    worksheet.merge_cells("A1:D1")
-                    worksheet["A1"] = f"本月Notes_VS_上月Notes (对比时间{current_time})"
-                    worksheet["A1"].font = openpyxl.styles.Font(bold=True, size=14)
-                    worksheet["A1"].alignment = openpyxl.styles.Alignment(
-                        horizontal="center"
-                    )
-                    # 合并并居中 A2:D2 和 A3:D3
-                    worksheet.merge_cells("A2:D2")
-                    worksheet.merge_cells("A3:D3")
-                    worksheet["A2"].alignment = openpyxl.styles.Alignment(
-                        horizontal="center"
-                    )
-                    worksheet["A3"].alignment = openpyxl.styles.Alignment(
-                        horizontal="center"
-                    )
-
-                    current_row = 3
-
-                    # 寫入新增資產數據
-                    if not new_df_pandas.empty:
-                        # 標題
+                    if not new_No_df.is_empty():
                         worksheet[f"A{current_row}"] = (
-                            f"本月比上月新增资产 {len(self.new_assets)}笔"
+                            f"本月比上月新增无资产记录 {len(self.new_No_assets)}笔"
                         )
                         worksheet[f"A{current_row}"].font = openpyxl.styles.Font(
                             bold=True, size=12
                         )
                         current_row += 1
 
-                        # 列標題
-                        headers = ["No.", "資產名稱", "資產編號", "保管人"]
+                        headers = ["No.", "資產名稱", "機身SN", "保管人"]
                         for i, header in enumerate(headers, 1):
                             cell = worksheet.cell(
                                 row=current_row, column=i, value=header
@@ -353,37 +435,60 @@ class Notes_Notes:
                             )
                         current_row += 1
 
-                        # 數據
-                        for i in range(len(new_df_pandas)):
-                            worksheet.cell(row=current_row + i, column=1, value=i + 1)
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=2,
-                                value=new_df_pandas.iloc[i]["資產名稱"],
-                            )
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=3,
-                                value=new_df_pandas.iloc[i]["資產編號"],
-                            )
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=4,
-                                value=new_df_pandas.iloc[i]["保管人"],
-                            )
-                        current_row += len(new_df_pandas) + 2
+                        for i, row_dict in enumerate(
+                            new_No_df.iter_rows(named=True), 1
+                        ):
+                            worksheet.cell(row=current_row, column=1, value=i)
+                            safe_cell(worksheet, current_row, 2, row_dict["資產名稱"])
+                            safe_cell(worksheet, current_row, 3, row_dict["機身SN"])
+                            safe_cell(worksheet, current_row, 4, row_dict["保管人"])
+                            current_row += 1
+                        current_row += 1
 
-                    # 寫入減少資產數據
-                    if not removed_df_pandas.empty:
+                if len(self.removed_No_assets) > 0:
+                    # 根据key列表过滤出减少的无资产记录
+                    removed_No_df = (
+                        self.last_Notes_data.filter(
+                            pl.col("資產編號").is_null()
+                            | (
+                                pl.col("資產編號")
+                                .cast(pl.String)
+                                .str.strip_chars()
+                                .str.len_chars()
+                                == 0
+                            )
+                            | (
+                                ~(
+                                    pl.col("資產編號")
+                                    .cast(pl.String)
+                                    .str.starts_with("18-")
+                                    | pl.col("資產編號")
+                                    .cast(pl.String)
+                                    .str.starts_with("13-")
+                                )
+                            )
+                        )
+                        .select(["資產名稱", "機身SN", "保管人"])
+                        .with_columns(
+                            pl.concat_str(
+                                [pl.col("資產名稱"), pl.col("機身SN")],
+                                separator="||",
+                            ).alias("key")
+                        )
+                        .filter(pl.col("key").is_in(self.removed_No_assets))
+                        .drop("key")
+                    )
+
+                    if not removed_No_df.is_empty():
                         worksheet[f"A{current_row}"] = (
-                            f"本月比上月减少资产 {len(self.removed_assets)}笔"
+                            f"本月比上月减少无资产记录 {len(self.removed_No_assets)}笔"
                         )
                         worksheet[f"A{current_row}"].font = openpyxl.styles.Font(
                             bold=True, size=12
                         )
                         current_row += 1
 
-                        headers = ["No.", "資產名稱", "資產編號", "保管人"]
+                        headers = ["No.", "資產名稱", "機身SN", "保管人"]
                         for i, header in enumerate(headers, 1):
                             cell = worksheet.cell(
                                 row=current_row, column=i, value=header
@@ -396,207 +501,43 @@ class Notes_Notes:
                             )
                         current_row += 1
 
-                        for i in range(len(removed_df_pandas)):
-                            worksheet.cell(row=current_row + i, column=1, value=i + 1)
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=2,
-                                value=removed_df_pandas.iloc[i]["資產名稱"],
-                            )
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=3,
-                                value=removed_df_pandas.iloc[i]["資產編號"],
-                            )
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=4,
-                                value=removed_df_pandas.iloc[i]["保管人"],
-                            )
-                        current_row += len(removed_df_pandas) + 2
-
-                    # 處理無資產記錄的變化
-                    if len(self.new_No_assets) > 0:
-                        # 根据key列表过滤出新增的无资产记录
-                        new_No_df = (
-                            self.this_Notes_data.filter(
-                                pl.col("資產編號").is_null()
-                                | (
-                                    pl.col("資產編號")
-                                    .cast(pl.String)
-                                    .str.strip_chars()
-                                    .str.len_chars()
-                                    == 0
-                                )
-                                | (
-                                    ~(
-                                        pl.col("資產編號")
-                                        .cast(pl.String)
-                                        .str.starts_with("18-")
-                                        | pl.col("資產編號")
-                                        .cast(pl.String)
-                                        .str.starts_with("13-")
-                                    )
-                                )
-                            )
-                            .select(["資產名稱", "機身SN", "保管人"])
-                            .with_columns(
-                                pl.concat_str(
-                                    [pl.col("資產名稱"), pl.col("機身SN")],
-                                    separator="||",
-                                ).alias("key")
-                            )
-                            .filter(pl.col("key").is_in(self.new_No_assets))
-                            .drop("key")
-                        )
-
-                        if not new_No_df.is_empty():
-                            new_No_df_pandas = new_No_df.to_pandas()
-                            worksheet[f"A{current_row}"] = (
-                                f"本月比上月新增无资产记录 {len(self.new_No_assets)}笔"
-                            )
-                            worksheet[f"A{current_row}"].font = openpyxl.styles.Font(
-                                bold=True, size=12
-                            )
+                        for i, row_dict in enumerate(
+                            removed_No_df.iter_rows(named=True), 1
+                        ):
+                            worksheet.cell(row=current_row, column=1, value=i)
+                            safe_cell(worksheet, current_row, 2, row_dict["資產名稱"])
+                            safe_cell(worksheet, current_row, 3, row_dict["機身SN"])
+                            safe_cell(worksheet, current_row, 4, row_dict["保管人"])
                             current_row += 1
+                        current_row += 1
 
-                            headers = ["No.", "資產名稱", "機身SN", "保管人"]
-                            for i, header in enumerate(headers, 1):
-                                cell = worksheet.cell(
-                                    row=current_row, column=i, value=header
-                                )
-                                cell.font = openpyxl.styles.Font(bold=True)
-                                cell.fill = openpyxl.styles.PatternFill(
-                                    start_color="E6F3FF",
-                                    end_color="E6F3FF",
-                                    fill_type="solid",
-                                )
-                            current_row += 1
+                # 設置列寬和邊框
+                from openpyxl.styles import Border, Side  # noqa: E402, I001, UP015, F401
 
-                            for i in range(len(new_No_df_pandas)):
-                                worksheet.cell(
-                                    row=current_row + i, column=1, value=i + 1
-                                )
-                                worksheet.cell(
-                                    row=current_row + i,
-                                    column=2,
-                                    value=new_No_df_pandas.iloc[i]["資產名稱"],
-                                )
-                                worksheet.cell(
-                                    row=current_row + i,
-                                    column=3,
-                                    value=new_No_df_pandas.iloc[i]["機身SN"],
-                                )
-                                worksheet.cell(
-                                    row=current_row + i,
-                                    column=4,
-                                    value=new_No_df_pandas.iloc[i]["保管人"],
-                                )
-                            current_row += len(new_No_df_pandas) + 2
+                thin_border = Border(
+                    left=Side(style="thin"),
+                    right=Side(style="thin"),
+                    top=Side(style="thin"),
+                    bottom=Side(style="thin"),
+                )
 
-                    if len(self.removed_No_assets) > 0:
-                        # 根据key列表过滤出减少的无资产记录
-                        removed_No_df = (
-                            self.last_Notes_data.filter(
-                                pl.col("資產編號").is_null()
-                                | (
-                                    pl.col("資產編號")
-                                    .cast(pl.String)
-                                    .str.strip_chars()
-                                    .str.len_chars()
-                                    == 0
-                                )
-                                | (
-                                    ~(
-                                        pl.col("資產編號")
-                                        .cast(pl.String)
-                                        .str.starts_with("18-")
-                                        | pl.col("資產編號")
-                                        .cast(pl.String)
-                                        .str.starts_with("13-")
-                                    )
-                                )
-                            )
-                            .select(["資產名稱", "機身SN", "保管人"])
-                            .with_columns(
-                                pl.concat_str(
-                                    [pl.col("資產名稱"), pl.col("機身SN")],
-                                    separator="||",
-                                ).alias("key")
-                            )
-                            .filter(pl.col("key").is_in(self.removed_No_assets))
-                            .drop("key")
-                        )
+                # 設置列寬
+                column_widths = [8, 40, 25, 20]  # 根據內容調整
+                for i, width in enumerate(column_widths, 1):
+                    worksheet.column_dimensions[
+                        openpyxl.utils.get_column_letter(i)
+                    ].width = width
 
-                        if not removed_No_df.is_empty():
-                            removed_No_df_pandas = removed_No_df.to_pandas()
-                            worksheet[f"A{current_row}"] = (
-                                f"本月比上月减少无资产记录 {len(self.removed_No_assets)}笔"
-                            )
-                            worksheet[f"A{current_row}"].font = openpyxl.styles.Font(
-                                bold=True, size=12
-                            )
-                            current_row += 1
+                # 添加邊框
+                for row in worksheet.iter_rows(
+                    min_row=1,
+                    max_row=worksheet.max_row,
+                    min_col=1,
+                    max_col=worksheet.max_column,
+                ):
+                    for cell in row:
+                        cell.border = thin_border
 
-                            headers = ["No.", "資產名稱", "機身SN", "保管人"]
-                            for i, header in enumerate(headers, 1):
-                                cell = worksheet.cell(
-                                    row=current_row, column=i, value=header
-                                )
-                                cell.font = openpyxl.styles.Font(bold=True)
-                                cell.fill = openpyxl.styles.PatternFill(
-                                    start_color="FFE6E6",
-                                    end_color="FFE6E6",
-                                    fill_type="solid",
-                                )
-                            current_row += 1
-
-                            for i in range(len(removed_No_df_pandas)):
-                                worksheet.cell(
-                                    row=current_row + i, column=1, value=i + 1
-                                )
-                                worksheet.cell(
-                                    row=current_row + i,
-                                    column=2,
-                                    value=removed_No_df_pandas.iloc[i]["資產名稱"],
-                                )
-                                worksheet.cell(
-                                    row=current_row + i,
-                                    column=3,
-                                    value=removed_No_df_pandas.iloc[i]["機身SN"],
-                                )
-                                worksheet.cell(
-                                    row=current_row + i,
-                                    column=4,
-                                    value=removed_No_df_pandas.iloc[i]["保管人"],
-                                )
-
-                    # 設置列寬和邊框
-                    from openpyxl.styles import Border, Side  # noqa: E402, I001, UP015, F401
-
-                    thin_border = Border(
-                        left=Side(style="thin"),
-                        right=Side(style="thin"),
-                        top=Side(style="thin"),
-                        bottom=Side(style="thin"),
-                    )
-
-                    # 設置列寬
-                    column_widths = [8, 40, 25, 20]  # 根據內容調整
-                    for i, width in enumerate(column_widths, 1):
-                        worksheet.column_dimensions[
-                            openpyxl.utils.get_column_letter(i)
-                        ].width = width
-
-                    # 添加邊框
-                    for row in worksheet.iter_rows(
-                        min_row=1,
-                        max_row=worksheet.max_row,
-                        min_col=1,
-                        max_col=worksheet.max_column,
-                    ):
-                        for cell in row:
-                            cell.border = thin_border
-
+                wb.save(NOTES_NOTES_SAVE_PATH)
             except Exception as e:
                 logger.error(e)

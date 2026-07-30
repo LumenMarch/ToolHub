@@ -2,13 +2,17 @@ import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
-import pandas as pd  # noqa: E402, I001, UP015, F401
+import polars as pl  # noqa: E402, I001, UP015, F401
 import xlrd  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.const import SFC_SFC_SAVE_PATH  # noqa: E402, I001, UP015, F401
-from loguru import logger  # noqa: E402, I001, UP015, F401
+from app.services.asset_comparison.excel_writer import (  # noqa: E402, I001, UP015, F401
+    new_workbook,
+    write_section,
+)
 from app.services.asset_comparison.TableParser import (  # noqa: E402
     TableParser,
 )  # 使用自定義的 HTML 表格解析器  # noqa: E402, I001, UP015, F401
+from loguru import logger  # noqa: E402, I001, UP015, F401
 
 
 class SFC_SFC:
@@ -26,7 +30,7 @@ class SFC_SFC:
         self.Last_data_path = None
 
     def safe_read_excel(self, path):
-        """安全讀取Excel或HTML偽裝的Excel，並返回 pandas DataFrame"""
+        """安全讀取Excel或HTML偽裝的Excel，並返回 Polars DataFrame"""
         required_columns = {"设备编号", "资产编号", "資產編號"}
 
         # 智能檢測文件格式並相應處理
@@ -104,7 +108,7 @@ class SFC_SFC:
                     cleaned_row + [""] * (max_cols - len(cleaned_row))
                     normalized_data.append(cleaned_row[:max_cols])
 
-                # 創建 pandas DataFrame
+                # 創建 Polars DataFrame
                 if normalized_data:
                     df_dict = {}
                     for i, header in enumerate(headers):
@@ -129,7 +133,7 @@ class SFC_SFC:
                                 column_data.append("")
                         df_dict[column_name] = column_data
 
-                    df_pandas = pd.DataFrame(df_dict)
+                    df = pl.DataFrame(df_dict)
                 else:
                     # 如果沒有數據行，創建空的 DataFrame
                     df_dict = {}
@@ -140,9 +144,9 @@ class SFC_SFC:
                             else f"col_{i}"
                         )
                         df_dict[column_name] = []
-                    df_pandas = pd.DataFrame(df_dict)
+                    df = pl.DataFrame(df_dict)
 
-                logger.info(f"HTML解析成功，原始数据行数: {len(df_pandas)}")
+                logger.info(f"HTML解析成功，原始数据行数: {len(df)}")
 
             except Exception as html_error:
                 logger.exception(f"HTML解析失敗: {html_error}")
@@ -150,7 +154,7 @@ class SFC_SFC:
 
         else:
             logger.info(f"檢測到Excel格式文件，嘗試讀取: {os.path.basename(path)}")
-            # 策略：.xls 文件使用 xlrd（openpyxl 不支援 .xls），.xlsx 用 openpyxl
+            # 策略：.xls 文件使用 xlrd，.xlsx 用 calamine
             try:
                 if os.path.splitext(path)[1].lower() == ".xls":
                     logger.info(f".xls 文件使用 xlrd 讀取: {os.path.basename(path)}")
@@ -161,10 +165,10 @@ class SFC_SFC:
                     for r in range(1, sheet.nrows):
                         row = [sheet.cell_value(r, c) for c in range(sheet.ncols)]
                         data_rows.append(row)
-                    df_pandas = pd.DataFrame(data_rows, columns=headers)
+                    df = pl.DataFrame(data_rows, schema=headers, orient="row")
                 else:
-                    df_pandas = pd.read_excel(path, engine="openpyxl")
-                logger.info(f"Excel文件讀取成功，原始数据行数: {len(df_pandas)}")
+                    df = pl.read_excel(path, engine="calamine", infer_schema_length=0)
+                logger.info(f"Excel文件讀取成功，原始数据行数: {len(df)}")
 
             except Exception as excel_error:
                 logger.exception(f"Excel讀取失敗: {excel_error}，嘗試 HTML 回退解析")
@@ -238,7 +242,7 @@ class SFC_SFC:
                                 else:
                                     column_data.append("")
                             df_dict[column_name] = column_data
-                        df_pandas = pd.DataFrame(df_dict)
+                        df = pl.DataFrame(df_dict)
                     else:
                         df_dict = {}
                         for i, header in enumerate(headers):
@@ -248,9 +252,9 @@ class SFC_SFC:
                                 else f"col_{i}"
                             )
                             df_dict[column_name] = []
-                        df_pandas = pd.DataFrame(df_dict)
+                        df = pl.DataFrame(df_dict)
 
-                    logger.info(f"HTML回退解析成功，原始数据行数: {len(df_pandas)}")
+                    logger.info(f"HTML回退解析成功，原始数据行数: {len(df)}")
                 except Exception as html_error:
                     logger.exception(f"HTML回退解析也失敗: {html_error}")
                     return None
@@ -258,14 +262,14 @@ class SFC_SFC:
         # 統一的数据清理和过滤逻辑
         try:
             # 檢查是否包含必需的列
-            df_columns = set(df_pandas.columns.astype(str))
+            df_columns = set(df.columns)
             if not required_columns.intersection(df_columns):
                 logger.warning(
                     f"文件中未找到必需的列，嘗試查找包含關鍵字的列: {os.path.basename(path)}"
                 )
                 # 嘗試查找包含關鍵字的列
                 found_columns = []
-                for col in df_pandas.columns:
+                for col in df.columns:
                     col_str = str(col).lower()
                     if any(
                         keyword in col_str
@@ -280,52 +284,56 @@ class SFC_SFC:
                 else:
                     logger.info(f"找到相關列: {found_columns}")
 
+            # 将所有列转换为字符串类型以避免数据类型推断错误
+            df = df.with_columns([pl.col(c).cast(pl.Utf8) for c in df.columns])
+
             # 🎯 加强空数据过滤
             # 自动去除资产编号列末尾的点号
-            if "资产编号" in df_pandas.columns:
-                df_pandas["资产编号"] = (
-                    df_pandas["资产编号"].astype(str).str.rstrip(".")
-                )
-            if "資產編號" in df_pandas.columns:
-                df_pandas["資產編號"] = (
-                    df_pandas["資產編號"].astype(str).str.rstrip(".")
-                )
-
-            # 将所有列转换为字符串类型以避免数据类型推断错误
-            df_pandas = df_pandas.astype(str)
+            for col in ["资产编号", "資產編號"]:
+                if col in df.columns:
+                    df = df.with_columns(
+                        pl.col(col).cast(pl.Utf8).str.strip_chars_end(".").alias(col)
+                    )
 
             # 🎯 过滤完全空白的行
-            # 检查每一行是否所有列都是空值或只包含空格
-            def is_empty_row(row):
-                return all(str(cell).strip() == "" for cell in row)
-
-            # 过滤掉完全空白的行
-            df_pandas = df_pandas[~df_pandas.apply(is_empty_row, axis=1)]
+            df = df.filter(
+                ~pl.all_horizontal(
+                    [
+                        pl.col(c)
+                        .cast(pl.Utf8)
+                        .fill_null("")
+                        .str.strip_chars()
+                        .is_in(["", "nan", "none", "null"])
+                        for c in df.columns
+                    ]
+                )
+            )
 
             # 🎯 过滤资产编号为空的行
             asset_cols = ["资产编号", "資產編號"]
             for col in asset_cols:
-                if col in df_pandas.columns:
-                    # 过滤掉资产编号为空、NaN、None的行
-                    df_pandas = df_pandas[
-                        (df_pandas[col].astype(str).str.strip() != "")
-                        & (df_pandas[col].astype(str).str.lower() != "nan")
-                        & (df_pandas[col].astype(str).str.lower() != "none")
-                        & (df_pandas[col].astype(str).str.lower() != "null")
-                    ]
+                if col in df.columns:
+                    df = df.filter(
+                        ~pl.col(col)
+                        .cast(pl.Utf8)
+                        .fill_null("")
+                        .str.strip_chars()
+                        .str.to_lowercase()
+                        .is_in(["", "nan", "none", "null"])
+                    )
 
-            logger.info(f"过滤后数据行数: {len(df_pandas)}")
-            if len(df_pandas) > 0:
-                logger.info(f"数据样本: {df_pandas.head(3).to_dict('records')}")
+            logger.info(f"过滤后数据行数: {len(df)}")
+            if len(df) > 0:
+                logger.info(f"数据样本: {df.head(3).to_dicts()}")
 
-            return df_pandas
+            return df
 
         except Exception as e:
             logger.exception(f"数据清理和过滤失败: {e}")
             return None
 
     def This_SFC_date(self):
-        """讀取本期SFC數據（使用 pandas DataFrame）"""
+        """讀取本期SFC數據"""
         self.this_SFC_data = None
         try:
             self.this_SFC_data = self.safe_read_excel(self.This_data_Path)
@@ -333,7 +341,7 @@ class SFC_SFC:
             logger.exception(e)
 
     def Last_SFC_date(self):
-        """讀取上期SFC數據（使用 pandas DataFrame）"""
+        """讀取上期SFC數據"""
         self.last_SFC_data = None
         try:
             self.last_SFC_data = self.safe_read_excel(self.Last_data_path)
@@ -344,7 +352,7 @@ class SFC_SFC:
         """获取用于对比的唯一标识键。
         资产编号有效时用资产编号，为 NA 时降级使用设备编号。
         返回 (keys_set, asset_col, device_col)"""
-        if df is None or df.empty:
+        if df is None or df.is_empty():
             return set(), None, None
 
         asset_col = next((c for c in ["资产编号", "資產編號"] if c in df.columns), None)
@@ -354,9 +362,9 @@ class SFC_SFC:
 
         invalid_values = {"nan", "none", "null", "na", ""}
         keys = set()
-        for _, row in df.iterrows():
-            asset_val = str(row.get(asset_col, "")).strip() if asset_col else ""
-            device_val = str(row.get(device_col, "")).strip() if device_col else ""
+        for row in df.iter_rows(named=True):
+            asset_val = str(row.get(asset_col) or "").strip() if asset_col else ""
+            device_val = str(row.get(device_col) or "").strip() if device_col else ""
 
             if asset_val and asset_val.lower() not in invalid_values:
                 keys.add(f"A:{asset_val}")
@@ -366,7 +374,7 @@ class SFC_SFC:
         return keys, asset_col, device_col
 
     def SFC_SFC_Comparison(self):
-        """SFC數據比較（使用 pandas DataFrame）"""
+        """SFC數據比較"""
         self.new_assets = None
         self.removed_assets = None
         self.this_SFC_assets = None
@@ -432,21 +440,33 @@ class SFC_SFC:
                 new_by_asset, new_by_device = split_keys(self.new_assets)
                 removed_by_asset, removed_by_device = split_keys(self.removed_assets)
 
-                invalid_values = {"nan", "none", "null", "na"}
+                invalid_values = ["nan", "none", "null", "na", ""]
 
                 def filter_by_keys(df, asset_keys, device_keys):
                     """用资产编号或设备编号过滤 DataFrame"""
-                    mask = pd.Series([False] * len(df))
-                    if asset_col and asset_keys:
-                        am = df[asset_col].astype(str).str.strip().isin(asset_keys)
-                        valid = ~df[asset_col].astype(str).str.strip().str.lower().isin(
-                            invalid_values
+                    conds = []
+                    if asset_col and asset_col in df.columns and asset_keys:
+                        am = (
+                            pl.col(asset_col)
+                            .cast(pl.Utf8)
+                            .str.strip_chars()
+                            .is_in(list(asset_keys))
                         )
-                        mask = mask | (am & valid)
-                    if device_col and device_keys:
-                        dm = df[device_col].astype(str).str.strip().isin(device_keys)
-                        mask = mask | dm
-                    return mask
+                        valid = ~pl.col(asset_col).cast(
+                            pl.Utf8
+                        ).str.strip_chars().str.to_lowercase().is_in(invalid_values)
+                        conds.append(am & valid)
+                    if device_col and device_col in df.columns and device_keys:
+                        dm = (
+                            pl.col(device_col)
+                            .cast(pl.Utf8)
+                            .str.strip_chars()
+                            .is_in(list(device_keys))
+                        )
+                        conds.append(dm)
+                    if not conds:
+                        return df.clear()
+                    return df.filter(pl.any_horizontal(conds))
 
                 # 选列：name, asset, keeper + device(用于NA替补)
                 name_col = None
@@ -467,33 +487,43 @@ class SFC_SFC:
                         keeper_col = self.this_SFC_data.columns[-1]
 
                 select_cols = [name_col, asset_col, keeper_col]
-                if device_col and device_col not in select_cols:
+                if (
+                    device_col
+                    and device_col not in select_cols
+                    and device_col in self.this_SFC_data.columns
+                ):
                     select_cols.append(device_col)
 
-                new_mask = filter_by_keys(
-                    self.this_SFC_data, new_by_asset, new_by_device
-                )
-                new_df = self.this_SFC_data[new_mask][select_cols].drop_duplicates()
+                new_df = filter_by_keys(self.this_SFC_data, new_by_asset, new_by_device)
+                if not new_df.is_empty():
+                    new_df = new_df.select(select_cols).unique()
 
-                removed_mask = filter_by_keys(
+                removed_df = filter_by_keys(
                     self.last_SFC_data, removed_by_asset, removed_by_device
                 )
-                removed_df = self.last_SFC_data[removed_mask][
-                    select_cols
-                ].drop_duplicates()
+                if not removed_df.is_empty():
+                    removed_df = removed_df.select(select_cols).unique()
 
                 # 资产编号为 NA 时用设备编号替代显示
                 def fill_na_asset(df):
-                    if device_col and asset_col:
-                        na_mask = (
-                            df[asset_col]
-                            .astype(str)
-                            .str.strip()
-                            .str.lower()
-                            .isin(invalid_values)
+                    if (
+                        device_col
+                        and asset_col
+                        and asset_col in df.columns
+                        and device_col in df.columns
+                    ):
+                        df = df.with_columns(
+                            pl.when(
+                                pl.col(asset_col)
+                                .cast(pl.Utf8)
+                                .str.strip_chars()
+                                .str.to_lowercase()
+                                .is_in(invalid_values)
+                            )
+                            .then(pl.col(device_col))
+                            .otherwise(pl.col(asset_col))
+                            .alias(asset_col)
                         )
-                        df = df.copy()
-                        df.loc[na_mask, asset_col] = df.loc[na_mask, device_col]
                     return df
 
                 new_df = fill_na_asset(new_df)
@@ -505,154 +535,66 @@ class SFC_SFC:
                     asset_col: "资产编号",
                     keeper_col: "保管人",
                 }
-                new_df = new_df.rename(columns=out_cols_map)
-                removed_df = removed_df.rename(columns=out_cols_map)
-                # 只保留输出用的三列
-                new_df = new_df[["设备名称", "资产编号", "保管人"]]
-                removed_df = removed_df[["设备名称", "资产编号", "保管人"]]
+                out_cols_map = {k: v for k, v in out_cols_map.items() if k != v}
+
+                if not new_df.is_empty():
+                    new_df = new_df.rename(out_cols_map).select(
+                        ["设备名称", "资产编号", "保管人"]
+                    )
+                else:
+                    new_df = pl.DataFrame(schema=["设备名称", "资产编号", "保管人"])
+
+                if not removed_df.is_empty():
+                    removed_df = removed_df.rename(out_cols_map).select(
+                        ["设备名称", "资产编号", "保管人"]
+                    )
+                else:
+                    removed_df = pl.DataFrame(schema=["设备名称", "资产编号", "保管人"])
 
                 # 創建Excel寫入器
-                with pd.ExcelWriter(SFC_SFC_SAVE_PATH, engine="openpyxl") as writer:
-                    # 創建一個空的DataFrame來初始化工作表
-                    empty_df = pd.DataFrame()
-                    empty_df.to_excel(writer, sheet_name="對比結果", index=False)
+                wb, ws = new_workbook("對比結果")
 
-                    # 獲取工作表
-                    worksheet = writer.sheets["對比結果"]
+                # 寫入標題信息
+                ws.merge_cells("A1:D1")
+                ws["A1"] = f"本月SFC资产_VS_上月SFC资产 (对比时间{current_time})"
+                ws["A1"].font = openpyxl.styles.Font(bold=True, size=14)
+                ws["A1"].alignment = openpyxl.styles.Alignment(horizontal="center")
+                # 合并并居中 A2:D2 和 A3:D3
+                ws.merge_cells("A2:D2")
+                ws.merge_cells("A3:D3")
+                ws["A2"].alignment = openpyxl.styles.Alignment(horizontal="center")
+                ws["A3"].alignment = openpyxl.styles.Alignment(horizontal="center")
 
-                    # 寫入標題信息
-                    worksheet.merge_cells("A1:D1")
-                    worksheet["A1"] = (
-                        f"本月SFC资产_VS_上月SFC资产 (对比时间{current_time})"
-                    )
-                    worksheet["A1"].font = openpyxl.styles.Font(bold=True, size=14)
-                    worksheet["A1"].alignment = openpyxl.styles.Alignment(
-                        horizontal="center"
-                    )
-                    # 合并并居中 A2:D2 和 A3:D3
-                    worksheet.merge_cells("A2:D2")
-                    worksheet.merge_cells("A3:D3")
-                    worksheet["A2"].alignment = openpyxl.styles.Alignment(
-                        horizontal="center"
-                    )
-                    worksheet["A3"].alignment = openpyxl.styles.Alignment(
-                        horizontal="center"
+                current_row = 3
+
+                # 寫入新增資產數據
+                if not new_df.is_empty():
+                    current_row = write_section(
+                        ws,
+                        new_df,
+                        f"本月比上月新增资产 {len(self.new_assets)}笔",
+                        current_row,
+                        "new",
                     )
 
-                    current_row = 3
-
-                    # 寫入新增資產數據
-                    if not new_df.empty:
-                        # 標題
-                        worksheet[f"A{current_row}"] = (
-                            f"本月比上月新增资产 {len(self.new_assets)}笔"
-                        )
-                        worksheet[f"A{current_row}"].font = openpyxl.styles.Font(
-                            bold=True, size=12
-                        )
-                        current_row += 1
-
-                        # 列標題
-                        headers = ["No.", "设备名称", "资产编号", "保管人"]
-                        for i, header in enumerate(headers, 1):
-                            cell = worksheet.cell(
-                                row=current_row, column=i, value=header
-                            )
-                            cell.font = openpyxl.styles.Font(bold=True)
-                            cell.fill = openpyxl.styles.PatternFill(
-                                start_color="E6F3FF",
-                                end_color="E6F3FF",
-                                fill_type="solid",
-                            )
-                        current_row += 1
-
-                        # 數據
-                        for i in range(len(new_df)):
-                            worksheet.cell(row=current_row + i, column=1, value=i + 1)
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=2,
-                                value=new_df.iloc[i]["设备名称"],
-                            )
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=3,
-                                value=new_df.iloc[i]["资产编号"],
-                            )
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=4,
-                                value=new_df.iloc[i]["保管人"],
-                            )
-                        current_row += len(new_df) + 2
-
-                    # 寫入減少資產數據
-                    if not removed_df.empty:
-                        worksheet[f"A{current_row}"] = (
-                            f"本月比上月减少资产 {len(self.removed_assets)}笔"
-                        )
-                        worksheet[f"A{current_row}"].font = openpyxl.styles.Font(
-                            bold=True, size=12
-                        )
-                        current_row += 1
-
-                        headers = ["No.", "设备名称", "资产编号", "保管人"]
-                        for i, header in enumerate(headers, 1):
-                            cell = worksheet.cell(
-                                row=current_row, column=i, value=header
-                            )
-                            cell.font = openpyxl.styles.Font(bold=True)
-                            cell.fill = openpyxl.styles.PatternFill(
-                                start_color="FFE6E6",
-                                end_color="FFE6E6",
-                                fill_type="solid",
-                            )
-                        current_row += 1
-
-                        for i in range(len(removed_df)):
-                            worksheet.cell(row=current_row + i, column=1, value=i + 1)
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=2,
-                                value=removed_df.iloc[i]["设备名称"],
-                            )
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=3,
-                                value=removed_df.iloc[i]["资产编号"],
-                            )
-                            worksheet.cell(
-                                row=current_row + i,
-                                column=4,
-                                value=removed_df.iloc[i]["保管人"],
-                            )
-
-                    # 設置列寬和邊框
-                    from openpyxl.styles import Border, Side  # noqa: E402, I001, UP015, F401
-
-                    thin_border = Border(
-                        left=Side(style="thin"),
-                        right=Side(style="thin"),
-                        top=Side(style="thin"),
-                        bottom=Side(style="thin"),
+                # 寫入減少資產數據
+                if not removed_df.is_empty():
+                    current_row = write_section(
+                        ws,
+                        removed_df,
+                        f"本月比上月减少资产 {len(self.removed_assets)}笔",
+                        current_row,
+                        "removed",
                     )
 
-                    # 設置列寬
-                    column_widths = [8, 40, 25, 20]  # 根據內容調整
-                    for i, width in enumerate(column_widths, 1):
-                        worksheet.column_dimensions[
-                            openpyxl.utils.get_column_letter(i)
-                        ].width = width
+                # 設置列寬
+                from openpyxl.utils import get_column_letter
 
-                    # 添加邊框
-                    for row in worksheet.iter_rows(
-                        min_row=1,
-                        max_row=worksheet.max_row,
-                        min_col=1,
-                        max_col=worksheet.max_column,
-                    ):
-                        for cell in row:
-                            cell.border = thin_border
+                column_widths = [8, 40, 25, 20]  # 根據內容調整
+                for i, width in enumerate(column_widths, 1):
+                    ws.column_dimensions[get_column_letter(i)].width = width
+
+                wb.save(SFC_SFC_SAVE_PATH)
 
         except Exception as e:
             logger.exception(e)

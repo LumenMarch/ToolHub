@@ -2,9 +2,9 @@ import os  # noqa: E402, I001, UP015, F401
 from datetime import datetime  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
-import pandas as pd  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.const import FINANCE_FINANCE_SAVE_PATH  # noqa: E402, I001, UP015, F401
+from app.services.asset_comparison.excel_writer import new_workbook, write_section
 from loguru import logger  # noqa: E402, I001, UP015, F401
 
 
@@ -299,164 +299,86 @@ class Finance_Finance:
             Error_Department = Error_Department_query
 
             # 创建Excel文件
-            with pd.ExcelWriter(FINANCE_FINANCE_SAVE_PATH, engine="openpyxl") as writer:
-                # 创建一个空的DataFrame来初始化工作表
-                empty_df = pd.DataFrame()
-                empty_df.to_excel(writer, sheet_name="對比結果", index=False)
+            wb, worksheet = new_workbook("對比結果")
 
-                # 获取工作表对象
-                worksheet = writer.sheets["對比結果"]
+            # 设置标题
+            worksheet.merge_cells("A1:E1")
+            worksheet["A1"] = f"本月财务_VS_上月财务 (对比时间{current_time})"
+            worksheet["A1"].font = openpyxl.styles.Font(bold=True, size=14)
+            worksheet["A1"].alignment = openpyxl.styles.Alignment(horizontal="center")
+            # 合并并居中 A2:D2 和 A3:D3
+            worksheet.merge_cells("A2:D2")
+            worksheet.merge_cells("A3:D3")
+            worksheet["A2"].alignment = openpyxl.styles.Alignment(horizontal="center")
+            worksheet["A3"].alignment = openpyxl.styles.Alignment(horizontal="center")
 
-                # 设置标题
-                worksheet.merge_cells("A1:E1")
-                worksheet["A1"] = f"本月财务_VS_上月财务 (对比时间{current_time})"
-                worksheet["A1"].font = openpyxl.styles.Font(bold=True, size=14)
-                worksheet["A1"].alignment = openpyxl.styles.Alignment(
-                    horizontal="center"
+            current_row = 3
+
+            # 处理保管人新增资产
+            if not new_df.is_empty():
+                current_row = write_section(
+                    worksheet,
+                    new_df,
+                    f"依保管人本月比上月新增资产 {len(self.new_Custodian_assets)}笔",
+                    current_row,
+                    "new",
                 )
-                # 合并并居中 A2:D2 和 A3:D3
-                worksheet.merge_cells("A2:D2")
-                worksheet.merge_cells("A3:D3")
-                worksheet["A2"].alignment = openpyxl.styles.Alignment(
-                    horizontal="center"
+
+            # 处理保管人减少资产
+            if not removed_df.is_empty():
+                current_row = write_section(
+                    worksheet,
+                    removed_df,
+                    f"依保管人本月比上月减少资产 {len(self.removed_Custodian_assets)}笔",
+                    current_row,
+                    "removed",
                 )
-                worksheet["A3"].alignment = openpyxl.styles.Alignment(
-                    horizontal="center"
+
+            # 处理部门新增资产
+            if not new_df_Department.is_empty():
+                current_row = write_section(
+                    worksheet,
+                    new_df_Department,
+                    f"依保管部门本月比上月新增资产 {len(self.new_Department_assets)}笔",
+                    current_row,
+                    "new",
                 )
 
-                current_row = 3
+            # 处理部门减少资产
+            if not removed_df_Department.is_empty():
+                current_row = write_section(
+                    worksheet,
+                    removed_df_Department,
+                    f"依保管部门本月比上月减少资产 {len(self.removed_Department_assets)}笔",
+                    current_row,
+                    "removed",
+                )
 
-                # 处理保管人新增资产
-                if not new_df.is_empty():
-                    current_row = self._add_section_to_excel(
-                        worksheet,
-                        new_df.to_pandas(),
-                        f"依保管人本月比上月新增资产 {len(self.new_Custodian_assets)}笔",
-                        current_row,
-                        "new",
-                    )
+            # 处理保管人错误资产
+            if not Error_Custodian.is_empty():
+                current_row = write_section(
+                    worksheet,
+                    Error_Custodian,
+                    f"本月财务_VS_上月财务_保管人错误资产 {len(self.check_Custodian)}笔",
+                    current_row,
+                    "error",
+                )
 
-                # 处理保管人减少资产
-                if not removed_df.is_empty():
-                    current_row = self._add_section_to_excel(
-                        worksheet,
-                        removed_df.to_pandas(),
-                        f"依保管人本月比上月减少资产 {len(self.removed_Custodian_assets)}笔",
-                        current_row,
-                        "removed",
-                    )
+            # 处理部门错误资产
+            if not Error_Department.is_empty():
+                current_row = write_section(
+                    worksheet,
+                    Error_Department,
+                    f"本月财务_VS_上月财务_部门错误资产 {len(self.check_Department)}笔",
+                    current_row,
+                    "error",
+                )
 
-                # 处理部门新增资产
-                if not new_df_Department.is_empty():
-                    current_row = self._add_section_to_excel(
-                        worksheet,
-                        new_df_Department.to_pandas(),
-                        f"依保管部门本月比上月新增资产 {len(self.new_Department_assets)}笔",
-                        current_row,
-                        "new",
-                    )
+            # 设置列宽
+            for col in ["A", "B", "C", "D", "E"]:
+                worksheet.column_dimensions[col].width = 20
 
-                # 处理部门减少资产
-                if not removed_df_Department.is_empty():
-                    current_row = self._add_section_to_excel(
-                        worksheet,
-                        removed_df_Department.to_pandas(),
-                        f"依保管部门本月比上月减少资产 {len(self.removed_Department_assets)}笔",
-                        current_row,
-                        "removed",
-                    )
-
-                # 处理保管人错误资产
-                if not Error_Custodian.is_empty():
-                    current_row = self._add_section_to_excel(
-                        worksheet,
-                        Error_Custodian.to_pandas(),
-                        f"本月财务_VS_上月财务_保管人错误资产 {len(self.check_Custodian)}笔",
-                        current_row,
-                        "error",
-                    )
-
-                # 处理部门错误资产
-                if not Error_Department.is_empty():
-                    current_row = self._add_section_to_excel(
-                        worksheet,
-                        Error_Department.to_pandas(),
-                        f"本月财务_VS_上月财务_部门错误资产 {len(self.check_Department)}笔",
-                        current_row,
-                        "error",
-                    )
-
-                # 设置列宽
-                for col in ["A", "B", "C", "D", "E"]:
-                    worksheet.column_dimensions[col].width = 20
+            wb.save(FINANCE_FINANCE_SAVE_PATH)
 
         except Exception as e:
             logger.exception(e)
-
-    def _add_section_to_excel(self, worksheet, df, title, start_row, section_type):
-        """添加一个数据段到Excel工作表"""
-        # 添加段标题
-        worksheet.cell(row=start_row, column=1, value=title)
-        worksheet.cell(row=start_row, column=1).font = openpyxl.styles.Font(bold=True)
-        start_row += 2
-
-        if df.empty:
-            worksheet.cell(row=start_row, column=1, value="（无数据）")
-            return start_row + 2
-
-        # 添加表头
-        headers = ["No."] + list(df.columns)
-        for col_idx, header in enumerate(headers, 1):
-            cell = worksheet.cell(row=start_row, column=col_idx, value=header)
-            cell.font = openpyxl.styles.Font(bold=True)
-
-            # 根据类型设置颜色
-            if section_type == "new":
-                cell.fill = openpyxl.styles.PatternFill(
-                    start_color="ADD8E6", end_color="ADD8E6", fill_type="solid"
-                )
-            elif section_type == "removed":
-                cell.fill = openpyxl.styles.PatternFill(
-                    start_color="FFB6C1", end_color="FFB6C1", fill_type="solid"
-                )
-            elif section_type == "error":
-                cell.fill = openpyxl.styles.PatternFill(
-                    start_color="FFFF99", end_color="FFFF99", fill_type="solid"
-                )
-
-            cell.border = openpyxl.styles.Border(
-                left=openpyxl.styles.Side(style="thin"),
-                right=openpyxl.styles.Side(style="thin"),
-                top=openpyxl.styles.Side(style="thin"),
-                bottom=openpyxl.styles.Side(style="thin"),
-            )
-
-        start_row += 1
-
-        # 添加数据行
-        for row_idx, (_, row) in enumerate(df.iterrows(), 1):
-            # No. 列
-            cell = worksheet.cell(row=start_row, column=1, value=row_idx)
-            cell.border = openpyxl.styles.Border(
-                left=openpyxl.styles.Side(style="thin"),
-                right=openpyxl.styles.Side(style="thin"),
-                top=openpyxl.styles.Side(style="thin"),
-                bottom=openpyxl.styles.Side(style="thin"),
-            )
-
-            # 数据列
-            for col_idx, value in enumerate(row, 2):
-                cell = worksheet.cell(
-                    row=start_row,
-                    column=col_idx,
-                    value=str(value) if value is not None else "",
-                )
-                cell.border = openpyxl.styles.Border(
-                    left=openpyxl.styles.Side(style="thin"),
-                    right=openpyxl.styles.Side(style="thin"),
-                    top=openpyxl.styles.Side(style="thin"),
-                    bottom=openpyxl.styles.Side(style="thin"),
-                )
-            start_row += 1
-
-        return start_row + 1
