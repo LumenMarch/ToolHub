@@ -1328,7 +1328,11 @@ def _normalize_raw_data_line_breaks(df: pl.DataFrame) -> pl.DataFrame:
         "備註說明",
         "備註説明",
     }
-    target_columns = remark_columns.intersection(df.columns)
+    target_columns = [
+        col
+        for col in remark_columns.intersection(df.columns)
+        if df[col].dtype in (pl.String, pl.Utf8)
+    ]
     if not target_columns:
         return df
 
@@ -1337,6 +1341,14 @@ def _normalize_raw_data_line_breaks(df: pl.DataFrame) -> pl.DataFrame:
         for column in target_columns
     ]
     return df.with_columns(exprs)
+
+
+def _format_cell_value(v):
+    if v is None:
+        return ""
+    if isinstance(v, (int, float, bool)):
+        return v
+    return str(v)
 
 
 def _build_raw_data_xlsx(
@@ -1409,7 +1421,7 @@ def _build_raw_data_xlsx(
         worksheet = workbook.add_worksheet(safe_name)
         worksheet.write_row(0, 0, list(df.columns))
         for r_idx, row in enumerate(df.iter_rows(named=False), start=1):
-            worksheet.write_row(r_idx, 0, ["" if v is None else str(v) for v in row])
+            worksheet.write_row(r_idx, 0, [_format_cell_value(v) for v in row])
         _log_save_stage(
             "write_raw_data_sheet",
             sheet_started_at,
