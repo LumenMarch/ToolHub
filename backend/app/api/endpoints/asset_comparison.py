@@ -12,6 +12,7 @@ from time import perf_counter
 from urllib.parse import quote
 
 import polars as pl
+import xlsxwriter
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -1401,13 +1402,14 @@ def _build_raw_data_xlsx(
         normalized_df = _normalize_raw_data_line_breaks(df)
         sheet_dfs.append((safe_name, normalized_df))
 
-    wb = Workbook(write_only=True)
+    buf = io.BytesIO()
+    workbook = xlsxwriter.Workbook(buf, {"constant_memory": True})
     for safe_name, df in sheet_dfs:
         sheet_started_at = perf_counter()
-        ws = wb.create_sheet(title=safe_name)
-        ws.append(list(df.columns))
-        for row in df.iter_rows(named=False):
-            ws.append(["" if v is None else str(v) for v in row])
+        worksheet = workbook.add_worksheet(safe_name)
+        worksheet.write_row(0, 0, list(df.columns))
+        for r_idx, row in enumerate(df.iter_rows(named=False), start=1):
+            worksheet.write_row(r_idx, 0, ["" if v is None else str(v) for v in row])
         _log_save_stage(
             "write_raw_data_sheet",
             sheet_started_at,
@@ -1415,9 +1417,7 @@ def _build_raw_data_xlsx(
             rows=len(df),
             columns=len(df.columns),
         )
-
-    buf = io.BytesIO()
-    wb.save(buf)
+    workbook.close()
     buf.seek(0)
     return buf
 
