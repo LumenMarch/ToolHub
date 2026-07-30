@@ -3,7 +3,7 @@ name = "backend"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "bcrypt>=5.0.0",
     "fastapi>=0.140.0",
@@ -26,6 +26,7 @@ dependencies = [
     "uvicorn>=0.51.0",
     "xlrd>=2.0.2",
     "xlsxwriter>=3.2.9",
+    "rustpy-xlsxwriter>=0.1.0",
 ]
 
 [dependency-groups]

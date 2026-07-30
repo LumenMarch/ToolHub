@@ -1351,10 +1351,24 @@ def _format_cell_value(v):
     return str(v)
 
 
-def _build_raw_data_xlsx(
+def _clean_df_for_rustpy(df: pl.DataFrame) -> pl.DataFrame:
+    """清理字符串列中的 \\ufffd (替换字符) 避免 rustpy-xlsxwriter 字符串索引越界 panic"""
+    if df is None or df.is_empty():
+        return df
+    exprs = [
+        pl.col(col).str.replace_all("\ufffd", "?")
+        for col in df.columns
+        if df[col].dtype in (pl.String, pl.Utf8)
+    ]
+    if exprs:
+        return df.with_columns(exprs)
+    return df
+
+
+def _extract_data_sheets(
     summary: dict, this_month_str: str, last_month_str: str
-) -> io.BytesIO | None:
-    """从比对结果中提取原始数据，生成原始数据.xlsx 到 BytesIO 缓冲"""
+) -> dict:
+    """从比对结果中提取各模块的原始数据 DataFrame 映射"""
     data_sheets = {}
 
     def _get_df(obj, attr_name):
@@ -1365,46 +1379,73 @@ def _build_raw_data_xlsx(
             val = val.collect()
         return val
 
-    # 财务数据
-    ff = summary.get("ff")
-    if ff:
-        df_this = _get_df(ff, "this_Finance_data")
-        df_last = _get_df(ff, "last_Finance_data")
-        if df_this is not None and not df_this.is_empty():
-            data_sheets[f"{this_month_str}-财务"] = df_this
-        if df_last is not None and not df_last.is_empty():
-            data_sheets[f"{last_month_str}-财务"] = df_last
+    modules = [
+        ("ff", "this_Finance_data", "last_Finance_data", "财务"),
+        ("nn", "this_Notes_data", "last_Notes_data", "Notes"),
+        ("sfc", "this_SFC_data", "last_SFC_data", "SFC"),
+        ("cc", "this_Customer_data", "last_Customer_data", "客户"),
+    ]
 
-    # Notes数据
-    nn = summary.get("nn")
-    if nn:
-        df_this = _get_df(nn, "this_Notes_data")
-        df_last = _get_df(nn, "last_Notes_data")
+    for key, this_attr, last_attr, label in modules:
+        obj = summary.get(key)
+        if not obj:
+            continue
+        df_this = _get_df(obj, this_attr)
+        df_last = _get_df(obj, last_attr)
         if df_this is not None and not df_this.is_empty():
-            data_sheets[f"{this_month_str}-Notes"] = df_this
+            data_sheets[f"{this_month_str}-{label}"] = df_this
         if df_last is not None and not df_last.is_empty():
-            data_sheets[f"{last_month_str}-Notes"] = df_last
+            data_sheets[f"{last_month_str}-{label}"] = df_last
 
-    # SFC数据
-    sfc = summary.get("sfc")
-    if sfc:
-        df_this = _get_df(sfc, "this_SFC_data")
-        df_last = _get_df(sfc, "last_SFC_data")
-        if df_this is not None and not df_this.is_empty():
-            data_sheets[f"{this_month_str}-SFC"] = df_this
-        if df_last is not None and not df_last.is_empty():
-            data_sheets[f"{last_month_str}-SFC"] = df_last
+    return data_sheets
 
-    # 客户数据
-    cc = summary.get("cc")
-    if cc:
-        df_this = _get_df(cc, "this_Customer_data")
-        df_last = _get_df(cc, "last_Customer_data")
-        if df_this is not None and not df_this.is_empty():
-            data_sheets[f"{this_month_str}-客户"] = df_this
-        if df_last is not None and not df_last.is_empty():
-            data_sheets[f"{last_month_str}-客户"] = df_last
 
+def _build_raw_data_xlsx_rustpy(
+    summary: dict, this_month_str: str, last_month_str: str
+) -> io.BytesIO | None:
+    """使用 rustpy-xlsxwriter 从比对结果中提取原始数据，高效生成原始数据.xlsx 到 BytesIO 缓冲"""
+    data_sheets = _extract_data_sheets(summary, this_month_str, last_month_str)
+    if not data_sheets:
+        return None
+
+    import rustpy_xlsxwriter as rx
+
+    buf = io.BytesIO()
+    sheet_dfs = []
+    for sheet_name, df in data_sheets.items():
+        safe_name = sheet_name[:31]
+        normalized_df = _normalize_raw_data_line_breaks(df)
+        cleaned_df = _clean_df_for_rustpy(normalized_df)
+        sheet_dfs.append((safe_name, cleaned_df))
+
+    with rx.FastExcel(buf, autofit=False) as fe:
+        for safe_name, df in sheet_dfs:
+            sheet_started_at = perf_counter()
+            fe.sheet(safe_name, df)
+            _log_save_stage(
+                "write_raw_data_sheet_rustpy",
+                sheet_started_at,
+                sheet=safe_name,
+                rows=len(df),
+                columns=len(df.columns),
+            )
+
+    buf.seek(0)
+    return buf
+
+
+def _build_raw_data_xlsx(
+    summary: dict, this_month_str: str, last_month_str: str
+) -> io.BytesIO | None:
+    """从比对结果中提取原始数据，生成原始数据.xlsx 到 BytesIO 缓冲 (优先使用 rustpy-xlsxwriter)"""
+    try:
+        buf = _build_raw_data_xlsx_rustpy(summary, this_month_str, last_month_str)
+        if buf is not None:
+            return buf
+    except Exception as e:
+        logger.warning(f"rustpy_xlsxwriter 导出失败，降级回退到 xlsxwriter: {e}")
+
+    data_sheets = _extract_data_sheets(summary, this_month_str, last_month_str)
     if not data_sheets:
         return None
 
