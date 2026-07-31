@@ -1409,10 +1409,13 @@ const AssetComparison: React.FC = () => {
                       />
                     </div>
                   ) : isDifferenceLoading && !differenceData ? (
-                    <div className="space-y-3 p-5" aria-label="正在载入差异明细">
-                      {[0, 1, 2, 3].map(item => (
-                        <div key={item} className="h-12 animate-pulse bg-secondary" />
-                      ))}
+                    <div className="flex min-h-72 items-center justify-center px-6">
+                      <LoadingSignal
+                        ariaLabel="正在载入差异明细"
+                        meta="Asset / Difference Details"
+                        label="[ 差异明细 · 载入中 ]"
+                        detail="正在拉取当前模块的逐行差异证据"
+                      />
                     </div>
                   ) : differenceError ? (
                     <div className="m-5 border border-red-400/50 p-5">
@@ -1521,9 +1524,11 @@ const AssetComparison: React.FC = () => {
 
                 <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 min-[80rem]:py-2">
                   <p className="font-mono text-xs tabular-nums text-muted-foreground" aria-live="polite">
-                    {differenceData
-                      ? `显示 ${differenceData.records.length} / ${differenceData.filteredTotal} 条`
-                      : '等待差异明细'}
+                    {isDifferenceLoading && !differenceData
+                      ? '正在载入差异明细…'
+                      : differenceData
+                        ? `显示 ${differenceData.records.length} / ${differenceData.filteredTotal} 条`
+                        : '等待差异明细'}
                   </p>
                   <div className="flex items-center gap-2">
                     <button
@@ -1692,6 +1697,10 @@ const AssetComparison: React.FC = () => {
                   </div>
                   <button
                     type="button"
+                    onMouseDown={(event) => {
+                      // 避免 textarea blur 触发的 saving 状态在 click 前禁用本按钮
+                      event.preventDefault();
+                    }}
                     onClick={handleSaveAndNext}
                     disabled={!job || activeResult.status !== 'ready' || annotationSaveStatus === 'saving'}
                     className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 border border-foreground px-4 text-sm font-bold outline-none transition-[background-color,color,transform] hover:bg-foreground hover:text-background focus-visible:ring-2 focus-visible:ring-primary active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
