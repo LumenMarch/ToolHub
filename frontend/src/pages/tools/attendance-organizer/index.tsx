@@ -818,7 +818,7 @@ const AttendanceOrganizer: React.FC = () => {
   };
 
   return (
-    <div className="flex w-full flex-col pb-20">
+    <div className="flex w-full flex-col pb-20 min-[80rem]:-mx-44 min-[80rem]:w-auto">
       <p className="mb-8 max-w-2xl font-mono text-xs uppercase leading-relaxed tracking-[0.18em] text-muted-foreground md:text-sm">
         上传通行记录与班别明细，自动识别离岗、用餐、超时及数据异常。
       </p>

@@ -4,7 +4,6 @@ import { AuthContext } from '../context/AuthContext';
 import { toolsConfig } from '../config/tools';
 import { ThemeToggle } from './ThemeToggle';
 import { gsap } from 'gsap';
-import { ArrowRight } from '@phosphor-icons/react';
 import { cn } from '../lib/cn';
 import { useVisibleTools } from '../hooks/useToolsMeta';
 import { LoadingSignal } from './LoadingSignal';
@@ -15,7 +14,7 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const navRef = useRef<HTMLElement>(null);
 
-  const { visibleTools, isPending } = useVisibleTools();
+  const { visibleTools } = useVisibleTools();
 
   const activeTool = visibleTools.find(
     (tool) =>
@@ -142,38 +141,6 @@ const Layout: React.FC = () => {
       >
         <Outlet />
       </main>
-
-      {/* 左下角浮动工具索引 — 只显示已启用的工具 */}
-      <div className="hidden lg:flex fixed bottom-12 left-12 flex-col gap-2 z-40  w-48">
-        <p className="mb-2 text-[0.625rem] font-mono uppercase tracking-[0.2em] opacity-40">索引</p>
-        {isPending ? (
-          <LoadingSignal
-            ariaLabel="正在加载工具索引"
-            label="[ 建立索引 ]"
-            detail="等待工具元数据"
-            compact
-          />
-        ) : visibleTools.map((tool) => {
-          const isActive = activeTool?.id === tool.id;
-
-          return (
-            <Link
-              key={tool.id}
-              to={tool.path}
-              aria-current={isActive ? 'page' : undefined}
-              className={cn(
-                'flex items-center gap-2 text-xs font-medium uppercase tracking-wider transition-[color,transform] duration-500 ease-out',
-                isActive
-                  ? 'translate-x-2 text-primary'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {isActive && <ArrowRight className="size-3" />}
-              {tool.name}
-            </Link>
-          );
-        })}
-      </div>
     </div>
   );
 };

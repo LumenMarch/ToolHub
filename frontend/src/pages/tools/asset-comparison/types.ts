@@ -12,7 +12,34 @@ export interface CheckResult {
   has_diff: boolean;
   msg: string;
   status: 'pending' | 'running' | 'ready' | 'failed';
+  counts?: {
+    new: number;
+    removed: number;
+    anomaly: number;
+  };
   sub_groups?: SubGroup[];
+}
+
+export type DifferenceType = 'all' | 'new' | 'removed' | 'anomaly';
+
+export interface DifferenceRecord {
+  id: string;
+  changeType: Exclude<DifferenceType, 'all'>;
+  dimension: string;
+  identifier: string;
+  name: string;
+  owner: string;
+  sourceLabel: string;
+  detail: string;
+}
+
+export interface DifferenceDetails {
+  moduleKey: string;
+  records: DifferenceRecord[];
+  totals: Record<DifferenceType, number>;
+  filteredTotal: number;
+  offset: number;
+  limit: number;
 }
 
 export interface JobArtifact {
@@ -85,6 +112,7 @@ export interface AssetComparisonJob {
   canFinalize: boolean;
   finalizeBlockers: FinalizeBlocker[];
   error?: string | null;
+  createdAt?: string | null;
   updatedAt?: string | null;
   expiresAt?: string | null;
 }

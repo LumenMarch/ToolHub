@@ -76,7 +76,7 @@ class TaskArtifactStore:
         blob_ttl_hours: int | None = None,
         blob_max_disk_ratio: float | None = None,
     ) -> None:
-        self.root = root or Path(settings.TASK_ARTIFACT_ROOT)
+        self.root = (root or Path(settings.TASK_ARTIFACT_ROOT)).resolve()
         self.upload_root = self.root / "uploads"
         self.user_root = self.root / "users"
         self.blob_ttl_hours = (

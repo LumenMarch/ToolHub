@@ -226,7 +226,11 @@ def _resolve_snapshot_data_path(job_dir: Path, relative_path: str) -> Path:
     return target
 
 
-def load_comparison_snapshot(job_dir: Path) -> dict:
+def load_comparison_snapshot(
+    job_dir: Path,
+    *,
+    module_keys: set[str] | None = None,
+) -> dict:
     """从持久化快照重建最终报告所需的只读数据。"""
     snapshot_path = job_dir / SNAPSHOT_FILENAME
     snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
@@ -239,6 +243,8 @@ def load_comparison_snapshot(job_dir: Path) -> dict:
         "results_info": snapshot.get("results_info", []),
     }
     for module_key, module_data in snapshot.get("modules", {}).items():
+        if module_keys is not None and module_key not in module_keys:
+            continue
         fields = {}
         for field_name, field_data in module_data.get("fields", {}).items():
             kind = field_data.get("kind")

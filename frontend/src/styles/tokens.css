@@ -158,6 +158,38 @@ input:-webkit-autofill:active {
   display: none;
 }
 
+/* 差异明细滚动区域在悬停或键盘聚焦时显示细滚动条。 */
+.difference-scroll {
+  scrollbar-gutter: stable;
+  scrollbar-width: none;
+}
+
+.difference-scroll:hover,
+.difference-scroll:focus-within {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-foreground) 24%, transparent) transparent;
+}
+
+.difference-scroll::-webkit-scrollbar {
+  display: block;
+  width: 0;
+  height: 0;
+}
+
+.difference-scroll:hover::-webkit-scrollbar,
+.difference-scroll:focus-within::-webkit-scrollbar {
+  width: 0.375rem;
+  height: 0.375rem;
+}
+
+.difference-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.difference-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-foreground) 24%, transparent);
+}
+
 html,
 body {
   overflow-x: clip;

@@ -21,7 +21,7 @@ from time import perf_counter
 import polars as pl
 import xlsxwriter
 from dateutil.relativedelta import relativedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from loguru import logger
 from openpyxl import Workbook, load_workbook
@@ -432,6 +432,11 @@ def task_ff(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
                 "label": "【财务-财务】",
                 "has_diff": diff_count > 0,
                 "msg": f"保管人异常 {cust_anomaly} | 部门异常 {dept_anomaly}",
+                "counts": {
+                    "new": cust_new + dept_new,
+                    "removed": cust_rm + dept_rm,
+                    "anomaly": cust_anomaly + dept_anomaly,
+                },
                 "sub_groups": [
                     {
                         "label": "依保管人差异",
@@ -476,6 +481,11 @@ def task_sfc(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
                 "label": "【SFC-SFC】",
                 "has_diff": diff_count > 0,
                 "msg": f"新增: {_safe_len(sfc.new_assets)}, 减少: {_safe_len(sfc.removed_assets)}",
+                "counts": {
+                    "new": _safe_len(sfc.new_assets),
+                    "removed": _safe_len(sfc.removed_assets),
+                    "anomaly": 0,
+                },
             }
         except Exception as e:
             info = {
@@ -508,6 +518,13 @@ def task_nn(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
                 "label": "【Notes-Notes】",
                 "has_diff": diff_count > 0,
                 "msg": f"有资产新增: {_safe_len(nn.new_assets)}, 有资产减少: {_safe_len(nn.removed_assets)} | 无资产总差异: {abs(_safe_len(nn.new_No_assets) - _safe_len(nn.removed_No_assets))}",
+                "counts": {
+                    "new": (_safe_len(nn.new_assets) + _safe_len(nn.new_No_assets)),
+                    "removed": (
+                        _safe_len(nn.removed_assets) + _safe_len(nn.removed_No_assets)
+                    ),
+                    "anomaly": 0,
+                },
             }
         except Exception as e:
             info = {
@@ -540,6 +557,11 @@ def task_cc(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
                 "label": "【客户-客户】",
                 "has_diff": diff_count > 0,
                 "msg": f"新增: {_safe_len(cc.new_Customer_assets)}, 减少: {_safe_len(cc.removed_Customer_assets)}",
+                "counts": {
+                    "new": _safe_len(cc.new_Customer_assets),
+                    "removed": _safe_len(cc.removed_Customer_assets),
+                    "anomaly": 0,
+                },
             }
         except Exception as e:
             info = {
@@ -570,6 +592,11 @@ def task_fn(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
                 "label": "【财务比Notes】",
                 "has_diff": diff_count > 0,
                 "msg": f"财务比Notes新增: {_safe_len(fn.removed_assets)}, 财务比Notes减少: {_safe_len(fn.new_assets)}",
+                "counts": {
+                    "new": _safe_len(fn.new_assets),
+                    "removed": _safe_len(fn.removed_assets),
+                    "anomaly": 0,
+                },
             }
         except Exception as e:
             info = {
@@ -600,6 +627,11 @@ def task_ns(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
                 "label": "【Notes比SFC】",
                 "has_diff": diff_count > 0,
                 "msg": f"Notes比SFC新增: {_safe_len(ns.Notes_new_assets)}, Notes比SFC减少: {_safe_len(ns.Notes_removed_assets)}",
+                "counts": {
+                    "new": _safe_len(ns.Notes_new_assets),
+                    "removed": _safe_len(ns.Notes_removed_assets),
+                    "anomaly": 0,
+                },
             }
         except Exception as e:
             info = {
@@ -630,6 +662,11 @@ def task_cn(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
                 "label": "【客户比Notes】",
                 "has_diff": diff_count > 0,
                 "msg": f"客户比Notes新增: {_safe_len(cn.remove_assets)}, 客户比Notes减少: {_safe_len(cn.new_assets)}",
+                "counts": {
+                    "new": _safe_len(cn.new_assets),
+                    "removed": _safe_len(cn.remove_assets),
+                    "anomaly": 0,
+                },
             }
         except Exception as e:
             info = {
@@ -1192,6 +1229,31 @@ def get_asset_comparison_job(
         return asset_comparison_job_manager.get_job(
             user_id=current_user.id,
             job_id=job_id,
+        )
+    except Exception as exc:
+        _raise_job_http_error(exc)
+
+
+@router.get("/jobs/{job_id}/modules/{module_key}/differences")
+def get_asset_comparison_differences(
+    job_id: str,
+    module_key: str,
+    change_type: str = Query("all", alias="type"),
+    query: str = Query("", max_length=120),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(require_permission("tool:use")),
+    _: None = Depends(require_tool_enabled("asset-comparison")),
+):
+    try:
+        return asset_comparison_job_manager.get_difference_details(
+            user_id=current_user.id,
+            job_id=job_id,
+            module_key=module_key,
+            change_type=change_type,
+            query=query,
+            offset=offset,
+            limit=limit,
         )
     except Exception as exc:
         _raise_job_http_error(exc)
