@@ -17,6 +17,7 @@ from loguru import logger  # noqa: E402, I001, UP015, F401
 
 class SFC_SFC:
     def __init__(self):
+        self.input_catalog = None
         self.removed_count = None
         self.new_count = None
         self.removed_assets = None
@@ -37,8 +38,8 @@ class SFC_SFC:
         def is_html_file(file_path):
             """檢測文件是否為HTML格式"""
             try:
-                with open(file_path, encoding="utf-8-sig", errors="ignore") as f:
-                    for line in f:
+                with open(file_path, encoding="utf-8-sig", errors="ignore") as file:
+                    for line in file:
                         line = line.strip()
                         if not line:
                             continue  # skip blank lines (including bare BOM)
@@ -53,8 +54,13 @@ class SFC_SFC:
             logger.info(f"檢測到HTML格式文件，使用HTML解析: {os.path.basename(path)}")
             # 使用 HTML 解析方式
             try:
-                with open(path, encoding="utf-8-sig", errors="ignore") as f:
-                    html_content = f.read()
+                if self.input_catalog is not None:
+                    html_content = self.input_catalog.read_text(
+                        path, encoding="utf-8-sig", errors="ignore"
+                    )
+                else:
+                    with open(path, encoding="utf-8-sig", errors="ignore") as f:
+                        html_content = f.read()
 
                 # 使用自定義的 TableParser 解析 HTML
                 parser = TableParser()
@@ -167,15 +173,27 @@ class SFC_SFC:
                         data_rows.append(row)
                     df = pl.DataFrame(data_rows, schema=headers, orient="row")
                 else:
-                    df = pl.read_excel(path, engine="calamine", infer_schema_length=0)
+                    if self.input_catalog is not None:
+                        df = self.input_catalog.read_excel(
+                            path, engine="calamine", infer_schema_length=0
+                        )
+                    else:
+                        df = pl.read_excel(
+                            path, engine="calamine", infer_schema_length=0
+                        )
                 logger.info(f"Excel文件讀取成功，原始数据行数: {len(df)}")
 
             except Exception as excel_error:
                 logger.exception(f"Excel讀取失敗: {excel_error}，嘗試 HTML 回退解析")
                 # is_html_file 可能因 BOM / 空行漏检，回退到 HTML 解析路徑
                 try:
-                    with open(path, encoding="utf-8-sig", errors="ignore") as f:
-                        html_content = f.read()
+                    if self.input_catalog is not None:
+                        html_content = self.input_catalog.read_text(
+                            path, encoding="utf-8-sig", errors="ignore"
+                        )
+                    else:
+                        with open(path, encoding="utf-8-sig", errors="ignore") as file:
+                            html_content = file.read()
 
                     parser = TableParser()
                     parser.feed(html_content)

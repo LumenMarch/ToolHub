@@ -10,6 +10,7 @@ from loguru import logger  # noqa: E402, I001, UP015, F401
 
 class Finance_Notes:
     def __init__(self):
+        self.input_catalog = None
         self.processed_notes_data = None
         self.date_Notes_assets = None
         self.Finance_path = None
@@ -32,7 +33,10 @@ class Finance_Notes:
         try:
             # 嘗試使用 Polars 讀取 Excel
             # 注意：设置 infer_schema_length=0 让Polars将所有列读取为字符串，避免类型推断错误
-            df_polars = pl.read_excel(path, infer_schema_length=0)
+            if self.input_catalog is not None:
+                df_polars = self.input_catalog.read_excel(path, infer_schema_length=0)
+            else:
+                df_polars = pl.read_excel(path, infer_schema_length=0)
 
             # 檢查是否包含必需的列
             header_columns = set(df_polars.columns)
@@ -95,9 +99,12 @@ class Finance_Notes:
 
     def read_Custodian_data(self):
         self.Custodian_txt = None
-        with open(self.Custodian_path, encoding="utf-8") as file:
-            lines = file.readlines()  # 读取所有行
-            self.Custodian_txt = [line.strip() for line in lines]
+        if self.input_catalog is not None:
+            self.Custodian_txt = self.input_catalog.read_text_lines(self.Custodian_path)
+        else:
+            with open(self.Custodian_path, encoding="utf-8") as file:
+                lines = file.readlines()  # 读取所有行
+                self.Custodian_txt = [line.strip() for line in lines]
 
     def read_Finance_data(self):
         """讀取財務數據（使用LazyFrame）"""

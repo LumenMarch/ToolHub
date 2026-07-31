@@ -10,6 +10,7 @@ from loguru import logger  # noqa: E402, I001, UP015, F401
 
 class Finance_Finance:
     def __init__(self):
+        self.input_catalog = None
         self.Department_Difference = []
         self.Custodian_Difference = []
         self.check_Custodian = []
@@ -39,6 +40,10 @@ class Finance_Finance:
         self.Custodian_data = []
         if self.Custodian_path is None:
             self.Custodian_data = []
+        elif self.input_catalog is not None:
+            self.Custodian_data = self.input_catalog.read_text_lines(
+                self.Custodian_path
+            )
         else:
             with open(self.Custodian_path, encoding="utf-8") as file:
                 lines = file.readlines()  # 读取所有行
@@ -48,6 +53,10 @@ class Finance_Finance:
         self.Department_data = []
         if self.Department_path is None:
             self.Department_data = []
+        elif self.input_catalog is not None:
+            self.Department_data = self.input_catalog.read_text_lines(
+                self.Department_path
+            )
         else:
             with open(self.Department_path, encoding="utf-8") as file:
                 lines = file.readlines()  # 读取所有行
@@ -58,7 +67,10 @@ class Finance_Finance:
         try:
             # 先用 read_excel 讀取數據
             # 注意：设置 infer_schema_length=0 让Polars将所有列读取为字符串，避免类型推断错误
-            df_eager = pl.read_excel(path, infer_schema_length=0)
+            if self.input_catalog is not None:
+                df_eager = self.input_catalog.read_excel(path, infer_schema_length=0)
+            else:
+                df_eager = pl.read_excel(path, infer_schema_length=0)
 
             # 檢查表頭中是否包含空值
             header_row = df_eager.columns
