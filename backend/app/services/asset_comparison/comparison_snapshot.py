@@ -7,13 +7,14 @@ import uuid
 from collections.abc import Iterable
 from datetime import date, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import polars as pl
 
 SNAPSHOT_FILENAME = "report-snapshot.json"
 SNAPSHOT_DATA_DIR = "report-data"
+CURRENT_SNAPSHOT_VERSION = 2
+SUPPORTED_SNAPSHOT_VERSIONS = {1, CURRENT_SNAPSHOT_VERSION}
 
 DATA_FIELDS = {
     "ff": ("this_Finance_data", "last_Finance_data"),
@@ -39,6 +40,8 @@ SEQUENCE_FIELDS = {
         "removed_Custodian_assets",
         "new_Department_assets",
         "removed_Department_assets",
+        "check_Custodian",
+        "check_Department",
     ),
     "nn": ("new_assets", "removed_assets", "new_No_assets", "removed_No_assets"),
     "sfc": ("new_assets", "removed_assets"),
@@ -50,6 +53,12 @@ SEQUENCE_FIELDS = {
 
 SCALAR_FIELDS = {
     "nn": ("this_invalid_all_rows", "last_invalid_all_rows"),
+    "ns": (
+        "notes_asset_col",
+        "notes_device_col",
+        "sfc_asset_col",
+        "sfc_device_col",
+    ),
 }
 
 
@@ -100,6 +109,30 @@ def _sequence_values(value: Any) -> list[Any]:
     else:
         values = [value]
     return [_json_scalar(item) for item in values]
+
+
+def _new_module_instance(module_key: str):
+    from app.services.asset_comparison.Customer_Customer import Customer_Customer
+    from app.services.asset_comparison.Customer_Notes import Customer_Notes
+    from app.services.asset_comparison.Finance_Finance import Finance_Finance
+    from app.services.asset_comparison.Finance_Notes import Finance_Notes
+    from app.services.asset_comparison.Notes_Notes import Notes_Notes
+    from app.services.asset_comparison.Notes_SFC import Notes_SFC
+    from app.services.asset_comparison.SFC_SFC import SFC_SFC
+
+    module_types = {
+        "ff": Finance_Finance,
+        "nn": Notes_Notes,
+        "sfc": SFC_SFC,
+        "cc": Customer_Customer,
+        "fn": Finance_Notes,
+        "ns": Notes_SFC,
+        "cn": Customer_Notes,
+    }
+    try:
+        return module_types[module_key]()
+    except KeyError as exc:
+        raise ValueError(f"未知的资产核对模块: {module_key}") from exc
 
 
 def save_comparison_snapshot(summary: dict, job_dir: Path) -> Path:
@@ -158,13 +191,15 @@ def save_comparison_snapshot(summary: dict, job_dir: Path) -> Path:
             for field_name in SCALAR_FIELDS.get(module_key, ()):
                 fields[field_name] = {
                     "kind": "scalar",
-                    "value": _json_scalar(getattr(instance, field_name, 0)),
+                    "value": _json_scalar(getattr(instance, field_name, None)),
                 }
 
             modules[module_key] = {"fields": fields}
 
         snapshot = {
-            "version": 1,
+            "version": (
+                1 if summary.get("_snapshot_version") == 1 else CURRENT_SNAPSHOT_VERSION
+            ),
             "generation": generation,
             "results_info": summary.get("results_info", []),
             "modules": modules,
@@ -195,10 +230,14 @@ def load_comparison_snapshot(job_dir: Path) -> dict:
     """从持久化快照重建最终报告所需的只读数据。"""
     snapshot_path = job_dir / SNAPSHOT_FILENAME
     snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    if snapshot.get("version") != 1:
+    snapshot_version = snapshot.get("version")
+    if snapshot_version not in SUPPORTED_SNAPSHOT_VERSIONS:
         raise ValueError("不支持的资产核对报告快照版本")
 
-    summary = {"results_info": snapshot.get("results_info", [])}
+    summary = {
+        "_snapshot_version": snapshot_version,
+        "results_info": snapshot.get("results_info", []),
+    }
     for module_key, module_data in snapshot.get("modules", {}).items():
         fields = {}
         for field_name, field_data in module_data.get("fields", {}).items():
@@ -221,7 +260,14 @@ def load_comparison_snapshot(job_dir: Path) -> dict:
                 raise ValueError(
                     f"不支持的资产核对快照字段类型: {module_key}.{field_name}"
                 )
-        summary[module_key] = SimpleNamespace(**fields)
+        instance = _new_module_instance(module_key)
+        for field_name, value in fields.items():
+            setattr(instance, field_name, value)
+        summary[module_key] = instance
+
+    finance_notes = summary.get("fn")
+    if finance_notes is not None:
+        finance_notes.processed_notes_data = getattr(finance_notes, "Notes_data", None)
     return summary
 
 
@@ -229,7 +275,7 @@ def comparison_snapshot_exists(job_dir: Path) -> bool:
     snapshot_path = job_dir / SNAPSHOT_FILENAME
     try:
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
-        if snapshot.get("version") != 1:
+        if snapshot.get("version") not in SUPPORTED_SNAPSHOT_VERSIONS:
             return False
         modules = snapshot.get("modules")
         if not isinstance(modules, dict) or set(modules) != set(DATA_FIELDS):

@@ -4,7 +4,6 @@ from datetime import datetime  # noqa: E402, I001, UP015, F401
 import openpyxl  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
 import xlrd  # noqa: E402, I001, UP015, F401
-from app.services.asset_comparison.const import NOTES_SFC_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.excel_writer import (  # noqa: E402, I001, UP015, F401
     new_workbook,
     write_section,
@@ -378,7 +377,7 @@ class Notes_SFC:
             except Exception as e:
                 logger.exception(e)
 
-    def Save_Notes_SFC_Comparison(self):
+    def Save_Notes_SFC_Comparison(self, output_path):
         """保存Notes與SFC比較結果為Excel文件"""
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
@@ -601,7 +600,7 @@ class Notes_SFC:
                 for i, w in enumerate(widths, 1):
                     ws.column_dimensions[get_column_letter(i)].width = w
 
-                wb.save(NOTES_SFC_SAVE_PATH)
+                wb.save(output_path)
 
         except Exception as e:
             logger.exception(e)

@@ -2,6 +2,7 @@ import hashlib
 import io
 import os
 import shutil
+import tempfile
 import threading
 import traceback
 import uuid
@@ -37,6 +38,7 @@ from app.schemas.asset_comparison import (
     AssetComparisonJobCreate,
 )
 from app.services.asset_comparison.comparison_snapshot import (
+    CURRENT_SNAPSHOT_VERSION,
     load_comparison_snapshot,
     save_comparison_snapshot,
 )
@@ -743,27 +745,36 @@ _RAW_SOURCE_MODULES = {"ff", "nn", "sfc", "cc"}
 
 
 def _module_export_definition(module_key: str):
-    from app.services.asset_comparison.const import (
-        CUSTOMER_CUSTOMER_SAVE_PATH,
-        CUSTOMER_NOTES_SAVE_PATH,
-        FINANCE_FINANCE_SAVE_PATH,
-        FINANCE_NOTES_SAVE_PATH,
-        NOTES_NOTES_SAVE_PATH,
-        NOTES_SFC_SAVE_PATH,
-        SFC_SFC_SAVE_PATH,
-    )
+    current_date = datetime.now()
+    this_month = current_date.strftime("%Y%m")
+    last_month = (current_date - relativedelta(months=1)).strftime("%Y%m")
 
     definitions = {
-        "ff": ("Save_Check", Path(FINANCE_FINANCE_SAVE_PATH)),
-        "nn": ("Save_Notes_Notes_Comparison", Path(NOTES_NOTES_SAVE_PATH)),
-        "sfc": ("Save_SFC_SFC_Comparison", Path(SFC_SFC_SAVE_PATH)),
+        "ff": ("Save_Check", f"{this_month}财务与{last_month}财务对比结果.xlsx"),
+        "nn": (
+            "Save_Notes_Notes_Comparison",
+            f"{this_month}Notes与{last_month}Notes对比结果.xlsx",
+        ),
+        "sfc": (
+            "Save_SFC_SFC_Comparison",
+            f"{this_month}SFC与{last_month}SFC对比结果.xlsx",
+        ),
         "cc": (
             "Save_Customer_Customer_Comparison",
-            Path(CUSTOMER_CUSTOMER_SAVE_PATH),
+            f"{this_month}客户与{last_month}客户对比结果.xlsx",
         ),
-        "fn": ("Save_Finance_Notes_Comparison", Path(FINANCE_NOTES_SAVE_PATH)),
-        "ns": ("Save_Notes_SFC_Comparison", Path(NOTES_SFC_SAVE_PATH)),
-        "cn": ("Save_Customer_Notes_Comparison", Path(CUSTOMER_NOTES_SAVE_PATH)),
+        "fn": (
+            "Save_Finance_Notes_Comparison",
+            f"{this_month}财务与{this_month}Notes对比结果.xlsx",
+        ),
+        "ns": (
+            "Save_Notes_SFC_Comparison",
+            f"{this_month}Notes与{this_month}SFC对比结果.xlsx",
+        ),
+        "cn": (
+            "Save_Customer_Notes_Comparison",
+            f"{this_month}客户与{this_month}Notes对比结果.xlsx",
+        ),
     }
     try:
         return definitions[module_key]
@@ -787,25 +798,23 @@ def _build_module_job_artifact(
     result: dict,
     job_dir: Path,
 ) -> dict:
-    method_name, legacy_path = _module_export_definition(module_key)
+    method_name, filename = _module_export_definition(module_key)
     target_path = job_dir / f"module-{module_key}.xlsx"
     temporary_path = target_path.with_suffix(".xlsx.tmp")
 
     with _module_export_lock:
         temporary_path.unlink(missing_ok=True)
         if result.get("has_diff"):
-            legacy_path.unlink(missing_ok=True)
-            getattr(instance, method_name)()
-            if not legacy_path.is_file():
+            getattr(instance, method_name)(temporary_path)
+            if not temporary_path.is_file():
                 raise RuntimeError(f"{result['label']}文件生成失败")
-            shutil.copy2(legacy_path, temporary_path)
         else:
             _write_no_difference_workbook(temporary_path, result["label"])
         os.replace(temporary_path, target_path)
 
     return {
         "path": target_path.name,
-        "filename": legacy_path.name,
+        "filename": filename,
         "content_type": (
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
@@ -1062,6 +1071,7 @@ def _finalize_asset_comparison_job(
             raw_data=raw_path.read_bytes(),
             job_id=job_id,
             is_cancel_requested=is_cancel_requested,
+            working_dir=job_dir,
         )
     target_path = job_dir / "complete.zip"
     temporary_path = target_path.with_suffix(".zip.tmp")
@@ -1079,35 +1089,24 @@ def _finalize_asset_comparison_job(
 def _retry_asset_comparison_artifact(
     job_id: str,
     artifact_key: str,
-    runtime: dict | None,
     job_dir: Path,
     inputs: dict[str, str],
 ) -> dict:
     if artifact_key == "raw_data_xlsx":
-        summary = (
-            runtime["summary"]
-            if runtime is not None
-            else load_comparison_snapshot(job_dir)
-        )
+        summary = load_comparison_snapshot(job_dir)
         return _build_raw_job_artifact(summary, job_dir)
     if artifact_key.startswith("module_"):
         module_key = artifact_key.removeprefix("module_")
-        summary = (
-            runtime["summary"]
-            if runtime is not None
-            else load_comparison_snapshot(job_dir)
-        )
-        results = (
-            runtime["results"]
-            if runtime is not None
-            else {result["key"]: result for result in summary.get("results_info", [])}
-        )
+        summary = load_comparison_snapshot(job_dir)
+        results = {result["key"]: result for result in summary.get("results_info", [])}
         result = results[module_key]
         instance = summary[module_key]
         retried_result = None
         needs_comparison_retry = result.get("msg", "").startswith("异常:")
-        needs_runtime_instance = runtime is None and result.get("has_diff")
-        if needs_comparison_retry or needs_runtime_instance:
+        needs_snapshot_upgrade = summary.get(
+            "_snapshot_version", 1
+        ) < CURRENT_SNAPSHOT_VERSION and result.get("has_diff")
+        if needs_comparison_retry or needs_snapshot_upgrade:
             task_by_key = {
                 "ff": task_ff,
                 "sfc": task_sfc,
@@ -1127,9 +1126,6 @@ def _retry_asset_comparison_artifact(
                 results[key] for key in MODULE_ORDER if key in results
             ]
             save_comparison_snapshot(summary, job_dir)
-            if runtime is not None:
-                runtime["summary"] = summary
-                runtime["results"] = results
             retried_result = result
 
         artifact = _build_module_job_artifact(
@@ -1684,6 +1680,7 @@ def _build_complete_export(
     *,
     job_id: str | None = None,
     is_cancel_requested=None,
+    working_dir: Path,
 ) -> tuple[bytes, str]:
     def raise_if_cancelled() -> None:
         if is_cancel_requested is not None and is_cancel_requested():
@@ -1706,6 +1703,7 @@ def _build_complete_export(
         )
 
     request_started_at = perf_counter()
+    export_dir = Path(tempfile.mkdtemp(prefix="complete-export-", dir=working_dir))
     try:
         ff = summary.get("ff")
         nn = summary.get("nn")
@@ -1715,21 +1713,12 @@ def _build_complete_export(
         ns = summary.get("ns")
         cn = summary.get("cn")
 
-        from app.services.asset_comparison.const import SAVE_CHECK_PATH
-
-        if not os.path.exists(SAVE_CHECK_PATH):
-            os.makedirs(SAVE_CHECK_PATH, exist_ok=True)
-
         current_date = datetime.now()
         this_month_str = current_date.strftime("%Y%m")
         last_month_date = current_date - relativedelta(months=1)
         last_month_str = last_month_date.strftime("%Y%m")
-        save_all_path = os.path.join(
-            SAVE_CHECK_PATH, f"TE&PE资产对比_{this_month_str}对比总结.xlsx"
-        )
-        save_pdf_path = os.path.join(
-            SAVE_CHECK_PATH, f"TE&PE资产对比_{this_month_str}对比总结.pdf"
-        )
+        save_all_path = str(export_dir / f"TE&PE资产对比_{this_month_str}对比总结.xlsx")
+        save_pdf_path = str(export_dir / f"TE&PE资产对比_{this_month_str}对比总结.pdf")
 
         for output_path in (save_all_path, save_pdf_path):
             if os.path.exists(output_path):
@@ -2134,11 +2123,11 @@ def _build_complete_export(
         # Step 2: PDF 导出会签表
         step2_started_at = perf_counter()
         pdf_ok = False
-        summary_pdf_path = os.path.join(
-            SAVE_CHECK_PATH, f"TE&PE资产对比_{this_month_str}对比总结_summary.pdf"
+        summary_pdf_path = str(
+            export_dir / f"TE&PE资产对比_{this_month_str}对比总结_summary.pdf"
         )
-        detail_pdf_path = os.path.join(
-            SAVE_CHECK_PATH, f"TE&PE资产对比_{this_month_str}对比总结_detail.pdf"
+        detail_pdf_path = str(
+            export_dir / f"TE&PE资产对比_{this_month_str}对比总结_detail.pdf"
         )
 
         try:
@@ -2273,3 +2262,5 @@ def _build_complete_export(
             traceback.format_exc(),
         )
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        shutil.rmtree(export_dir, ignore_errors=True)

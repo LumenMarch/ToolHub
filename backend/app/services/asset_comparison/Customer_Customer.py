@@ -3,7 +3,6 @@ from datetime import datetime  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
-from app.services.asset_comparison.const import CUSTOMER_CUSTOMER_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.excel_writer import new_workbook, safe_cell
 from loguru import logger  # noqa: E402, I001, UP015, F401
 
@@ -157,7 +156,7 @@ class Customer_Customer:
             except Exception as e:
                 logger.exception(e)
 
-    def Save_Customer_Customer_Comparison(self):
+    def Save_Customer_Customer_Comparison(self, output_path):
         """保存客戶與客戶比較結果為Excel文件"""
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
@@ -275,6 +274,6 @@ class Customer_Customer:
                     for cell in r:
                         cell.border = thin
 
-                wb.save(CUSTOMER_CUSTOMER_SAVE_PATH)
+                wb.save(output_path)
         except Exception as e:
             logger.exception(e)
