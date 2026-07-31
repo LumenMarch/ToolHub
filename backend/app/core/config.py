@@ -1,6 +1,7 @@
 import tempfile
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -18,10 +19,15 @@ class Settings(BaseSettings):
     # Database
     SQLALCHEMY_DATABASE_URI: str = "sqlite:///./toolhub.db"
 
-    # 资产核对任务
-    ASSET_COMPARISON_ARTIFACT_ROOT: str = str(
-        Path(tempfile.gettempdir()) / "toolhub-asset-comparison-jobs"
+    # 任务产物与上传内容缓存
+    TASK_ARTIFACT_ROOT: str = str(
+        Path(tempfile.gettempdir()) / "toolhub-task-artifacts"
     )
+    TASK_ARTIFACT_BLOB_TTL_HOURS: int = Field(default=24 * 7, gt=0)
+    TASK_ARTIFACT_BLOB_MAX_DISK_RATIO: float = Field(default=0.2, gt=0, lt=1)
+    TASK_ARTIFACT_CLEANUP_INTERVAL_HOURS: float = Field(default=6, gt=0)
+
+    # 资产核对任务
     ASSET_COMPARISON_MAX_ACTIVE_JOBS: int = 1
     ASSET_COMPARISON_JOB_TTL_HOURS: int = 24
     ASSET_COMPARISON_MAX_STORED_JOBS: int = 20

@@ -1,10 +1,11 @@
 from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
 from time import perf_counter
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -82,6 +83,20 @@ def _build_download_response(content: bytes, filename: str) -> Response:
     )
     return Response(
         content=content,
+        media_type=EXCEL_CONTENT_TYPE,
+        headers={"Content-Disposition": content_disposition},
+    )
+
+
+def _build_download_file_response(file_path: Path, filename: str) -> FileResponse:
+    encoded_filename = quote(filename)
+    ascii_filename = f"attendance_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    content_disposition = (
+        f'attachment; filename="{ascii_filename}"; '
+        f"filename*=UTF-8''{encoded_filename}"
+    )
+    return FileResponse(
+        path=file_path,
         media_type=EXCEL_CONTENT_TYPE,
         headers={"Content-Disposition": content_disposition},
     )
@@ -224,8 +239,8 @@ def download_attendance_result(
     except AttendanceResultNotFoundError as exc:
         raise HTTPException(status_code=404, detail="分析结果不存在") from exc
 
-    return _build_download_response(
-        cached_result.content,
+    return _build_download_file_response(
+        cached_result.content_path,
         cached_result.filename,
     )
 

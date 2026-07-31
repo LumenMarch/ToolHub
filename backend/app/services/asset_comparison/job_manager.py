@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import threading
 import uuid
 from collections.abc import Callable
@@ -15,8 +14,10 @@ from loguru import logger
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.asset_comparison_job import AssetComparisonJob
+from app.services.task_artifacts import TaskArtifactStore, task_artifact_store
 
 MODULE_ORDER = ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
+TASK_TOOL = "asset-comparison"
 BASE_ARTIFACT_KEYS = [*(f"module_{key}" for key in MODULE_ORDER), "raw_data_xlsx"]
 REVIEW_VALUES = {"差異確認OK", "待跟进", "異常"}
 ACTIVE_JOB_STATUSES = {
@@ -93,12 +94,12 @@ class AssetComparisonJobManager:
         execute_job: Callable,
         finalize_job: Callable,
         retry_artifact: Callable,
+        artifact_store: TaskArtifactStore | None = None,
     ) -> None:
         self._execute_job = execute_job
         self._finalize_job = finalize_job
         self._retry_artifact = retry_artifact
-        self._artifact_root = Path(settings.ASSET_COMPARISON_ARTIFACT_ROOT)
-        self._artifact_root.mkdir(parents=True, exist_ok=True)
+        self._artifact_store = artifact_store or task_artifact_store
         self._executor = ThreadPoolExecutor(
             max_workers=max(settings.ASSET_COMPARISON_MAX_ACTIVE_JOBS, 1),
             thread_name_prefix="asset-comparison-job",
@@ -128,22 +129,70 @@ class AssetComparisonJobManager:
 
             now = _utcnow()
             job_id = str(uuid.uuid4())
+            expires_at = now + timedelta(hours=settings.ASSET_COMPARISON_JOB_TTL_HOURS)
+            source_paths = {
+                key: Path(value).resolve()
+                for key, value in inputs.items()
+                if str(value).strip()
+            }
+            invalid_inputs = [
+                key
+                for key in inputs
+                if key not in source_paths or not source_paths[key].is_file()
+            ]
+            if invalid_inputs:
+                raise AssetComparisonJobValidationError(
+                    f"输入文件不存在: {', '.join(invalid_inputs)}"
+                )
+            self._artifact_store.ensure_task(
+                user_id=user_id,
+                tool=TASK_TOOL,
+                task_id=job_id,
+                expires_at=expires_at.replace(tzinfo=UTC).timestamp(),
+                metadata={
+                    "client_request_id": client_request_id,
+                    "inputs": {
+                        key: source_path.name
+                        for key, source_path in source_paths.items()
+                    },
+                },
+            )
+            staged_inputs = {}
+            try:
+                for key, source_path in source_paths.items():
+                    suffix = source_path.suffix.lower() or ".bin"
+                    staged_inputs[key] = str(
+                        self._artifact_store.materialize_input(
+                            user_id=user_id,
+                            tool=TASK_TOOL,
+                            task_id=job_id,
+                            filename=f"{key}{suffix}",
+                            source_path=source_path,
+                        )
+                    )
+            except Exception:
+                self._delete_job_files(user_id, job_id)
+                raise
+
             job = AssetComparisonJob(
                 id=job_id,
                 user_id=user_id,
                 client_request_id=client_request_id,
                 status="queued",
-                input_json=_dumps(inputs),
+                input_json=_dumps(staged_inputs),
                 results_json="[]",
                 artifacts_json=_dumps(_initial_artifacts()),
                 remarks_json="{}",
                 reviews_json="{}",
                 progress_json=_dumps(_initial_progress()),
-                expires_at=now
-                + timedelta(hours=settings.ASSET_COMPARISON_JOB_TTL_HOURS),
+                expires_at=expires_at,
             )
-            db.add(job)
-            db.commit()
+            try:
+                db.add(job)
+                db.commit()
+            except Exception:
+                self._delete_job_files(user_id, job_id)
+                raise
             db.refresh(job)
             response = self._serialize(job)
 
@@ -310,9 +359,13 @@ class AssetComparisonJobManager:
             if not relative_path:
                 raise AssetComparisonJobNotFoundError
 
-            job_dir = self._job_dir(job.user_id, job.id).resolve()
-            path = (job_dir / relative_path).resolve()
-            if job_dir not in path.parents or not path.is_file():
+            path = self._artifact_store.resolve_task_path(
+                user_id=job.user_id,
+                tool=TASK_TOOL,
+                task_id=job.id,
+                relative_path=relative_path,
+            )
+            if not path.is_file():
                 raise AssetComparisonJobNotFoundError
             return (
                 path,
@@ -735,7 +788,13 @@ class AssetComparisonJobManager:
             job = db.get(AssetComparisonJob, job_id)
             if job is None:
                 raise AssetComparisonJobNotFoundError
-            return self._job_dir(job.user_id, job.id)
+            return self._artifact_store.ensure_task(
+                user_id=job.user_id,
+                tool=TASK_TOOL,
+                task_id=job.id,
+                expires_at=job.expires_at.replace(tzinfo=UTC).timestamp(),
+                metadata={"client_request_id": job.client_request_id},
+            )
 
     def _is_cancel_requested(self, job_id: str) -> bool:
         with self._lock, SessionLocal() as db:
@@ -743,7 +802,11 @@ class AssetComparisonJobManager:
             return job is None or job.status == "cancel_requested"
 
     def _job_dir(self, user_id: int, job_id: str) -> Path:
-        return self._artifact_root / str(user_id) / job_id
+        return self._artifact_store.task_dir(
+            user_id=user_id,
+            tool=TASK_TOOL,
+            task_id=job_id,
+        )
 
     def _delete_job_files(
         self,
@@ -752,9 +815,12 @@ class AssetComparisonJobManager:
         *,
         ignore_errors: bool = True,
     ) -> None:
-        job_dir = self._job_dir(user_id, job_id)
-        if ignore_errors or job_dir.exists():
-            shutil.rmtree(job_dir, ignore_errors=ignore_errors)
+        self._artifact_store.delete_task(
+            user_id=user_id,
+            tool=TASK_TOOL,
+            task_id=job_id,
+            ignore_errors=ignore_errors,
+        )
 
     def _cleanup_storage_limit(self) -> None:
         with self._lock, SessionLocal() as db:
@@ -770,9 +836,10 @@ class AssetComparisonJobManager:
             )
             sizes = {}
             for job in jobs:
-                job_dir = self._job_dir(job.user_id, job.id)
-                sizes[job.id] = sum(
-                    file.stat().st_size for file in job_dir.rglob("*") if file.is_file()
+                sizes[job.id] = self._artifact_store.task_size(
+                    user_id=job.user_id,
+                    tool=TASK_TOOL,
+                    task_id=job.id,
                 )
             total_size = sum(sizes.values())
             for job in jobs:

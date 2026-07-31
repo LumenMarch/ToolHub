@@ -1,5 +1,9 @@
+import asyncio
+from contextlib import suppress
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
 from starlette.formparsers import MultiPartParser
 
 from app.api.api_router import api_router
@@ -45,13 +49,50 @@ app.add_middleware(
 # Mount all API routes from the single API aggregator
 app.include_router(api_router, prefix="/api/v1")
 
+artifact_cleanup_task: asyncio.Task[None] | None = None
 
-@app.on_event("startup")
-async def cleanup_expired_uploads() -> None:
-    """启动时清理超过 24 小时的未完成上传。"""
+
+def cleanup_task_artifacts() -> None:
+    """清理过期上传、任务产物，并按 TTL 和容量限制回收缓存。"""
+    from app.services.task_artifacts import task_artifact_store
     from app.services.upload.store import UploadStore
 
     UploadStore().cleanup_expired(max_age_hours=24)
+    result = task_artifact_store.cleanup()
+    logger.info(
+        "task artifacts cleaned: expired_tasks={} expired_blobs={} "
+        "capacity_blobs={} evicted_bytes={} cache_bytes={} cache_budget_bytes={}",
+        result.expired_tasks,
+        result.expired_blobs,
+        result.capacity_blobs,
+        result.evicted_bytes,
+        result.cache_bytes,
+        result.cache_budget_bytes,
+    )
+
+
+async def cleanup_task_artifacts_periodically() -> None:
+    from app.core.config import settings
+
+    interval_seconds = settings.TASK_ARTIFACT_CLEANUP_INTERVAL_HOURS * 3600
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await asyncio.to_thread(cleanup_task_artifacts)
+        except Exception:
+            logger.exception("task artifact periodic cleanup failed")
+
+
+@app.on_event("startup")
+async def start_task_artifact_cleanup() -> None:
+    """启动清理任务并定期回收缓存空间。"""
+    global artifact_cleanup_task
+
+    await asyncio.to_thread(cleanup_task_artifacts)
+    artifact_cleanup_task = asyncio.create_task(
+        cleanup_task_artifacts_periodically(),
+        name="task-artifact-cleanup",
+    )
 
 
 @app.on_event("startup")
@@ -68,6 +109,19 @@ async def shutdown_asset_comparison_jobs() -> None:
     from app.api.endpoints.asset_comparison import asset_comparison_job_manager
 
     asset_comparison_job_manager.shutdown()
+
+
+@app.on_event("shutdown")
+async def shutdown_task_artifact_cleanup() -> None:
+    """停止任务产物周期清理。"""
+    global artifact_cleanup_task
+
+    if artifact_cleanup_task is None:
+        return
+    artifact_cleanup_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await artifact_cleanup_task
+    artifact_cleanup_task = None
 
 
 @app.get("/")

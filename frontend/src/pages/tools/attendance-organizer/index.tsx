@@ -94,6 +94,7 @@ type UploadProgressState = Pick<
   | 'bytesSent'
   | 'bytesAccepted'
   | 'bytesTotal'
+  | 'cacheHit'
 >;
 
 const formatMegabytes = (bytes: number) =>
@@ -103,6 +104,8 @@ const UploadProgressRow: React.FC<{
   label: string;
   upload: UploadProgressState;
 }> = ({ label, upload }) => {
+  const isHashing = upload.status === 'hashing';
+  const isCheckingCache = upload.status === 'cache-checking';
   const isCompleting = upload.status === 'confirming';
   const isCompleted = upload.status === 'completed';
 
@@ -116,8 +119,12 @@ const UploadProgressRow: React.FC<{
           {isCompleted ? (
             <>
               <CheckCircle weight="fill" className="size-4 text-primary" />
-              已完成
+              {upload.cacheHit ? '已使用缓存' : '已完成'}
             </>
+          ) : isHashing ? (
+            '正在校验'
+          ) : isCheckingCache ? (
+            '查找缓存'
           ) : isCompleting ? (
             <>
               <span

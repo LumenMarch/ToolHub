@@ -1,5 +1,7 @@
 import { useRef, useState, useCallback } from 'react';
 import * as tus from 'tus-js-client';
+import api from '../api/axios';
+import { calculateFileDigest } from '../lib/fileDigest';
 
 interface UseTusUploadOptions {
   /** tus 服务端点，默认 /api/v1/upload/tus */
@@ -22,6 +24,8 @@ interface UseTusUploadOptions {
 
 export type UploadStatus =
   | 'idle'
+  | 'hashing'
+  | 'cache-checking'
   | 'uploading'
   | 'confirming'
   | 'completed'
@@ -36,6 +40,7 @@ export interface UploadState {
   bytesSent: number;
   bytesAccepted: number;
   bytesTotal: number;
+  cacheHit: boolean;
   error: string | null;
 }
 
@@ -64,6 +69,7 @@ const createInitialState = (): UploadState => ({
   bytesSent: 0,
   bytesAccepted: 0,
   bytesTotal: 0,
+  cacheHit: false,
   error: null,
 });
 
@@ -83,8 +89,8 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
 
   const [state, setState] = useState<UploadState>(createInitialState);
 
-  const uploadRef = useRef<tus.Upload | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const uploadRefs = useRef(new Set<tus.Upload>());
+  const abortControllers = useRef(new Set<AbortController>());
 
   const upload = useCallback(
     ({
@@ -93,63 +99,48 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
       onProgress: onFileProgress,
       onChunkComplete: onFileChunkComplete,
     }: UploadFileOptions): Promise<string> => {
-      return new Promise<string>((resolve, reject) => {
+      const run = async (): Promise<string> => {
+        const controller = new AbortController();
+        const filename = metadata?.filename || file.name;
+        abortControllers.current.add(controller);
         setState({
           ...createInitialState(),
-          status: 'uploading',
+          status: 'hashing',
           bytesTotal: file.size,
         });
 
-        const uploadInstance = new tus.Upload(file, {
-          endpoint,
-          chunkSize,
-          metadata: metadata ?? {},
-          onProgress(bytesUploaded, bytesTotal) {
-            const pct =
-              bytesTotal > 0
-                ? Math.min(100, Math.floor((bytesUploaded / bytesTotal) * 100))
-                : 0;
-            setState((prev) => ({
-              ...prev,
-              status:
-                bytesTotal > 0 && bytesUploaded >= bytesTotal
-                  ? 'confirming'
-                  : 'uploading',
-              progress: pct,
-              bytesSent: bytesUploaded,
-              bytesTotal,
-            }));
-            onProgress?.(bytesUploaded, bytesTotal);
-            onFileProgress?.(bytesUploaded, bytesTotal);
-          },
-          onChunkComplete(chunkBytes, bytesAccepted, bytesTotal) {
-            const acceptedPct =
-              bytesTotal > 0
-                ? Math.min(
-                    100,
-                    Math.floor((bytesAccepted / bytesTotal) * 100),
-                  )
-                : 0;
-            setState((prev) => ({
-              ...prev,
-              status:
-                bytesTotal > 0 && bytesAccepted >= bytesTotal
-                  ? 'confirming'
-                  : prev.status,
-              acceptedProgress: acceptedPct,
-              bytesAccepted,
-              bytesTotal,
-            }));
-            onChunkComplete?.(chunkBytes, bytesAccepted, bytesTotal);
-            onFileChunkComplete?.(chunkBytes, bytesAccepted, bytesTotal);
-          },
-          onSuccess(payload) {
-            const url =
-              uploadInstance.url ||
-              payload?.lastResponse?.getHeader('Location') ||
-              '';
-            const uploadId =
-              url.split('?')[0].split('/').filter(Boolean).pop() ?? '';
+        try {
+          const digest = await calculateFileDigest(file, {
+            signal: controller.signal,
+            onProgress(bytesHashed, bytesTotal) {
+              const progress = Math.min(
+                100,
+                Math.floor((bytesHashed / bytesTotal) * 100),
+              );
+              setState((prev) => ({ ...prev, progress }));
+            },
+          });
+          setState((prev) => ({
+            ...prev,
+            status: 'cache-checking',
+            progress: 100,
+          }));
+
+          const cacheEndpoint = endpoint.replace(/\/tus\/?$/, '/cache/resolve');
+          const cacheResponse = await api.post<{
+            cache_hit: boolean;
+            upload_id: string | null;
+          }>(
+            cacheEndpoint.replace(/^\/api\/v1/, ''),
+            {
+              filename,
+              content_type: file.type || 'application/octet-stream',
+              ...digest,
+            },
+            { signal: controller.signal },
+          );
+          if (cacheResponse.data.cache_hit && cacheResponse.data.upload_id) {
+            const uploadId = cacheResponse.data.upload_id;
             setState({
               status: 'completed',
               uploadId,
@@ -158,35 +149,128 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
               bytesSent: file.size,
               bytesAccepted: file.size,
               bytesTotal: file.size,
+              cacheHit: true,
               error: null,
             });
             onSuccess?.(uploadId);
-            resolve(uploadId);
-          },
-          onError(err) {
-            const message = err instanceof Error ? err.message : String(err);
-            setState((prev) => ({
-              ...prev,
-              status: 'error',
-              uploadId: null,
-              error: message,
-            }));
-            onError?.(err instanceof Error ? err : new Error(message));
-            reject(err);
-          },
-          // 关键：允许凭据（Cookie）随请求发送
-          headers: {
-            'X-Requested-With': 'XMLHttpRequest',
-          },
-          // 移除断点续传指纹存储 —— 我们的场景不需要
-          storeFingerprintForResuming: false,
-        });
+            return uploadId;
+          }
 
-        uploadRef.current = uploadInstance;
+          setState((prev) => ({
+            ...prev,
+            status: 'uploading',
+            progress: 0,
+          }));
+          return await new Promise<string>((resolve, reject) => {
+            const uploadInstance = new tus.Upload(file, {
+              endpoint,
+              chunkSize,
+              metadata: {
+                ...(metadata ?? {}),
+                content_type: file.type || 'application/octet-stream',
+                md5: digest.md5,
+                sha256: digest.sha256,
+              },
+              onProgress(bytesUploaded, bytesTotal) {
+                const pct =
+                  bytesTotal > 0
+                    ? Math.min(
+                        100,
+                        Math.floor((bytesUploaded / bytesTotal) * 100),
+                      )
+                    : 0;
+                setState((prev) => ({
+                  ...prev,
+                  status:
+                    bytesTotal > 0 && bytesUploaded >= bytesTotal
+                      ? 'confirming'
+                      : 'uploading',
+                  progress: pct,
+                  bytesSent: bytesUploaded,
+                  bytesTotal,
+                }));
+                onProgress?.(bytesUploaded, bytesTotal);
+                onFileProgress?.(bytesUploaded, bytesTotal);
+              },
+              onChunkComplete(chunkBytes, bytesAccepted, bytesTotal) {
+                const acceptedPct =
+                  bytesTotal > 0
+                    ? Math.min(
+                        100,
+                        Math.floor((bytesAccepted / bytesTotal) * 100),
+                      )
+                    : 0;
+                setState((prev) => ({
+                  ...prev,
+                  status:
+                    bytesTotal > 0 && bytesAccepted >= bytesTotal
+                      ? 'confirming'
+                      : prev.status,
+                  acceptedProgress: acceptedPct,
+                  bytesAccepted,
+                  bytesTotal,
+                }));
+                onChunkComplete?.(chunkBytes, bytesAccepted, bytesTotal);
+                onFileChunkComplete?.(chunkBytes, bytesAccepted, bytesTotal);
+              },
+              onSuccess(payload) {
+                const url =
+                  uploadInstance.url
+                  || payload?.lastResponse?.getHeader('Location')
+                  || '';
+                const uploadId =
+                  url.split('?')[0].split('/').filter(Boolean).pop() ?? '';
+                setState({
+                  status: 'completed',
+                  uploadId,
+                  progress: 100,
+                  acceptedProgress: 100,
+                  bytesSent: file.size,
+                  bytesAccepted: file.size,
+                  bytesTotal: file.size,
+                  cacheHit: false,
+                  error: null,
+                });
+                uploadRefs.current.delete(uploadInstance);
+                onSuccess?.(uploadId);
+                resolve(uploadId);
+              },
+              onError(err) {
+                uploadRefs.current.delete(uploadInstance);
+                reject(err);
+              },
+              // 关键：允许凭据（Cookie）随请求发送
+              headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+              },
+              // 移除断点续传指纹存储 —— 我们的场景不需要
+              storeFingerprintForResuming: false,
+            });
 
-        // 启动上传
-        uploadInstance.start();
-      });
+            uploadRefs.current.add(uploadInstance);
+            uploadInstance.start();
+          });
+        } catch (error) {
+          if (controller.signal.aborted) {
+            throw error;
+          }
+          const message = error instanceof Error ? error.message : String(error);
+          const normalizedError =
+            error instanceof Error ? error : new Error(message);
+          setState((prev) => ({
+            ...prev,
+            status: 'error',
+            uploadId: null,
+            error: message,
+          }));
+          onError?.(normalizedError);
+          throw normalizedError;
+        } finally {
+          abortControllers.current.delete(controller);
+        }
+      };
+
+      return run();
     },
     [
       endpoint,
@@ -199,16 +283,20 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
   );
 
   const abort = useCallback(() => {
-    if (uploadRef.current) {
-      uploadRef.current.abort(true);
-      uploadRef.current = null;
+    for (const uploadInstance of uploadRefs.current) {
+      void uploadInstance.abort(true);
     }
-    abortRef.current?.abort();
+    uploadRefs.current.clear();
+    for (const controller of abortControllers.current) {
+      controller.abort();
+    }
+    abortControllers.current.clear();
     setState({ ...createInitialState(), status: 'aborted' });
   }, []);
 
   const reset = useCallback(() => {
-    uploadRef.current = null;
+    uploadRefs.current.clear();
+    abortControllers.current.clear();
     setState(createInitialState());
   }, []);
 
