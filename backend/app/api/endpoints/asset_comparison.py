@@ -6,7 +6,13 @@ import threading
 import traceback
 import uuid
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+)
+from concurrent.futures import (
+    TimeoutError as FutureTimeoutError,
+)
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -37,6 +43,10 @@ from app.services.asset_comparison.comparison_snapshot import (
 )
 from app.services.asset_comparison.Customer_Customer import Customer_Customer
 from app.services.asset_comparison.Customer_Notes import Customer_Notes
+from app.services.asset_comparison.domain import (
+    MODULE_ORDER,
+    AssetComparisonCancelledError,
+)
 from app.services.asset_comparison.Finance_Finance import Finance_Finance
 from app.services.asset_comparison.Finance_Notes import Finance_Notes
 from app.services.asset_comparison.job_manager import (
@@ -626,8 +636,8 @@ def run_comparisons(req: ComparisonRequest, on_complete=None):
     with ThreadPoolExecutor(max_workers=7) as executor:
         futures = [
             executor.submit(task_ff, req),
-            executor.submit(task_sfc, req),
             executor.submit(task_nn, req),
+            executor.submit(task_sfc, req),
             executor.submit(task_cc, req),
             executor.submit(task_fn, req),
             executor.submit(task_ns, req),
@@ -642,8 +652,9 @@ def run_comparisons(req: ComparisonRequest, on_complete=None):
                 on_complete(key, instance, info)
 
     # 排序以保持输出顺序稳定
-    order = ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
-    results_info.sort(key=lambda x: order.index(x["key"]) if x["key"] in order else 99)
+    results_info.sort(
+        key=lambda x: MODULE_ORDER.index(x["key"]) if x["key"] in MODULE_ORDER else 99
+    )
 
     summary["results_info"] = results_info
     return summary
@@ -819,6 +830,7 @@ def _execute_asset_comparison_job(
     emit,
     is_cancel_requested,
 ):
+    validation_started_at = perf_counter()
     missing_inputs = [key for key, value in inputs.items() if not str(value).strip()]
     invalid_paths = [
         key
@@ -830,22 +842,33 @@ def _execute_asset_comparison_job(
     if invalid_paths:
         raise ValueError(f"输入文件不存在: {', '.join(invalid_paths)}")
 
-    emit("validation_ready")
-    for module_key in ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]:
+    if is_cancel_requested():
+        return {"summary": {}, "inputs": inputs, "results": {}}
+
+    emit(
+        "validation_ready",
+        elapsed=perf_counter() - validation_started_at,
+    )
+    comparison_started_at = {}
+    for module_key in MODULE_ORDER:
+        comparison_started_at[module_key] = perf_counter()
         emit("comparison_started", module_key=module_key)
 
     request = ComparisonRequest(**inputs)
     partial_summary = {}
     results_by_key = {}
     raw_future = None
-
-    with ThreadPoolExecutor(
+    raw_started_at = None
+    cancelled = False
+    raw_executor = ThreadPoolExecutor(
         max_workers=1,
         thread_name_prefix=f"asset-raw-{job_id[:8]}",
-    ) as raw_executor:
+    )
+
+    try:
 
         def on_complete(module_key, instance, info):
-            nonlocal raw_future
+            nonlocal raw_future, raw_started_at
             partial_summary[module_key] = instance
             result = info or {
                 "key": module_key,
@@ -854,14 +877,26 @@ def _execute_asset_comparison_job(
                 "msg": "异常: 核对模块没有返回结果",
             }
             results_by_key[module_key] = result
+            if is_cancel_requested():
+                return
+            comparison_elapsed = perf_counter() - comparison_started_at[module_key]
             if result.get("msg", "").startswith("异常:"):
-                emit("comparison_failed", result=result)
+                emit(
+                    "comparison_failed",
+                    result=result,
+                    elapsed=comparison_elapsed,
+                )
             else:
-                emit("comparison_ready", result=result)
+                emit(
+                    "comparison_ready",
+                    result=result,
+                    elapsed=comparison_elapsed,
+                )
                 emit(
                     "artifact_building",
                     artifact_key=f"module_{module_key}",
                 )
+                artifact_started_at = perf_counter()
                 try:
                     artifact = _build_module_job_artifact(
                         module_key,
@@ -869,24 +904,33 @@ def _execute_asset_comparison_job(
                         result,
                         job_dir,
                     )
-                    emit(
-                        "artifact_ready",
-                        artifact_key=f"module_{module_key}",
-                        **artifact,
-                    )
+                    if not is_cancel_requested():
+                        emit(
+                            "artifact_ready",
+                            artifact_key=f"module_{module_key}",
+                            elapsed=perf_counter() - artifact_started_at,
+                            **artifact,
+                        )
                 except Exception as exc:
                     logger.exception(
                         f"asset module artifact failed: "
                         f"job_id={job_id} module={module_key} error={exc}"
                     )
-                    emit(
-                        "artifact_failed",
-                        artifact_key=f"module_{module_key}",
-                        error=str(exc),
-                    )
+                    if not is_cancel_requested():
+                        emit(
+                            "artifact_failed",
+                            artifact_key=f"module_{module_key}",
+                            error=str(exc),
+                            elapsed=perf_counter() - artifact_started_at,
+                        )
 
-            if raw_future is None and _RAW_SOURCE_MODULES.issubset(partial_summary):
+            if (
+                not is_cancel_requested()
+                and raw_future is None
+                and _RAW_SOURCE_MODULES.issubset(partial_summary)
+            ):
                 emit("artifact_building", artifact_key="raw_data_xlsx")
+                raw_started_at = perf_counter()
                 raw_future = raw_executor.submit(
                     _build_raw_job_artifact,
                     {key: partial_summary[key] for key in _RAW_SOURCE_MODULES},
@@ -896,6 +940,7 @@ def _execute_asset_comparison_job(
         summary = run_comparisons(request, on_complete=on_complete)
 
         if is_cancel_requested():
+            cancelled = True
             return {
                 "summary": summary,
                 "inputs": inputs,
@@ -904,44 +949,76 @@ def _execute_asset_comparison_job(
 
         if raw_future is None:
             emit("artifact_building", artifact_key="raw_data_xlsx")
+            raw_started_at = perf_counter()
             raw_future = raw_executor.submit(
                 _build_raw_job_artifact,
                 summary,
                 job_dir,
             )
         try:
-            raw_artifact = raw_future.result()
+            while True:
+                try:
+                    raw_artifact = raw_future.result(timeout=0.2)
+                    break
+                except FutureTimeoutError:
+                    if is_cancel_requested():
+                        cancelled = True
+                        raw_future.cancel()
+                        return {
+                            "summary": summary,
+                            "inputs": inputs,
+                            "results": results_by_key,
+                        }
             emit(
                 "artifact_ready",
                 artifact_key="raw_data_xlsx",
+                elapsed=perf_counter() - raw_started_at,
                 **raw_artifact,
             )
         except Exception as exc:
+            if is_cancel_requested():
+                cancelled = True
+                return {
+                    "summary": summary,
+                    "inputs": inputs,
+                    "results": results_by_key,
+                }
             logger.exception(f"asset raw artifact failed: job_id={job_id} error={exc}")
             emit(
                 "artifact_failed",
                 artifact_key="raw_data_xlsx",
                 error=str(exc),
+                elapsed=perf_counter() - raw_started_at,
             )
 
-    save_comparison_snapshot(summary, job_dir)
-    return {
-        "summary": summary,
-        "inputs": inputs,
-        "results": results_by_key,
-    }
+        if is_cancel_requested():
+            cancelled = True
+            return {
+                "summary": summary,
+                "inputs": inputs,
+                "results": results_by_key,
+            }
+        save_comparison_snapshot(summary, job_dir)
+        return {
+            "summary": summary,
+            "inputs": inputs,
+            "results": results_by_key,
+        }
+    finally:
+        raw_executor.shutdown(
+            wait=not cancelled,
+            cancel_futures=cancelled,
+        )
 
 
 def _finalize_asset_comparison_job(
-    _job_id: str,
+    job_id: str,
     job_dir: Path,
     remarks: dict[str, str],
     reviews: dict[str, str],
+    is_cancel_requested,
 ) -> dict:
-    effective_reviews = {
-        key: reviews.get(key, "差異確認OK")
-        for key in ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
-    }
+    effective_reviews = {key: reviews.get(key, "差異確認OK") for key in MODULE_ORDER}
     summary = load_comparison_snapshot(job_dir)
     request = ComparisonRequest(
         **{
@@ -969,6 +1046,8 @@ def _finalize_asset_comparison_job(
             request,
             summary,
             raw_data=raw_path.read_bytes(),
+            job_id=job_id,
+            is_cancel_requested=is_cancel_requested,
         )
     target_path = job_dir / "complete.zip"
     temporary_path = target_path.with_suffix(".zip.tmp")
@@ -1031,9 +1110,7 @@ def _retry_asset_comparison_artifact(
             summary[module_key] = instance
             results[module_key] = result
             summary["results_info"] = [
-                results[key]
-                for key in ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
-                if key in results
+                results[key] for key in MODULE_ORDER if key in results
             ]
             save_comparison_snapshot(summary, job_dir)
             if runtime is not None:
@@ -1590,7 +1667,15 @@ def _build_complete_export(
     req: ComparisonRequest,
     summary: dict,
     raw_data: bytes | None = None,
+    *,
+    job_id: str | None = None,
+    is_cancel_requested=None,
 ) -> tuple[bytes, str]:
+    def raise_if_cancelled() -> None:
+        if is_cancel_requested is not None and is_cancel_requested():
+            raise AssetComparisonCancelledError("任务已取消")
+
+    raise_if_cancelled()
     missing_remark_labels = [
         result.get("label", result.get("key", "未知模块"))
         for result in summary.get("results_info", [])
@@ -2024,7 +2109,13 @@ def _build_complete_export(
 
         wb.save(save_all_path)
         step1_elapsed = perf_counter() - step1_started_at
-        logger.info(f"Step 1: 结果表 Excel 模版导出完成，耗时 {step1_elapsed:.3f}s")
+        logger.info(
+            "asset_comparison job_id={} stage=job_build_summary_workbook "
+            "elapsed={:.3f}s status=ready",
+            job_id or "-",
+            step1_elapsed,
+        )
+        raise_if_cancelled()
 
         # Step 2: PDF 导出会签表
         step2_started_at = perf_counter()
@@ -2089,8 +2180,13 @@ def _build_complete_export(
 
         step2_elapsed = perf_counter() - step2_started_at
         logger.info(
-            f"Step 2: PDF 导出会签表完成，耗时 {step2_elapsed:.3f}s (ok={pdf_ok})"
+            "asset_comparison job_id={} stage=job_generate_pdf "
+            "elapsed={:.3f}s status={}",
+            job_id or "-",
+            step2_elapsed,
+            "ready" if pdf_ok else "failed",
         )
+        raise_if_cancelled()
 
         # Step 3: 原始数据.xlsx 生成
         step3_started_at = perf_counter()
@@ -2102,8 +2198,13 @@ def _build_complete_export(
         step3_elapsed = perf_counter() - step3_started_at
         raw_size = raw_buf.getbuffer().nbytes if raw_buf else 0
         logger.info(
-            f"Step 3: 原始数据.xlsx 生成完成，耗时 {step3_elapsed:.3f}s，文件大小 {raw_size} 字节"
+            "asset_comparison job_id={} stage=job_prepare_raw_workbook "
+            "elapsed={:.3f}s status=ready size_bytes={}",
+            job_id or "-",
+            step3_elapsed,
+            raw_size,
         )
+        raise_if_cancelled()
 
         # Step 4: 导出包 ZIP 压缩打包
         step4_started_at = perf_counter()
@@ -2121,18 +2222,41 @@ def _build_complete_export(
         step4_elapsed = perf_counter() - step4_started_at
         zip_size = zip_buf.getbuffer().nbytes
         logger.info(
-            f"Step 4: 导出包 ZIP 压缩打包完成，耗时 {step4_elapsed:.3f}s，文件大小 {zip_size} 字节"
+            "asset_comparison job_id={} stage=job_build_zip "
+            "elapsed={:.3f}s status=ready size_bytes={}",
+            job_id or "-",
+            step4_elapsed,
+            zip_size,
         )
 
         zip_filename = f"TE&PE资产对比_{this_month_str}.zip"
         total_elapsed = perf_counter() - request_started_at
-        logger.info(f"导出包处理完成，总耗时 {total_elapsed:.3f}s")
+        logger.info(
+            "asset_comparison job_id={} stage=job_finalize_total "
+            "elapsed={:.3f}s status=ready size_bytes={}",
+            job_id or "-",
+            total_elapsed,
+            zip_size,
+        )
         return zip_buf.getvalue(), zip_filename
 
     except Exception as e:
         elapsed = perf_counter() - request_started_at
+        if isinstance(e, AssetComparisonCancelledError):
+            logger.info(
+                "asset_comparison job_id={} stage=job_finalize_total "
+                "elapsed={:.3f}s status=cancelled",
+                job_id or "-",
+                elapsed,
+            )
+            raise
         logger.error(
-            f"导出包处理出错，耗时 {elapsed:.3f}s: {e!r}\n{traceback.format_exc()}"
+            "asset_comparison job_id={} stage=job_finalize_total "
+            "elapsed={:.3f}s status=failed error={!r}\n{}",
+            job_id or "-",
+            elapsed,
+            e,
+            traceback.format_exc(),
         )
         raise HTTPException(status_code=500, detail=str(e))
 

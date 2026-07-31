@@ -43,3 +43,15 @@ cache itself is excluded.
 The initial job runner is designed for one Uvicorn worker. It uses an internal
 bounded executor for comparison work, so a single Uvicorn worker does not
 limit the comparison tasks to one CPU core.
+
+Asset comparison inputs are snapshotted and verified before execution.
+Running jobs use cooperative cancellation at stage boundaries; Python threads
+are not forcefully terminated. Active jobs that reach their TTL are extended
+until they leave an active state. Expired terminal jobs retain a database
+tombstone so subsequent job and artifact requests consistently return
+`410 Gone`, while their files are removed.
+
+Asset comparison stage logs include `job_id`, `user_id`, `module_key`,
+`artifact_key`, `stage`, `elapsed`, `status`, `size_bytes`, and
+`annotation_revision`. These fields can be used to compare validation,
+comparison, module export, raw workbook, PDF, and ZIP timings on the VPS.
