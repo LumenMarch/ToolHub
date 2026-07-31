@@ -12,7 +12,7 @@ No_CheckRFID = ["A1300011C5C3", "A13000103933", "A1300010E606"]
 
 class Notes_Notes:
     def __init__(self):
-
+        self.input_catalog = None
         self.this_invalid_all_rows = None
         self.last_assets_filtered = None
         self.last_All_Notes_ = None
@@ -37,7 +37,10 @@ class Notes_Notes:
         try:
             # 嘗試使用 Polars 讀取 Excel
             # 注意：设置 infer_schema_length=0 让Polars将所有列读取为字符串，避免类型推断错误
-            df_polars = pl.read_excel(path, infer_schema_length=0)
+            if self.input_catalog is not None:
+                df_polars = self.input_catalog.read_excel(path, infer_schema_length=0)
+            else:
+                df_polars = pl.read_excel(path, infer_schema_length=0)
 
             # 檢查是否包含必需的列
             header_columns = set(df_polars.columns)

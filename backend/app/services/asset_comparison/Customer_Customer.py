@@ -10,7 +10,7 @@ from loguru import logger  # noqa: E402, I001, UP015, F401
 
 class Customer_Customer:
     def __init__(self):
-
+        self.input_catalog = None
         self.last_Customer_assets = None
         self.this_Customer_assets = None
         self.this_Customer_path = None
@@ -31,7 +31,10 @@ class Customer_Customer:
         try:
             # 嘗試使用 Polars 讀取 Excel
             # 注意：设置 infer_schema_length=0 让Polars将所有列读取为字符串，避免类型推断错误
-            df_polars = pl.read_excel(path, infer_schema_length=0)
+            if self.input_catalog is not None:
+                df_polars = self.input_catalog.read_excel(path, infer_schema_length=0)
+            else:
+                df_polars = pl.read_excel(path, infer_schema_length=0)
 
             # 檢查是否包含必需的列
             header_columns = set(df_polars.columns)
@@ -93,9 +96,14 @@ class Customer_Customer:
 
     def get_Customer_DRI(self):
         self.Customer_DRI_data = None
-        with open(self.Custodian_DRI_path, encoding="utf-8") as file:
-            lines = file.readlines()  # 读取所有行
-            self.Customer_DRI_data = [line.strip() for line in lines]
+        if self.input_catalog is not None:
+            self.Customer_DRI_data = self.input_catalog.read_text_lines(
+                self.Custodian_DRI_path
+            )
+        else:
+            with open(self.Custodian_DRI_path, encoding="utf-8") as file:
+                lines = file.readlines()  # 读取所有行
+                self.Customer_DRI_data = [line.strip() for line in lines]
 
     def read_this_Customer_data(self):
         """讀取本月客戶數據（使用LazyFrame）"""

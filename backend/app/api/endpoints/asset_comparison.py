@@ -48,6 +48,7 @@ from app.services.asset_comparison.domain import (
 )
 from app.services.asset_comparison.Finance_Finance import Finance_Finance
 from app.services.asset_comparison.Finance_Notes import Finance_Notes
+from app.services.asset_comparison.input_catalog import InputCatalog
 from app.services.asset_comparison.job_manager import (
     AssetComparisonJobConflictError,
     AssetComparisonJobExpiredError,
@@ -87,6 +88,10 @@ except ImportError:
     pass
 
 router = APIRouter()
+_comparison_executor = ThreadPoolExecutor(
+    max_workers=7,
+    thread_name_prefix="asset-comparison-module",
+)
 
 
 def _file_sha256(path: Path) -> str:
@@ -390,8 +395,9 @@ def _safe_len(d):
         return 0
 
 
-def task_ff(req: ComparisonRequest):
+def task_ff(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
     ff = Finance_Finance()
+    ff.input_catalog = input_catalog
     ff.this_Finance_path = req.thisFinance
     ff.last_Finance_path = req.lastFinance
     ff.Custodian_path = req.custodianData
@@ -451,8 +457,9 @@ def task_ff(req: ComparisonRequest):
     return "ff", ff, info
 
 
-def task_sfc(req: ComparisonRequest):
+def task_sfc(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
     sfc = SFC_SFC()
+    sfc.input_catalog = input_catalog
     sfc.This_data_Path = req.thisSFC
     sfc.Last_data_path = req.lastSFC
     info = None
@@ -478,8 +485,9 @@ def task_sfc(req: ComparisonRequest):
     return "sfc", sfc, info
 
 
-def task_nn(req: ComparisonRequest):
+def task_nn(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
     nn = Notes_Notes()
+    nn.input_catalog = input_catalog
     nn.This_Notes_path = req.thisNotes
     nn.Last_Notes_path = req.lastNotes
     info = None
@@ -509,8 +517,9 @@ def task_nn(req: ComparisonRequest):
     return "nn", nn, info
 
 
-def task_cc(req: ComparisonRequest):
+def task_cc(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
     cc = Customer_Customer()
+    cc.input_catalog = input_catalog
     cc.this_Customer_path = req.thisCustomer
     cc.last_Customer_path = req.lastCustomer
     cc.Custodian_DRI_path = req.driData
@@ -540,8 +549,9 @@ def task_cc(req: ComparisonRequest):
     return "cc", cc, info
 
 
-def task_fn(req: ComparisonRequest):
+def task_fn(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
     fn = Finance_Notes()
+    fn.input_catalog = input_catalog
     fn.Finance_path = req.thisFinance
     fn.Notes_path = req.thisNotes
     fn.Custodian_path = req.custodianData
@@ -569,8 +579,9 @@ def task_fn(req: ComparisonRequest):
     return "fn", fn, info
 
 
-def task_ns(req: ComparisonRequest):
+def task_ns(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
     ns = Notes_SFC()
+    ns.input_catalog = input_catalog
     ns.this_Notes_path = req.thisNotes
     ns.this_SFC_path = req.thisSFC
     info = None
@@ -598,8 +609,9 @@ def task_ns(req: ComparisonRequest):
     return "ns", ns, info
 
 
-def task_cn(req: ComparisonRequest):
+def task_cn(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
     cn = Customer_Notes()
+    cn.input_catalog = input_catalog
     cn.this_Customer_path = req.thisCustomer
     cn.this_Notes_path = req.thisNotes
     cn.this_Customer_DRI_path = req.driData
@@ -630,25 +642,39 @@ def task_cn(req: ComparisonRequest):
 def run_comparisons(req: ComparisonRequest, on_complete=None):
     summary = {}
     results_info = []
-
-    # 使用普通线程池并发执行 7 个比对任务
-    with ThreadPoolExecutor(max_workers=7) as executor:
-        futures = [
-            executor.submit(task_ff, req),
-            executor.submit(task_nn, req),
-            executor.submit(task_sfc, req),
-            executor.submit(task_cc, req),
-            executor.submit(task_fn, req),
-            executor.submit(task_ns, req),
-            executor.submit(task_cn, req),
+    input_catalog = InputCatalog(
+        [
+            req.thisFinance,
+            req.lastFinance,
+            req.thisSFC,
+            req.lastSFC,
+            req.thisNotes,
+            req.lastNotes,
+            req.thisCustomer,
+            req.lastCustomer,
+            req.departmentData,
+            req.custodianData,
+            req.driData,
         ]
-        for future in as_completed(futures):
-            key, instance, info = future.result()
-            summary[key] = instance
-            if info:
-                results_info.append(info)
-            if on_complete is not None:
-                on_complete(key, instance, info)
+    )
+    started_at = perf_counter()
+
+    futures = [
+        _comparison_executor.submit(task_ff, req, input_catalog),
+        _comparison_executor.submit(task_nn, req, input_catalog),
+        _comparison_executor.submit(task_sfc, req, input_catalog),
+        _comparison_executor.submit(task_cc, req, input_catalog),
+        _comparison_executor.submit(task_fn, req, input_catalog),
+        _comparison_executor.submit(task_ns, req, input_catalog),
+        _comparison_executor.submit(task_cn, req, input_catalog),
+    ]
+    for future in as_completed(futures):
+        key, instance, info = future.result()
+        summary[key] = instance
+        if info:
+            results_info.append(info)
+        if on_complete is not None:
+            on_complete(key, instance, info)
 
     # 排序以保持输出顺序稳定
     results_info.sort(
@@ -656,6 +682,16 @@ def run_comparisons(req: ComparisonRequest, on_complete=None):
     )
 
     summary["results_info"] = results_info
+    catalog_stats = input_catalog.stats()
+    for module_key in MODULE_ORDER:
+        instance = summary.get(module_key)
+        if instance is not None:
+            instance.input_catalog = None
+    logger.info(
+        "asset_comparison stage=input_catalog elapsed={:.3f}s stats={}",
+        perf_counter() - started_at,
+        catalog_stats,
+    )
     return summary
 
 

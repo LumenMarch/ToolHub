@@ -17,7 +17,7 @@ from loguru import logger  # noqa: E402, I001, UP015, F401
 
 class Notes_SFC:
     def __init__(self):
-
+        self.input_catalog = None
         self.Notes_new_assets = None
         self.Notes_removed_assets = None
         self.this_Notes_assets = None
@@ -44,7 +44,10 @@ class Notes_SFC:
         try:
             # 嘗試使用 Polars 讀取 Excel
             # 注意：设置 infer_schema_length=0 让Polars将所有列读取为字符串，避免类型推断错误
-            df_polars = pl.read_excel(path, infer_schema_length=0)
+            if self.input_catalog is not None:
+                df_polars = self.input_catalog.read_excel(path, infer_schema_length=0)
+            else:
+                df_polars = pl.read_excel(path, infer_schema_length=0)
 
             # 檢查是否包含必需的列
             header_columns = set(df_polars.columns)
@@ -160,8 +163,13 @@ class Notes_SFC:
 
             # 嘗試按 HTML 表格方式讀取（應對偽裝的 .xls 文件）
             try:
-                with open(path, encoding="utf-8-sig", errors="ignore") as f:
-                    html_content = f.read()
+                if self.input_catalog is not None:
+                    html_content = self.input_catalog.read_text(
+                        path, encoding="utf-8-sig", errors="ignore"
+                    )
+                else:
+                    with open(path, encoding="utf-8-sig", errors="ignore") as f:
+                        html_content = f.read()
 
                 # 使用自定義的 TableParser 解析 HTML
                 parser = TableParser()
