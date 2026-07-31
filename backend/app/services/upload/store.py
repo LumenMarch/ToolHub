@@ -8,6 +8,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import time
 import uuid
 from collections.abc import AsyncIterable
@@ -153,22 +154,34 @@ class UploadStore:
         """为缓存文件创建新的短期上传句柄。"""
         upload_id = uuid.uuid4().hex
         now = time.time()
-        self._write_meta(
-            upload_id,
-            {
-                "upload_length": blob.digest.size,
-                "filename": filename,
-                "content_type": content_type or "application/octet-stream",
-                "created_at": now,
-                "user_id": user_id,
-                "expected_md5": blob.digest.md5,
-                "expected_sha256": blob.digest.sha256,
-                "md5": blob.digest.md5,
-                "sha256": blob.digest.sha256,
-                "cache_hit": True,
-                "completed": True,
-            },
-        )
+        data_path = self._data_path(upload_id)
+        try:
+            try:
+                os.link(blob.path, data_path)
+            except OSError:
+                shutil.copy2(blob.path, data_path)
+            self._write_meta(
+                upload_id,
+                {
+                    "upload_length": blob.digest.size,
+                    "filename": filename,
+                    "content_type": content_type or "application/octet-stream",
+                    "created_at": now,
+                    "user_id": user_id,
+                    "expected_md5": blob.digest.md5,
+                    "expected_sha256": blob.digest.sha256,
+                    "md5": blob.digest.md5,
+                    "sha256": blob.digest.sha256,
+                    "cache_hit": True,
+                    "completed": True,
+                },
+            )
+        except FileNotFoundError as exc:
+            data_path.unlink(missing_ok=True)
+            raise UploadNotFoundError("上传缓存已失效") from exc
+        except Exception:
+            data_path.unlink(missing_ok=True)
+            raise
         return upload_id
 
     def find_cached_blob(
@@ -342,6 +355,9 @@ class UploadStore:
                 self.delete(upload_id)
 
     def _content_path(self, upload_id: str, meta: dict) -> Path:
+        data_path = self._data_path(upload_id)
+        if meta.get("completed") and data_path.is_file():
+            return data_path
         sha256 = meta.get("sha256")
         user_id = meta.get("user_id")
         if meta.get("completed") and sha256 and user_id:
@@ -354,7 +370,7 @@ class UploadStore:
             if blob is None:
                 raise UploadNotFoundError(f"上传缓存不存在: {upload_id}")
             return blob.path
-        return self._data_path(upload_id)
+        return data_path
 
     @staticmethod
     def _calculate_digest(path: Path) -> ContentDigest:

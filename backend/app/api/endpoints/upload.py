@@ -284,12 +284,15 @@ async def resolve_upload_cache(
     if blob is None:
         return {"cache_hit": False, "upload_id": None}
 
-    upload_id = store.create_cached_reference(
-        user_id=current_user.id,
-        filename=req.filename,
-        content_type=req.content_type,
-        blob=blob,
-    )
+    try:
+        upload_id = store.create_cached_reference(
+            user_id=current_user.id,
+            filename=req.filename,
+            content_type=req.content_type,
+            blob=blob,
+        )
+    except UploadNotFoundError:
+        return {"cache_hit": False, "upload_id": None}
     return {
         "cache_hit": True,
         "upload_id": upload_id,
