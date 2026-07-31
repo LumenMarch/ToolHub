@@ -16,13 +16,12 @@ from concurrent.futures import (
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from urllib.parse import quote
 
 import polars as pl
 import xlsxwriter
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from loguru import logger
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, PatternFill
@@ -703,28 +702,7 @@ def apply_review_colors(ws, req_reviews):
                     cell.fill = fill_pattern
 
 
-@router.post("/check")
-def check_data(
-    req: ComparisonRequest,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
-):
-    try:
-        summary = run_comparisons(req)
-        return {
-            "status": "success",
-            "message": "交叉盘点全部完成。",
-            "data": {"results": summary["results_info"]},
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e),
-            "errors": [traceback.format_exc()],
-        }
-
-
-_legacy_export_lock = threading.Lock()
+_module_export_lock = threading.Lock()
 _RAW_SOURCE_MODULES = {"ff", "nn", "sfc", "cc"}
 
 
@@ -777,7 +755,7 @@ def _build_module_job_artifact(
     target_path = job_dir / f"module-{module_key}.xlsx"
     temporary_path = target_path.with_suffix(".xlsx.tmp")
 
-    with _legacy_export_lock:
+    with _module_export_lock:
         temporary_path.unlink(missing_ok=True)
         if result.get("has_diff"):
             legacy_path.unlink(missing_ok=True)
@@ -1041,7 +1019,7 @@ def _finalize_asset_comparison_job(
     if not raw_path.is_file():
         raise RuntimeError("原始数据文件不存在")
 
-    with _legacy_export_lock:
+    with _module_export_lock:
         content, filename = _build_complete_export(
             request,
             summary,
@@ -2259,103 +2237,3 @@ def _build_complete_export(
             traceback.format_exc(),
         )
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/save")
-def save_results(
-    req: ComparisonRequest,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
-):
-    stage_started_at = perf_counter()
-    logger.info("资产对比 save 开始: run_comparisons")
-    summary = run_comparisons(req)
-    logger.info(
-        f"资产对比 run_comparisons 完成，耗时 {perf_counter() - stage_started_at:.3f}s"
-    )
-    content, filename = _build_complete_export(req, summary)
-    return StreamingResponse(
-        io.BytesIO(content),
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"
-        },
-    )
-
-
-@router.post("/export/{module}")
-def export_single_module(
-    module: str,
-    req: ComparisonRequest,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
-):
-    try:
-        summary = run_comparisons(req)
-        from app.services.asset_comparison.const import (
-            CUSTOMER_CUSTOMER_SAVE_PATH,
-            CUSTOMER_NOTES_SAVE_PATH,
-            FINANCE_FINANCE_SAVE_PATH,
-            FINANCE_NOTES_SAVE_PATH,
-            NOTES_NOTES_SAVE_PATH,
-            NOTES_SFC_SAVE_PATH,
-            SFC_SFC_SAVE_PATH,
-        )
-
-        if module == "ff":
-            summary["ff"].Save_Check()
-            return {
-                "status": "success",
-                "message": f"财务对比单独导出成功:\n{FINANCE_FINANCE_SAVE_PATH}",
-            }
-
-        elif module == "nn":
-            summary["nn"].Save_Notes_Notes_Comparison()
-            return {
-                "status": "success",
-                "message": f"Notes对比单独导出成功:\n{NOTES_NOTES_SAVE_PATH}",
-            }
-
-        elif module == "sfc":
-            summary["sfc"].Save_SFC_SFC_Comparison()
-            return {
-                "status": "success",
-                "message": f"SFC对比单独导出成功:\n{SFC_SFC_SAVE_PATH}",
-            }
-
-        elif module == "cc":
-            summary["cc"].Save_Customer_Customer_Comparison()
-            return {
-                "status": "success",
-                "message": f"客户对比单独导出成功:\n{CUSTOMER_CUSTOMER_SAVE_PATH}",
-            }
-
-        elif module == "fn":
-            summary["fn"].Save_Finance_Notes_Comparison()
-            return {
-                "status": "success",
-                "message": f"财务-Notes对比单独导出成功:\n{FINANCE_NOTES_SAVE_PATH}",
-            }
-
-        elif module == "ns":
-            summary["ns"].Save_Notes_SFC_Comparison()
-            return {
-                "status": "success",
-                "message": f"Notes-SFC对比单独导出成功:\n{NOTES_SFC_SAVE_PATH}",
-            }
-
-        elif module == "cn":
-            summary["cn"].Save_Customer_Notes_Comparison()
-            return {
-                "status": "success",
-                "message": f"客户-Notes对比单独导出成功:\n{CUSTOMER_NOTES_SAVE_PATH}",
-            }
-        else:
-            return {"status": "error", "message": "未知的导出模块"}
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e),
-            "errors": [traceback.format_exc()],
-        }
