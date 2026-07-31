@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import uuid
@@ -13,7 +14,11 @@ from loguru import logger
 
 from app.core.config import settings
 from app.db.session import SessionLocal
+from app.models.asset_comparison_artifact import AssetComparisonArtifact
 from app.models.asset_comparison_job import AssetComparisonJob
+from app.services.asset_comparison.comparison_snapshot import (
+    comparison_snapshot_exists,
+)
 from app.services.task_artifacts import TaskArtifactStore, task_artifact_store
 
 MODULE_ORDER = ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
@@ -60,6 +65,14 @@ def _loads(value: str | None, fallback):
 
 def _dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _initial_artifacts() -> dict:
@@ -144,7 +157,7 @@ class AssetComparisonJobManager:
                 raise AssetComparisonJobValidationError(
                     f"输入文件不存在: {', '.join(invalid_inputs)}"
                 )
-            self._artifact_store.ensure_task(
+            job_dir = self._artifact_store.ensure_task(
                 user_id=user_id,
                 tool=TASK_TOOL,
                 task_id=job_id,
@@ -157,36 +170,64 @@ class AssetComparisonJobManager:
                     },
                 },
             )
-            staged_inputs = {}
+            snapshot_files = {}
             try:
                 for key, source_path in source_paths.items():
                     suffix = source_path.suffix.lower() or ".bin"
-                    staged_inputs[key] = str(
-                        self._artifact_store.materialize_input(
-                            user_id=user_id,
-                            tool=TASK_TOOL,
-                            task_id=job_id,
-                            filename=f"{key}{suffix}",
-                            source_path=source_path,
-                        )
+                    staged_path = self._artifact_store.materialize_input(
+                        user_id=user_id,
+                        tool=TASK_TOOL,
+                        task_id=job_id,
+                        filename=f"{key}{suffix}",
+                        source_path=source_path,
+                        link_source=self._artifact_store.contains_path(source_path),
                     )
+                    snapshot_files[key] = {
+                        "relativePath": staged_path.relative_to(job_dir).as_posix(),
+                        "filename": source_path.name,
+                        "sizeBytes": staged_path.stat().st_size,
+                        "sha256": _sha256_file(staged_path),
+                    }
             except Exception:
                 self._delete_job_files(user_id, job_id)
                 raise
 
+            fingerprint_payload = {
+                key: {
+                    "sizeBytes": value["sizeBytes"],
+                    "sha256": value["sha256"],
+                }
+                for key, value in sorted(snapshot_files.items())
+            }
+            input_fingerprint = hashlib.sha256(
+                _dumps(fingerprint_payload).encode("utf-8")
+            ).hexdigest()
+            input_snapshot = {
+                "version": 1,
+                "fingerprint": input_fingerprint,
+                "files": snapshot_files,
+            }
+            self._artifact_store.ensure_task(
+                user_id=user_id,
+                tool=TASK_TOOL,
+                task_id=job_id,
+                expires_at=expires_at.replace(tzinfo=UTC).timestamp(),
+                metadata={"input_fingerprint": input_fingerprint},
+            )
             job = AssetComparisonJob(
                 id=job_id,
                 user_id=user_id,
                 client_request_id=client_request_id,
                 status="queued",
-                input_json=_dumps(staged_inputs),
+                input_json=_dumps(input_snapshot),
                 results_json="[]",
-                artifacts_json=_dumps(_initial_artifacts()),
+                artifacts_json="{}",
                 remarks_json="{}",
                 reviews_json="{}",
                 progress_json=_dumps(_initial_progress()),
                 expires_at=expires_at,
             )
+            self._store_artifacts(job, _initial_artifacts())
             try:
                 db.add(job)
                 db.commit()
@@ -242,12 +283,12 @@ class AssetComparisonJobManager:
             job.annotation_revision += 1
             job.updated_at = _utcnow()
 
-            artifacts = _loads(job.artifacts_json, {})
+            artifacts = self._load_artifacts(job)
             final_artifact = artifacts.get("final_bundle", {})
             if final_artifact.get("status") == "ready":
                 final_artifact["status"] = "stale"
                 artifacts["final_bundle"] = final_artifact
-                job.artifacts_json = _dumps(artifacts)
+                self._store_artifacts(job, artifacts)
                 if job.status == "complete":
                     job.status = "base_ready"
 
@@ -265,7 +306,7 @@ class AssetComparisonJobManager:
                     "；".join(blocker["message"] for blocker in blockers)
                 )
 
-            artifacts = _loads(job.artifacts_json, {})
+            artifacts = self._load_artifacts(job)
             final_artifact = artifacts["final_bundle"]
             if (
                 final_artifact.get("status") == "ready"
@@ -278,7 +319,7 @@ class AssetComparisonJobManager:
             final_artifact["status"] = "building"
             final_artifact.pop("error", None)
             artifacts["final_bundle"] = final_artifact
-            job.artifacts_json = _dumps(artifacts)
+            self._store_artifacts(job, artifacts)
             job.status = "finalizing"
             job.updated_at = _utcnow()
             revision = job.annotation_revision
@@ -309,16 +350,14 @@ class AssetComparisonJobManager:
 
         with self._lock, SessionLocal() as db:
             job = self._get_owned_job(db, user_id, job_id)
-            artifacts = _loads(job.artifacts_json, {})
+            artifacts = self._load_artifacts(job)
             artifact = artifacts.get(artifact_key, {})
             if artifact.get("status") not in {"failed", "stale"}:
                 raise AssetComparisonJobConflictError("当前产物不需要重试")
-            if job_id not in self._runtime:
-                raise AssetComparisonJobConflictError("任务运行数据已失效，请重新核对")
             artifact["status"] = "building"
             artifact.pop("error", None)
             artifacts[artifact_key] = artifact
-            job.artifacts_json = _dumps(artifacts)
+            self._store_artifacts(job, artifacts)
             job.status = "running"
             job.updated_at = _utcnow()
             db.commit()
@@ -356,7 +395,7 @@ class AssetComparisonJobManager:
     ) -> tuple[Path, str, str]:
         with self._lock, SessionLocal() as db:
             job = self._get_owned_job(db, user_id, job_id)
-            artifacts = _loads(job.artifacts_json, {})
+            artifacts = self._load_artifacts(job)
             artifact = artifacts.get(artifact_key)
             if artifact is None:
                 raise AssetComparisonJobNotFoundError
@@ -401,15 +440,29 @@ class AssetComparisonJobManager:
             )
             for job in jobs:
                 if job.status == "base_ready":
-                    job.status = "partial_failed"
-                    job.error_message = "服务已重启，可下载已有文件；完整导出需重新核对"
+                    if not self._has_comparison_snapshot(job):
+                        job.status = "partial_failed"
+                        job.error_message = "服务重启前的核对结果未持久化，请重新核对"
                     continue
                 if job.status == "cancel_requested":
                     job.status = "cancelled"
                     continue
+                if job.status == "finalizing" and self._has_comparison_snapshot(job):
+                    artifacts = self._load_artifacts(job)
+                    artifacts["final_bundle"].update(
+                        {
+                            "status": "failed",
+                            "error": "服务在完整导出期间重启，请重试完整导出",
+                        }
+                    )
+                    self._store_artifacts(job, artifacts)
+                    job.status = "base_ready"
+                    job.error_message = None
+                    job.updated_at = _utcnow()
+                    continue
                 job.status = "queued"
                 job.results_json = "[]"
-                job.artifacts_json = _dumps(_initial_artifacts())
+                self._store_artifacts(job, _initial_artifacts())
                 job.progress_json = _dumps(_initial_progress())
                 job.error_message = None
                 job.started_at = None
@@ -502,13 +555,9 @@ class AssetComparisonJobManager:
         reviews: dict[str, str],
     ) -> None:
         try:
-            runtime = self._runtime.get(job_id)
-            if runtime is None:
-                raise RuntimeError("任务运行数据已失效，请重新核对")
             job_dir = self._job_dir_for_id(job_id)
             artifact = self._finalize_job(
                 job_id,
-                runtime,
                 job_dir,
                 remarks,
                 reviews,
@@ -530,9 +579,9 @@ class AssetComparisonJobManager:
                 if job.annotation_revision == revision:
                     job.status = "complete"
                 else:
-                    artifacts = _loads(job.artifacts_json, {})
+                    artifacts = self._load_artifacts(job)
                     artifacts["final_bundle"]["status"] = "stale"
-                    job.artifacts_json = _dumps(artifacts)
+                    self._store_artifacts(job, artifacts)
                     job.status = "base_ready"
                 job.completed_at = _utcnow()
                 job.updated_at = _utcnow()
@@ -548,13 +597,15 @@ class AssetComparisonJobManager:
 
     def _retry_worker(self, job_id: str, artifact_key: str) -> None:
         try:
-            runtime = self._runtime[job_id]
+            runtime = self._runtime.get(job_id)
+            inputs = self._job_inputs(job_id)
             job_dir = self._job_dir_for_id(job_id)
             artifact = self._retry_artifact(
                 job_id,
                 artifact_key,
                 runtime,
                 job_dir,
+                inputs,
             )
             comparison_result = artifact.pop("_comparison_result", None)
             if comparison_result is not None:
@@ -616,6 +667,7 @@ class AssetComparisonJobManager:
                         "filename": payload["filename"],
                         "contentType": payload["content_type"],
                         "sizeBytes": payload["size_bytes"],
+                        "checksum": payload.get("checksum"),
                     }
                 )
                 if "annotation_revision" in payload:
@@ -645,7 +697,7 @@ class AssetComparisonJobManager:
             job = db.get(AssetComparisonJob, job_id)
             if job is None:
                 return
-            artifacts = _loads(job.artifacts_json, {})
+            artifacts = self._load_artifacts(job)
             progress = _loads(job.progress_json, {})
             results = _loads(job.results_json, [])
             mutator(job, artifacts, progress, results)
@@ -656,7 +708,7 @@ class AssetComparisonJobManager:
                     else 99
                 )
             )
-            job.artifacts_json = _dumps(artifacts)
+            self._store_artifacts(job, artifacts)
             job.progress_json = _dumps(progress)
             job.results_json = _dumps(results)
             job.updated_at = _utcnow()
@@ -667,7 +719,7 @@ class AssetComparisonJobManager:
             job = db.get(AssetComparisonJob, job_id)
             if job is None or job.status in {"cancelled", "cancel_requested"}:
                 return
-            artifacts = _loads(job.artifacts_json, {})
+            artifacts = self._load_artifacts(job)
             base_statuses = [
                 artifacts.get(key, {}).get("status") for key in BASE_ARTIFACT_KEYS
             ]
@@ -691,9 +743,63 @@ class AssetComparisonJobManager:
             job.updated_at = _utcnow()
             db.commit()
 
+    @staticmethod
+    def _load_artifacts(job: AssetComparisonJob) -> dict:
+        if job.artifact_records:
+            artifacts = {}
+            for record in job.artifact_records:
+                artifact = {
+                    "status": record.status,
+                }
+                if record.module_key:
+                    artifact["moduleKey"] = record.module_key
+                optional_values = {
+                    "path": record.relative_path,
+                    "filename": record.filename,
+                    "contentType": record.content_type,
+                    "sizeBytes": record.size_bytes,
+                    "checksum": record.checksum,
+                    "annotationRevision": record.annotation_revision,
+                    "error": record.error_message,
+                }
+                artifact.update(
+                    {
+                        key: value
+                        for key, value in optional_values.items()
+                        if value is not None
+                    }
+                )
+                artifacts[record.artifact_key] = artifact
+            return artifacts
+
+        legacy_artifacts = _loads(job.artifacts_json, {})
+        return legacy_artifacts or _initial_artifacts()
+
+    @staticmethod
+    def _store_artifacts(job: AssetComparisonJob, artifacts: dict) -> None:
+        records = {record.artifact_key: record for record in job.artifact_records}
+        for artifact_key, artifact in artifacts.items():
+            record = records.get(artifact_key)
+            if record is None:
+                record = AssetComparisonArtifact(
+                    artifact_key=artifact_key,
+                )
+                job.artifact_records.append(record)
+                records[artifact_key] = record
+            record.module_key = artifact.get("moduleKey")
+            record.status = artifact.get("status", "blocked")
+            record.relative_path = artifact.get("path")
+            record.filename = artifact.get("filename")
+            record.content_type = artifact.get("contentType")
+            record.size_bytes = artifact.get("sizeBytes")
+            record.checksum = artifact.get("checksum")
+            record.annotation_revision = artifact.get("annotationRevision")
+            record.error_message = artifact.get("error")
+            record.updated_at = _utcnow()
+
     def _serialize(self, job: AssetComparisonJob) -> dict:
         results = _loads(job.results_json, [])
-        artifacts = _loads(job.artifacts_json, {})
+        artifacts = self._load_artifacts(job)
         remarks = _loads(job.remarks_json, {})
         reviews = _loads(job.reviews_json, {})
         missing_remarks = [
@@ -735,15 +841,14 @@ class AssetComparisonJobManager:
                     "moduleKeys": missing_remarks,
                 }
             )
-        if (
-            job.id not in self._runtime
-            and job.finalized_revision is None
-            and job.status in {"base_ready", "partial_failed"}
-        ):
+        if job.status in {
+            "base_ready",
+            "partial_failed",
+        } and not self._has_comparison_snapshot(job):
             blockers.append(
                 {
-                    "code": "runtime_unavailable",
-                    "message": "服务重启后运行数据已失效，请重新核对",
+                    "code": "comparison_snapshot_unavailable",
+                    "message": "核对结果快照不存在，请重新核对",
                 }
             )
 
@@ -759,7 +864,8 @@ class AssetComparisonJobManager:
         return {
             "jobId": job.id,
             "status": job.status,
-            "inputs": _loads(job.input_json, {}),
+            "inputs": self._resolved_inputs(job),
+            "inputFingerprint": self._input_fingerprint(job),
             "results": results,
             "artifacts": artifact_views,
             "remarks": remarks,
@@ -788,7 +894,34 @@ class AssetComparisonJobManager:
             job = db.get(AssetComparisonJob, job_id)
             if job is None:
                 raise AssetComparisonJobNotFoundError
-            return _loads(job.input_json, {})
+            return self._resolved_inputs(job)
+
+    def _resolved_inputs(self, job: AssetComparisonJob) -> dict[str, str]:
+        snapshot = _loads(job.input_json, {})
+        files = snapshot.get("files") if isinstance(snapshot, dict) else None
+        if not isinstance(files, dict):
+            return snapshot
+        resolved = {}
+        for key, file_info in files.items():
+            relative_path = file_info.get("relativePath")
+            if not relative_path:
+                continue
+            resolved[key] = str(
+                self._artifact_store.resolve_task_path(
+                    user_id=job.user_id,
+                    tool=TASK_TOOL,
+                    task_id=job.id,
+                    relative_path=relative_path,
+                )
+            )
+        return resolved
+
+    @staticmethod
+    def _input_fingerprint(job: AssetComparisonJob) -> str | None:
+        snapshot = _loads(job.input_json, {})
+        if not isinstance(snapshot, dict):
+            return None
+        return snapshot.get("fingerprint")
 
     def _job_dir_for_id(self, job_id: str) -> Path:
         with self._lock, SessionLocal() as db:
@@ -814,6 +947,9 @@ class AssetComparisonJobManager:
             tool=TASK_TOOL,
             task_id=job_id,
         )
+
+    def _has_comparison_snapshot(self, job: AssetComparisonJob) -> bool:
+        return comparison_snapshot_exists(self._job_dir(job.user_id, job.id))
 
     def _delete_job_files(
         self,

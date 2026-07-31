@@ -203,6 +203,7 @@ class TaskArtifactStore:
         task_id: str,
         filename: str,
         source_path: Path,
+        link_source: bool = True,
     ) -> Path:
         """将缓存文件映射到任务输入目录，同文件系统优先使用硬链接。"""
         safe_filename = Path(filename).name
@@ -216,11 +217,21 @@ class TaskArtifactStore:
         )
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.unlink(missing_ok=True)
-        try:
-            os.link(source_path, destination)
-        except OSError:
+        if link_source:
+            try:
+                os.link(source_path, destination)
+                return destination
+            except OSError:
+                pass
+        if source_path.resolve() != destination.resolve():
             shutil.copy2(source_path, destination)
         return destination
+
+    def contains_path(self, path: Path) -> bool:
+        """判断路径是否位于受管理的任务或缓存目录中。"""
+        root = self.root.resolve()
+        resolved_path = path.resolve()
+        return resolved_path == root or root in resolved_path.parents
 
     def delete_task(
         self,

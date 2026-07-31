@@ -1,3 +1,4 @@
+from app.models.asset_comparison_artifact import AssetComparisonArtifact
 from app.models.asset_comparison_job import AssetComparisonJob
 from app.models.audit_log import AuditLog
 from app.models.permission import Permission
@@ -6,6 +7,7 @@ from app.models.tool_meta import ToolMeta
 from app.models.user import User
 
 __all__ = [
+    "AssetComparisonArtifact",
     "AssetComparisonJob",
     "AuditLog",
     "Permission",
