@@ -1,3 +1,4 @@
+import hashlib
 import io
 import os
 import shutil
@@ -29,6 +30,10 @@ from app.models.user import User
 from app.schemas.asset_comparison import (
     AssetComparisonAnnotationsUpdate,
     AssetComparisonJobCreate,
+)
+from app.services.asset_comparison.comparison_snapshot import (
+    load_comparison_snapshot,
+    save_comparison_snapshot,
 )
 from app.services.asset_comparison.Customer_Customer import Customer_Customer
 from app.services.asset_comparison.Customer_Notes import Customer_Notes
@@ -73,6 +78,14 @@ except ImportError:
     pass
 
 router = APIRouter()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class ComparisonRequest(BaseModel):
@@ -772,6 +785,7 @@ def _build_module_job_artifact(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
         "size_bytes": target_path.stat().st_size,
+        "checksum": _file_sha256(target_path),
     }
 
 
@@ -794,6 +808,7 @@ def _build_raw_job_artifact(summary: dict, job_dir: Path) -> dict:
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
         "size_bytes": target_path.stat().st_size,
+        "checksum": _file_sha256(target_path),
     }
 
 
@@ -909,6 +924,7 @@ def _execute_asset_comparison_job(
                 error=str(exc),
             )
 
+    save_comparison_snapshot(summary, job_dir)
     return {
         "summary": summary,
         "inputs": inputs,
@@ -917,8 +933,7 @@ def _execute_asset_comparison_job(
 
 
 def _finalize_asset_comparison_job(
-    job_id: str,
-    runtime: dict,
+    _job_id: str,
     job_dir: Path,
     remarks: dict[str, str],
     reviews: dict[str, str],
@@ -927,8 +942,21 @@ def _finalize_asset_comparison_job(
         key: reviews.get(key, "差異確認OK")
         for key in ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
     }
+    summary = load_comparison_snapshot(job_dir)
     request = ComparisonRequest(
-        **runtime["inputs"],
+        **{
+            "thisFinance": "",
+            "lastFinance": "",
+            "thisNotes": "",
+            "lastNotes": "",
+            "thisSFC": "",
+            "lastSFC": "",
+            "thisCustomer": "",
+            "lastCustomer": "",
+            "departmentData": "",
+            "custodianData": "",
+            "driData": "",
+        },
         remarks=remarks,
         reviews=effective_reviews,
     )
@@ -939,7 +967,7 @@ def _finalize_asset_comparison_job(
     with _legacy_export_lock:
         content, filename = _build_complete_export(
             request,
-            runtime["summary"],
+            summary,
             raw_data=raw_path.read_bytes(),
         )
     target_path = job_dir / "complete.zip"
@@ -951,23 +979,42 @@ def _finalize_asset_comparison_job(
         "filename": filename,
         "content_type": "application/zip",
         "size_bytes": target_path.stat().st_size,
+        "checksum": _file_sha256(target_path),
     }
 
 
 def _retry_asset_comparison_artifact(
     job_id: str,
     artifact_key: str,
-    runtime: dict,
+    runtime: dict | None,
     job_dir: Path,
+    inputs: dict[str, str],
 ) -> dict:
     if artifact_key == "raw_data_xlsx":
-        return _build_raw_job_artifact(runtime["summary"], job_dir)
+        summary = (
+            runtime["summary"]
+            if runtime is not None
+            else load_comparison_snapshot(job_dir)
+        )
+        return _build_raw_job_artifact(summary, job_dir)
     if artifact_key.startswith("module_"):
         module_key = artifact_key.removeprefix("module_")
-        result = runtime["results"][module_key]
-        instance = runtime["summary"][module_key]
+        summary = (
+            runtime["summary"]
+            if runtime is not None
+            else load_comparison_snapshot(job_dir)
+        )
+        results = (
+            runtime["results"]
+            if runtime is not None
+            else {result["key"]: result for result in summary.get("results_info", [])}
+        )
+        result = results[module_key]
+        instance = summary[module_key]
         retried_result = None
-        if result.get("msg", "").startswith("异常:"):
+        needs_comparison_retry = result.get("msg", "").startswith("异常:")
+        needs_runtime_instance = runtime is None and result.get("has_diff")
+        if needs_comparison_retry or needs_runtime_instance:
             task_by_key = {
                 "ff": task_ff,
                 "sfc": task_sfc,
@@ -977,14 +1024,21 @@ def _retry_asset_comparison_artifact(
                 "ns": task_ns,
                 "cn": task_cn,
             }
-            _, instance, result = task_by_key[module_key](
-                ComparisonRequest(**runtime["inputs"])
-            )
+            _, instance, result = task_by_key[module_key](ComparisonRequest(**inputs))
             if result is None or result.get("msg", "").startswith("异常:"):
                 message = result.get("msg") if result else "核对模块没有返回结果"
                 raise RuntimeError(message)
-            runtime["summary"][module_key] = instance
-            runtime["results"][module_key] = result
+            summary[module_key] = instance
+            results[module_key] = result
+            summary["results_info"] = [
+                results[key]
+                for key in ["ff", "sfc", "nn", "cc", "fn", "ns", "cn"]
+                if key in results
+            ]
+            save_comparison_snapshot(summary, job_dir)
+            if runtime is not None:
+                runtime["summary"] = summary
+                runtime["results"] = results
             retried_result = result
 
         artifact = _build_module_job_artifact(

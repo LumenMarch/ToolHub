@@ -9,6 +9,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.orm import relationship
 
 from app.db.base_class import Base
 
@@ -46,3 +47,10 @@ class AssetComparisonJob(Base):
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=False, index=True)
+
+    artifact_records = relationship(
+        "AssetComparisonArtifact",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
