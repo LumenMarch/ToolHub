@@ -35,6 +35,7 @@ yarn-error.log*
 
 .hallmark
 .zcode
+design-demos/
 
 # Browser automation artifacts
 .playwright-mcp/

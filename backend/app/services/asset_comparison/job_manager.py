@@ -19,6 +19,10 @@ from app.models.asset_comparison_artifact import AssetComparisonArtifact
 from app.models.asset_comparison_job import AssetComparisonJob
 from app.services.asset_comparison.comparison_snapshot import (
     comparison_snapshot_exists,
+    load_comparison_snapshot,
+)
+from app.services.asset_comparison.difference_details import (
+    build_difference_details,
 )
 from app.services.asset_comparison.domain import (
     JOB_ACTIVE_STATUSES,
@@ -255,6 +259,50 @@ class AssetComparisonJobManager:
         with self._lock, SessionLocal() as db:
             job = self._get_owned_job(db, user_id, job_id)
             return self._serialize(job)
+
+    def get_difference_details(
+        self,
+        *,
+        user_id: int,
+        job_id: str,
+        module_key: str,
+        change_type: str,
+        query: str,
+        offset: int,
+        limit: int,
+    ) -> dict:
+        if module_key not in MODULE_BY_KEY:
+            raise AssetComparisonJobValidationError("不支持的资产核对模块")
+        with self._lock, SessionLocal() as db:
+            job = self._get_owned_job(db, user_id, job_id)
+            results = normalize_module_results(_loads(job.results_json, []))
+            result = next(
+                (item for item in results if item["key"] == module_key),
+                None,
+            )
+            if result is None or result.get("status") != "ready":
+                raise AssetComparisonJobConflictError("核对明细尚未生成")
+            job_dir = self._job_dir(job.user_id, job.id)
+            if not comparison_snapshot_exists(job_dir):
+                raise AssetComparisonJobConflictError("核对结果快照不存在，请重新核对")
+            summary = load_comparison_snapshot(
+                job_dir,
+                module_keys={module_key},
+            )
+            instance = summary.get(module_key)
+            if instance is None:
+                raise AssetComparisonJobConflictError("核对模块快照不完整")
+            try:
+                return build_difference_details(
+                    module_key=module_key,
+                    instance=instance,
+                    change_type=change_type,
+                    query=query,
+                    offset=offset,
+                    limit=limit,
+                )
+            except ValueError as exc:
+                raise AssetComparisonJobValidationError(str(exc)) from exc
 
     def update_annotations(
         self,
