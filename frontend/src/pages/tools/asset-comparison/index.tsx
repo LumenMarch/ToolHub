@@ -1,6 +1,19 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { gsap } from 'gsap';
-import { FileArrowUp, CheckSquareOffset, FloppyDisk, DownloadSimple, Plus, Minus, Warning, FolderOpen, CircleNotch, ArrowClockwise, ArrowCounterClockwise } from '@phosphor-icons/react';
+import {
+  ArrowClockwise,
+  ArrowCounterClockwise,
+  CheckSquareOffset,
+  CircleNotch,
+  DownloadSimple,
+  FileArrowUp,
+  FloppyDisk,
+  FolderOpen,
+  Minus,
+  Plus,
+  Warning,
+  XCircle,
+} from '@phosphor-icons/react';
 import api from '../../../api/axios';
 import { LoadingSignal } from '../../../components/LoadingSignal';
 import { useTusUpload } from '../../../hooks/useTusUpload';
@@ -181,18 +194,22 @@ const AssetComparison: React.FC = () => {
   const [statusMsg, setStatusMsg] = useState<React.ReactNode>('');
   const [isScanning, setIsScanning] = useState(false);
   const scanInFlightRef = useRef(false);
-  const [isStartingJob, setIsStartingJob] = useState(false);
-  const [isFinalizingAction, setIsFinalizingAction] = useState(false);
   const [isResettingPage, setIsResettingPage] = useState(false);
-  const [retryingArtifact, setRetryingArtifact] = useState('');
   const restoredJobRef = useRef('');
   const {
     job,
     error: jobError,
+    expiredJobId,
+    isStarting,
+    isFinalizing,
+    isCancelling,
+    retryingArtifact,
+    annotationSaveStatus,
     start,
     saveAnnotations,
     finalize,
     retry,
+    cancel,
     reset,
     download,
   } = useAssetComparisonJob();
@@ -415,7 +432,10 @@ const AssetComparison: React.FC = () => {
           setStatusMsg(prev => (
             <div className="flex flex-col gap-1">
               {prev}
-              <span className="text-amber-400 text-xs">⚠ {failMsgs.length} 个文件上传失败</span>
+              <span className="flex items-center gap-1 text-xs text-amber-400">
+                <Warning className="size-3.5" weight="bold" />
+                {failMsgs.length} 个文件上传失败
+              </span>
             </div>
           ));
         }
@@ -470,7 +490,7 @@ const AssetComparison: React.FC = () => {
   };
 
   const handleCheck = async () => {
-    if (isStartingJob || isJobActive || isResettingPage) return;
+    if (isStarting || isJobActive || isResettingPage) return;
     const hasMissingPath = Object.values(paths).some(value => !value.trim());
     if (hasMissingPath) {
       setStatusMsg(
@@ -480,7 +500,6 @@ const AssetComparison: React.FC = () => {
     }
 
     setStatusMsg('正在创建核对任务...');
-    setIsStartingJob(true);
     setRemarks({});
     setReviews({});
     try {
@@ -488,18 +507,17 @@ const AssetComparison: React.FC = () => {
       setStatusMsg('');
     } catch (err: unknown) {
       setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {getErrorMessage(err)}</span>);
-    } finally {
-      setIsStartingJob(false);
     }
   };
 
   const handleSaveAll = async () => {
-    if (!job || isFinalizingAction) return;
+    if (!job || isFinalizing) return;
     const currentFinalArtifact = job.artifacts.final_bundle;
     if (
       currentFinalArtifact?.status === 'ready'
       && job.finalizedRevision === job.annotationRevision
       && !annotationsDirty
+      && !inputsChanged
     ) {
       download('final_bundle');
       return;
@@ -512,15 +530,23 @@ const AssetComparison: React.FC = () => {
     }
 
     setStatusMsg('正在保存异常原因并生成对比总结与 PDF...');
-    setIsFinalizingAction(true);
     try {
-      await saveAnnotations(remarks, reviews);
+      const nextJob = annotationsDirty
+        ? await saveAnnotations(remarks, reviews)
+        : job;
+      if (!nextJob?.canFinalize) {
+        setStatusMsg(
+          <span>
+            <Badge variant="warn">等待</Badge>{' '}
+            {nextJob?.finalizeBlockers[0]?.message ?? '任务状态正在更新，请稍后重试'}
+          </span>,
+        );
+        return;
+      }
       await finalize();
       setStatusMsg('');
     } catch (err: unknown) {
       setStatusMsg(<span><Badge variant="err">失败</Badge> {getErrorMessage(err)}</span>);
-    } finally {
-      setIsFinalizingAction(false);
     }
   };
 
@@ -536,12 +562,9 @@ const AssetComparison: React.FC = () => {
     if (artifact.status !== 'failed') return;
 
     try {
-      setRetryingArtifact(artifactKey);
       await retry(artifactKey);
     } catch (err: unknown) {
       setStatusMsg(<span><Badge variant="err">失败</Badge> {getErrorMessage(err)}</span>);
-    } finally {
-      setRetryingArtifact('');
     }
   };
 
@@ -551,11 +574,23 @@ const AssetComparison: React.FC = () => {
     }
   };
 
+  const handleCancelJob = async () => {
+    if (!job || !isJobActive || isCancelling) return;
+    try {
+      await cancel();
+      setStatusMsg('已提交取消请求，正在停止后台任务...');
+    } catch (err: unknown) {
+      setStatusMsg(
+        <span><Badge variant="err">失败</Badge> {getErrorMessage(err)}</span>,
+      );
+    }
+  };
+
   const resetDisabled = Boolean(
     isScanning
-    || isStartingJob
+    || isStarting
     || isJobActive
-    || isFinalizingAction
+    || isFinalizing
     || isResettingPage
     || retryingArtifact,
   );
@@ -589,7 +624,6 @@ const AssetComparison: React.FC = () => {
       setReviews({});
       setStatusMsg('');
       setModuleProgress(createEmptyModuleProgress());
-      setRetryingArtifact('');
       restoredJobRef.current = '';
     } catch (err: unknown) {
       setStatusMsg(
@@ -608,7 +642,7 @@ const AssetComparison: React.FC = () => {
       job?.finalizedRevision !== null
       && job?.finalizedRevision !== undefined
     )
-    || ['ready', 'stale', 'failed'].includes(finalArtifact?.status ?? ''),
+    || ['ready', 'stale'].includes(finalArtifact?.status ?? ''),
   );
   const inputsChanged = Boolean(
     job && JSON.stringify(paths) !== JSON.stringify(job.inputs),
@@ -635,41 +669,72 @@ const AssetComparison: React.FC = () => {
       || JSON.stringify(normalizedLocalReviews) !== JSON.stringify(normalizedJobReviews)
     ),
   );
-  const hasNonAnnotationBlocker = Boolean(
-    job?.finalizeBlockers.some(blocker => blocker.code !== 'missing_remarks'),
-  );
-  const canPrepareFinal = Boolean(
-    job && !hasNonAnnotationBlocker && localMissingRemarks.length === 0,
+  const serverBlockersAfterDraft = (
+    job?.finalizeBlockers.filter(blocker => (
+      blocker.code !== 'missing_remarks' || localMissingRemarks.length > 0
+    )) ?? []
   );
   const finalButtonIsDownload = Boolean(
     finalArtifact?.status === 'ready'
     && job?.finalizedRevision === job?.annotationRevision
-    && !annotationsDirty,
+    && !annotationsDirty
+    && !inputsChanged
+  );
+  const finalIsBuilding = Boolean(
+    isFinalizing
+    || retryingArtifact === 'final_bundle'
+    || finalArtifact?.status === 'building',
   );
   const finalButtonDisabled = Boolean(
     !job
-    || isFinalizingAction
-    || finalArtifact?.status === 'building'
+    || finalIsBuilding
     || (!finalButtonIsDownload && inputsChanged)
-    || (!finalButtonIsDownload && !canPrepareFinal),
+    || (
+      !finalButtonIsDownload
+      && (
+        localMissingRemarks.length > 0
+        || serverBlockersAfterDraft.length > 0
+      )
+    ),
   );
   const finalButtonLabel = (() => {
     if (!job) return '等待核对';
-    if (finalArtifact?.status === 'building') return '正在生成对比总结与 PDF';
+    if (finalIsBuilding) return '正在生成对比总结与 PDF';
     if (finalButtonIsDownload) return '下载完整结果';
     if (inputsChanged) return '输入已更改，请重新核对';
     if (localMissingRemarks.length > 0) {
       return `请填写 ${localMissingRemarks.length} 项异常原因`;
     }
+    if (annotationSaveStatus === 'saving') return '正在保存异常原因';
+    if (finalArtifact?.status === 'failed') return '生成失败，点击重试';
     if (
       hasGeneratedFinal
-      && (annotationsDirty || ['stale', 'failed'].includes(finalArtifact?.status ?? ''))
+      && (annotationsDirty || finalArtifact?.status === 'stale')
     ) {
       return '内容已更新，重新生成总结与 PDF';
     }
-    return job.finalizeBlockers.find(
-      blocker => blocker.code !== 'missing_remarks',
-    )?.message ?? '生成对比总结与 PDF';
+    const comparisonProgress = job.progress.comparison;
+    if (
+      comparisonProgress
+      && comparisonProgress.completed < comparisonProgress.total
+    ) {
+      return `等待资产核对 ${comparisonProgress.completed}/${comparisonProgress.total}`;
+    }
+    const artifactProgress = job.progress.moduleArtifacts;
+    if (
+      artifactProgress
+      && artifactProgress.completed < artifactProgress.total
+    ) {
+      return `等待模块文件 ${artifactProgress.completed}/${artifactProgress.total}`;
+    }
+    return serverBlockersAfterDraft[0]?.message ?? '生成对比总结与 PDF';
+  })();
+  const annotationStatusLabel = (() => {
+    if (annotationSaveStatus === 'saving') return '异常原因保存中';
+    if (annotationSaveStatus === 'error') return '异常原因保存失败，草稿已保留';
+    if (annotationsDirty) return '异常原因尚未保存';
+    if (annotationSaveStatus === 'saved') return '异常原因已保存';
+    return '';
   })();
 
   return (
@@ -692,7 +757,7 @@ const AssetComparison: React.FC = () => {
         <div className="gsap-reveal flex items-center gap-3">
           <button
             onClick={handleSelectFolder}
-            disabled={isScanning || isStartingJob || isInputLocked}
+            disabled={isScanning || isStarting || isInputLocked}
             title="选择文件夹"
             className="flex items-center justify-center gap-2 border border-border bg-secondary px-4 py-3 font-bold uppercase tracking-tight text-secondary-foreground transition-[background-color,transform] hover:bg-secondary/80 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 shrink-0"
           >
@@ -705,11 +770,11 @@ const AssetComparison: React.FC = () => {
             onChange={(e) => setFolderPath(e.target.value)}
             disabled={isInputLocked}
             placeholder="输入或粘贴文件夹路径..."
-            className="flex-1 min-w-[240px] border-b border-border bg-transparent px-2 py-2 font-mono text-sm outline-none transition-colors focus:border-primary text-foreground placeholder:text-muted-foreground/60 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex-1 min-w-[240px] border-b border-border bg-transparent px-2 py-2 font-mono text-base outline-none transition-colors focus:border-primary text-foreground placeholder:text-muted-foreground/60 disabled:cursor-not-allowed disabled:opacity-60 md:text-sm"
           />
           <button
             onClick={handleScanFolder}
-            disabled={isScanning || isStartingJob || isInputLocked || (!folderPath.trim() && selectedFilesRef.current.length === 0)}
+            disabled={isScanning || isStarting || isInputLocked || (!folderPath.trim() && selectedFilesRef.current.length === 0)}
             className="flex items-center justify-center gap-2 border border-primary bg-primary/10 px-5 py-3 font-bold uppercase tracking-tight text-primary transition-[background-color,transform] hover:bg-primary/20 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 shrink-0"
           >
             扫描解析
@@ -766,13 +831,13 @@ const AssetComparison: React.FC = () => {
       <div className="pt-8 flex flex-col sm:flex-row gap-6 max-w-6xl justify-start gsap-reveal border-b-2 border-border pb-8 mb-8">
         <button
           onClick={handleCheck}
-          disabled={isScanning || isStartingJob || isInputLocked}
+          disabled={isScanning || isStarting || isInputLocked}
           className="flex items-center justify-center gap-3 border-2 border-border px-10 py-4 text-lg font-bold uppercase tracking-tighter text-foreground transition-[background-color,color,transform] hover:bg-foreground hover:text-background active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {isJobActive || isStartingJob ? (
+          {isJobActive || isStarting ? (
             <>
               <CircleNotch weight="bold" className="size-6 animate-spin" />
-              {isStartingJob ? '正在创建任务' : `核对中 ${job?.progress.comparison?.completed ?? 0}/${job?.progress.comparison?.total ?? 7}`}
+              {isStarting ? '正在创建任务' : `核对中 ${job?.progress.comparison?.completed ?? 0}/${job?.progress.comparison?.total ?? 7}`}
             </>
           ) : (
             <>
@@ -781,6 +846,21 @@ const AssetComparison: React.FC = () => {
             </>
           )}
         </button>
+        {isJobActive && (
+          <button
+            type="button"
+            onClick={handleCancelJob}
+            disabled={isCancelling || job?.status === 'cancel_requested'}
+            className="flex items-center justify-center gap-2 border border-red-500/50 px-6 py-4 font-bold uppercase tracking-tight text-red-400 transition-[background-color,color,transform] hover:bg-red-500/10 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isCancelling || job?.status === 'cancel_requested' ? (
+              <CircleNotch weight="bold" className="size-5 animate-spin" />
+            ) : (
+              <XCircle weight="bold" className="size-5" />
+            )}
+            {job?.status === 'cancel_requested' ? '正在取消' : '取消任务'}
+          </button>
+        )}
         <button
           type="button"
           onClick={handleResetPage}
@@ -795,17 +875,42 @@ const AssetComparison: React.FC = () => {
           )}
           {isResettingPage ? '正在重置' : '重置页面'}
         </button>
-        {(statusMsg || job || jobError) && (
-          <div className="flex-1 p-4 bg-primary/10 text-primary font-mono text-sm max-w-2xl flex flex-col gap-2">
+        {(statusMsg || job || jobError || expiredJobId) && (
+          <div
+            className="flex-1 p-4 bg-primary/10 text-primary font-mono text-sm max-w-2xl flex flex-col gap-2"
+            aria-live="polite"
+          >
             {statusMsg && <div>{statusMsg}</div>}
+            {expiredJobId && (
+              <div className="text-amber-400">
+                <Badge variant="warn">已过期</Badge>{' '}
+                上次任务及文件已清理，请重新扫描并开始核对。
+              </div>
+            )}
             {job && (
               <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
                 <span>文件验证</span>
-                <span>{job.progress.validation?.status === 'ready' ? '完成' : '处理中'}</span>
+                <span>
+                  {job.progress.validation?.status === 'ready'
+                    ? '完成'
+                    : job.progress.validation?.status === 'failed'
+                      ? '失败'
+                      : '处理中'}
+                </span>
                 <span>资产核对</span>
-                <span>{job.progress.comparison?.completed ?? 0}/{job.progress.comparison?.total ?? 7}</span>
+                <span>
+                  {job.progress.comparison?.completed ?? 0}/{job.progress.comparison?.total ?? 7}
+                  {(job.progress.comparison?.failed ?? 0) > 0
+                    ? `，失败 ${job.progress.comparison?.failed}`
+                    : ''}
+                </span>
                 <span>模块文件</span>
-                <span>{job.progress.moduleArtifacts?.completed ?? 0}/{job.progress.moduleArtifacts?.total ?? 7}</span>
+                <span>
+                  {job.progress.moduleArtifacts?.completed ?? 0}/{job.progress.moduleArtifacts?.total ?? 7}
+                  {(job.progress.moduleArtifacts?.failed ?? 0) > 0
+                    ? `，失败 ${job.progress.moduleArtifacts?.failed}`
+                    : ''}
+                </span>
                 <span>原始数据</span>
                 <span>{job.progress.rawData?.status === 'ready' ? '完成' : job.progress.rawData?.status === 'failed' ? '失败' : '生成中'}</span>
               </div>
@@ -822,21 +927,68 @@ const AssetComparison: React.FC = () => {
       {checkResults.length > 0 && (
         <div className="max-w-6xl space-y-6 gsap-reveal mb-12">
           <h2 className="text-3xl font-bold tracking-tighter uppercase mb-6 flex items-center gap-4">
-            <div className="size-4 rounded-full bg-primary"></div>
+            <CheckSquareOffset className="size-7 text-primary" weight="bold" />
             核对结果明细
           </h2>
+          {annotationStatusLabel && (
+            <p
+              className={`font-mono text-xs ${
+                annotationSaveStatus === 'error'
+                  ? 'text-red-400'
+                  : annotationsDirty
+                    ? 'text-amber-400'
+                    : 'text-muted-foreground'
+              }`}
+              aria-live="polite"
+            >
+              {annotationStatusLabel}
+            </p>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {checkResults.map((res) => (
-              <div key={res.key} className={`p-6 border-2 ${res.status === 'failed' ? 'border-red-500 bg-red-500/5' : res.has_diff ? 'border-primary bg-primary/5' : 'border-border bg-card'}`}>
+            {checkResults.map((res) => {
+              const artifactKey = `module_${res.key}`;
+              const artifact = job?.artifacts[artifactKey];
+              const artifactBusy = ['blocked', 'pending', 'building'].includes(
+                artifact?.status ?? 'blocked',
+              );
+              return (
+              <div
+                key={res.key}
+                aria-busy={res.status === 'pending' || res.status === 'running'}
+                className={`p-6 border-2 ${
+                  res.status === 'failed'
+                    ? 'border-red-500 bg-red-500/5'
+                    : res.status === 'pending' || res.status === 'running'
+                      ? 'border-border bg-card/60'
+                      : res.has_diff
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border bg-card'
+                }`}
+              >
                 <div className="flex justify-between items-start mb-4">
                   <div className="w-full">
                     <div className="flex justify-between items-center w-full mb-2">
-                      <h3 className="text-xl font-bold">{res.label}</h3>
+                      <div className="flex items-center gap-3">
+                        <h3 className="text-xl font-bold">{res.label}</h3>
+                        {res.status === 'ready' ? (
+                          <Badge variant={res.has_diff ? 'warn' : 'ok'}>
+                            {res.has_diff ? '有差异' : '已完成'}
+                          </Badge>
+                        ) : res.status === 'failed' ? (
+                          <Badge variant="err">失败</Badge>
+                        ) : (
+                          <Badge variant="info">
+                            {res.status === 'running' ? '核对中' : '等待中'}
+                          </Badge>
+                        )}
+                      </div>
                       <select
                         value={reviews[res.key] || REVIEW_OPTIONS[0]}
                         onChange={(e) => handleReviewChange(res.key, e.target.value)}
-                        className="cursor-pointer border border-border bg-background px-3 py-1 font-mono text-base outline-none focus:border-primary focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 md:text-sm"
+                        disabled={res.status !== 'ready'}
+                        aria-label={`${res.label}审核状态`}
+                        className="cursor-pointer border border-border bg-background px-3 py-1 font-mono text-base outline-none focus:border-primary focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
                       >
                         {REVIEW_OPTIONS.map(opt => (
                           <option key={opt} value={opt}>{opt}</option>
@@ -873,26 +1025,53 @@ const AssetComparison: React.FC = () => {
                   </div>
                   <button
                     onClick={() => handleExportSingle(res.key)}
-                    disabled={retryingArtifact === `module_${res.key}` || !['ready', 'failed'].includes(job?.artifacts[`module_${res.key}`]?.status ?? '')}
+                    disabled={
+                      retryingArtifact === artifactKey
+                      || !['ready', 'failed'].includes(artifact?.status ?? '')
+                    }
                     className="p-2 border border-border hover:bg-foreground hover:text-background transition-colors flex-shrink-0 ml-4 disabled:cursor-not-allowed disabled:opacity-50"
-                    title={job?.artifacts[`module_${res.key}`]?.error ?? `单独导出${res.label.replace(/【|】/g, '')}结果`}
+                    title={
+                      artifact?.error
+                      ?? (
+                        artifact?.status === 'failed'
+                          ? `重新生成${res.label.replace(/【|】/g, '')}`
+                          : artifact?.status === 'ready'
+                            ? `下载${res.label.replace(/【|】/g, '')}`
+                            : `${res.label.replace(/【|】/g, '')}文件生成中`
+                      )
+                    }
+                    aria-label={
+                      artifact?.status === 'failed'
+                        ? `重新生成${res.label}`
+                        : artifact?.status === 'ready'
+                          ? `下载${res.label}`
+                          : `${res.label}文件生成中`
+                    }
                   >
-                    {retryingArtifact === `module_${res.key}` ? (
+                    {retryingArtifact === artifactKey ? (
                       <CircleNotch className="size-5 animate-spin" />
-                    ) : job?.artifacts[`module_${res.key}`]?.status === 'failed' ? (
+                    ) : artifact?.status === 'failed' ? (
                       <ArrowClockwise className="size-5" />
-                    ) : job?.artifacts[`module_${res.key}`]?.status === 'ready' ? (
+                    ) : artifact?.status === 'ready' ? (
                       <DownloadSimple className="size-5" />
-                    ) : (
+                    ) : artifactBusy ? (
                       <CircleNotch className="size-5 animate-spin" />
+                    ) : (
+                      <Warning className="size-5" />
                     )}
                   </button>
                 </div>
 
-                {res.has_diff && (
+                {res.status === 'ready' && res.has_diff && (
                   <div className="mt-4">
-                    <label className="text-xs uppercase tracking-widest text-primary mb-2 block font-mono">请填写异常原因 (必填):</label>
+                    <label
+                      htmlFor={`remark-${res.key}`}
+                      className="text-xs uppercase tracking-widest text-primary mb-2 block font-mono"
+                    >
+                      请填写异常原因 (必填):
+                    </label>
                     <textarea
+                      id={`remark-${res.key}`}
                       value={remarks[res.key] || ''}
                       onChange={(e) => handleRemarkChange(res.key, e.target.value)}
                       onBlur={handleRemarkBlur}
@@ -903,19 +1082,23 @@ const AssetComparison: React.FC = () => {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="pt-8 flex justify-end">
             <button
               onClick={handleSaveAll}
               disabled={finalButtonDisabled}
+              title={finalArtifact?.error}
               className="flex items-center justify-center gap-3 bg-primary px-12 py-4 text-xl font-bold uppercase tracking-tighter text-primary-foreground transition-[background-color,transform] hover:bg-primary/90 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {finalArtifact?.status === 'building' ? (
+              {finalIsBuilding ? (
                 <CircleNotch weight="bold" className="size-6 animate-spin" />
               ) : finalButtonIsDownload ? (
                 <DownloadSimple weight="bold" className="size-6" />
+              ) : finalArtifact?.status === 'failed' ? (
+                <ArrowClockwise weight="bold" className="size-6" />
               ) : (
                 <FloppyDisk weight="bold" className="size-6" />
               )}
