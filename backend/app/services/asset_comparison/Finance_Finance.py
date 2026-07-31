@@ -3,7 +3,6 @@ from datetime import datetime  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
-from app.services.asset_comparison.const import FINANCE_FINANCE_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.excel_writer import new_workbook, write_section
 from loguru import logger  # noqa: E402, I001, UP015, F401
 
@@ -238,7 +237,7 @@ class Finance_Finance:
         except Exception as e:
             logger.exception(e)
 
-    def Save_Check(self):
+    def Save_Check(self, output_path):
         """保存財務對比結果為Excel文件"""
         try:
             if (
@@ -390,7 +389,7 @@ class Finance_Finance:
             for col in ["A", "B", "C", "D", "E"]:
                 worksheet.column_dimensions[col].width = 20
 
-            wb.save(FINANCE_FINANCE_SAVE_PATH)
+            wb.save(output_path)
 
         except Exception as e:
             logger.exception(e)

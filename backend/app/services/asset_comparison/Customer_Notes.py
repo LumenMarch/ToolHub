@@ -4,7 +4,6 @@ from datetime import datetime  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
 import polars as pl  # noqa: E402, I001, UP015, F401
-from app.services.asset_comparison.const import CUSTOMER_NOTES_SAVE_PATH  # noqa: E402, I001, UP015, F401
 from app.services.asset_comparison.excel_writer import new_workbook, safe_cell
 from loguru import logger  # noqa: E402, I001, UP015, F401
 
@@ -272,7 +271,7 @@ class Customer_Notes:
             logger.exception(f"從備注説明列提取RFID失敗: {e}")
             raise
 
-    def Save_Customer_Notes_Comparison(self):
+    def Save_Customer_Notes_Comparison(self, output_path):
         """保存Customer與Notes比較結果為Excel文件"""
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
@@ -452,7 +451,7 @@ class Customer_Notes:
                 ):
                     for cell in row:
                         cell.border = thin_border
-                wb.save(CUSTOMER_NOTES_SAVE_PATH)
+                wb.save(output_path)
         except Exception as e:
             logger.exception(f"保存数据对比失败: {e}")
             raise

@@ -38,6 +38,14 @@ from app.services.task_artifacts import TaskArtifactStore, task_artifact_store
 TASK_TOOL = "asset-comparison"
 BASE_ARTIFACT_KEYS = [*(f"module_{key}" for key in MODULE_ORDER), "raw_data_xlsx"]
 REVIEW_VALUES = {"差異確認OK", "待跟进", "異常"}
+RETAINED_JOB_STATUSES = [
+    "base_ready",
+    "complete",
+    "partial_failed",
+    "failed",
+    "cancelled",
+    "expired",
+]
 
 
 class AssetComparisonJobNotFoundError(LookupError):
@@ -100,7 +108,6 @@ class AssetComparisonJobManager:
             max_workers=max(settings.ASSET_COMPARISON_MAX_ACTIVE_JOBS, 1),
             thread_name_prefix="asset-comparison-job",
         )
-        self._runtime: dict[str, Any] = {}
         self._lock = threading.RLock()
 
     @staticmethod
@@ -428,7 +435,6 @@ class AssetComparisonJobManager:
             if job.status in JOB_ACTIVE_STATUSES:
                 raise AssetComparisonJobConflictError("任务仍在运行，暂时无法删除")
             self._delete_job_files(job.user_id, job.id, ignore_errors=False)
-            self._runtime.pop(job.id, None)
             db.delete(job)
             db.commit()
 
@@ -614,22 +620,16 @@ class AssetComparisonJobManager:
                 artifacts = self._load_artifacts(job)
                 self._mark_expired_state(job, artifacts)
                 self._store_artifacts(job, artifacts)
-                self._runtime.pop(job.id, None)
                 expired_job_files.append((job.user_id, job.id))
 
             terminal_jobs = (
                 db.query(AssetComparisonJob)
-                .filter(
-                    AssetComparisonJob.status.in_(
-                        ["base_ready", "complete", "partial_failed", "failed"]
-                    )
-                )
+                .filter(AssetComparisonJob.status.in_(RETAINED_JOB_STATUSES))
                 .order_by(AssetComparisonJob.updated_at.desc())
                 .all()
             )
             for job in terminal_jobs[settings.ASSET_COMPARISON_MAX_STORED_JOBS :]:
                 self._delete_job_files(job.user_id, job.id)
-                self._runtime.pop(job.id, None)
                 db.delete(job)
             db.commit()
 
@@ -727,7 +727,7 @@ class AssetComparisonJobManager:
             )
             job_dir = self._job_dir_for_id(job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
-            runtime = self._execute_job(
+            self._execute_job(
                 job_id,
                 inputs,
                 job_dir,
@@ -736,7 +736,6 @@ class AssetComparisonJobManager:
             )
             if self._finish_cancel_if_requested(job_id):
                 return
-            self._runtime[job_id] = runtime
             self._refresh_overall_status(job_id)
             self._log_stage(
                 job_id=job_id,
@@ -834,13 +833,11 @@ class AssetComparisonJobManager:
         try:
             if self._finish_cancel_if_requested(job_id):
                 return
-            runtime = self._runtime.get(job_id)
             inputs = self._job_inputs(job_id)
             job_dir = self._job_dir_for_id(job_id)
             artifact = self._retry_artifact(
                 job_id,
                 artifact_key,
-                runtime,
                 job_dir,
                 inputs,
             )
@@ -1439,11 +1436,7 @@ class AssetComparisonJobManager:
         with self._lock, SessionLocal() as db:
             jobs = (
                 db.query(AssetComparisonJob)
-                .filter(
-                    AssetComparisonJob.status.in_(
-                        ["base_ready", "complete", "partial_failed", "failed"]
-                    )
-                )
+                .filter(AssetComparisonJob.status.in_(RETAINED_JOB_STATUSES))
                 .order_by(AssetComparisonJob.updated_at.asc())
                 .all()
             )
@@ -1460,6 +1453,5 @@ class AssetComparisonJobManager:
                     break
                 total_size -= sizes[job.id]
                 self._delete_job_files(job.user_id, job.id)
-                self._runtime.pop(job.id, None)
                 db.delete(job)
             db.commit()
