@@ -11,25 +11,34 @@ export interface CheckResult {
   label: string;
   has_diff: boolean;
   msg: string;
-  status: 'ready' | 'failed';
+  status: 'pending' | 'running' | 'ready' | 'failed';
   sub_groups?: SubGroup[];
 }
 
 export interface JobArtifact {
-  status: 'blocked' | 'pending' | 'building' | 'ready' | 'stale' | 'failed';
+  status:
+    | 'blocked'
+    | 'pending'
+    | 'building'
+    | 'ready'
+    | 'stale'
+    | 'failed'
+    | 'expired';
   moduleKey?: string;
   downloadUrl?: string;
   filename?: string;
   sizeBytes?: number;
+  checksum?: string;
   error?: string;
 }
 
 export interface FinalizeBlocker {
   code:
+    | 'job_not_finalizable'
     | 'comparison_not_ready'
     | 'artifacts_not_ready'
     | 'missing_remarks'
-    | 'runtime_unavailable';
+    | 'comparison_snapshot_unavailable';
   message: string;
   moduleKeys?: string[];
   artifactKeys?: string[];
@@ -38,6 +47,7 @@ export interface FinalizeBlocker {
 export interface AssetComparisonJob {
   jobId: string;
   inputs: AssetComparisonInputs;
+  inputFingerprint: string;
   status:
     | 'queued'
     | 'validating'
@@ -58,8 +68,18 @@ export interface AssetComparisonJob {
   finalizedRevision: number | null;
   progress: {
     validation?: { status: string };
-    comparison?: { completed: number; total: number };
-    moduleArtifacts?: { completed: number; total: number };
+    comparison?: {
+      completed: number;
+      ready: number;
+      failed: number;
+      total: number;
+    };
+    moduleArtifacts?: {
+      completed: number;
+      ready: number;
+      failed: number;
+      total: number;
+    };
     rawData?: { status: string; error?: string };
   };
   canFinalize: boolean;

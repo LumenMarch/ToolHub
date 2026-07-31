@@ -51,16 +51,56 @@ function readError(error: unknown): string {
   return String(error);
 }
 
+function readStatus(error: unknown): number | undefined {
+  return (
+    error as { response?: { status?: number } }
+  ).response?.status;
+}
+
+function isRequestCancelled(error: unknown): boolean {
+  return (
+    error as { code?: string; name?: string }
+  ).code === 'ERR_CANCELED'
+    || (error as { name?: string }).name === 'CanceledError';
+}
+
+export type AnnotationSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
 export function useAssetComparisonJob() {
   const [job, setJob] = useState<AssetComparisonJob | null>(null);
   const [error, setError] = useState('');
+  const [expiredJobId, setExpiredJobId] = useState('');
+  const [isStarting, setIsStarting] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [retryingArtifact, setRetryingArtifact] = useState('');
+  const [annotationSaveStatus, setAnnotationSaveStatus] =
+    useState<AnnotationSaveStatus>('idle');
   const jobRef = useRef<AssetComparisonJob | null>(null);
   const detachedJobIdsRef = useRef(new Set<string>());
+  const mountedRef = useRef(true);
+  const refreshControllerRef = useRef<AbortController | null>(null);
+  const requestControllersRef = useRef(new Set<AbortController>());
+  const annotationGenerationRef = useRef(0);
   const annotationQueueRef = useRef<Promise<AssetComparisonJob | null>>(
     Promise.resolve(null),
   );
 
+  const createRequestController = useCallback(() => {
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    return controller;
+  }, []);
+
+  const releaseRequestController = useCallback(
+    (controller: AbortController) => {
+      requestControllersRef.current.delete(controller);
+    },
+    [],
+  );
+
   const updateJob = useCallback((nextJob: AssetComparisonJob | null) => {
+    if (!mountedRef.current) return;
     if (nextJob && detachedJobIdsRef.current.has(nextJob.jobId)) {
       return;
     }
@@ -83,6 +123,7 @@ export function useAssetComparisonJob() {
     jobRef.current = nextJob;
     setJob(nextJob);
     if (nextJob) {
+      setExpiredJobId('');
       sessionStorage.setItem(STORAGE_KEY, nextJob.jobId);
     } else {
       sessionStorage.removeItem(STORAGE_KEY);
@@ -93,33 +134,53 @@ export function useAssetComparisonJob() {
     const targetJobId = jobId ?? jobRef.current?.jobId;
     if (!targetJobId) return null;
     if (detachedJobIdsRef.current.has(targetJobId)) return null;
+    refreshControllerRef.current?.abort();
+    const controller = createRequestController();
+    refreshControllerRef.current = controller;
     try {
       const response = await api.get<AssetComparisonJob>(
         `/tools/asset/jobs/${targetJobId}`,
+        { signal: controller.signal },
       );
-      setError('');
+      if (mountedRef.current) setError('');
       updateJob(response.data);
       return response.data;
     } catch (refreshError: unknown) {
+      if (isRequestCancelled(refreshError)) return null;
       if (detachedJobIdsRef.current.has(targetJobId)) {
         return null;
       }
-      const status = (
-        refreshError as { response?: { status?: number } }
-      ).response?.status;
+      const status = readStatus(refreshError);
       if (status === 404 || status === 410) {
         updateJob(null);
+        if (status === 410 && mountedRef.current) {
+          setExpiredJobId(targetJobId);
+        }
       }
-      setError(readError(refreshError));
+      if (mountedRef.current) setError(readError(refreshError));
       return null;
+    } finally {
+      releaseRequestController(controller);
+      if (refreshControllerRef.current === controller) {
+        refreshControllerRef.current = null;
+      }
     }
-  }, [updateJob]);
+  }, [createRequestController, releaseRequestController, updateJob]);
 
   useEffect(() => {
+    mountedRef.current = true;
+    const requestControllers = requestControllersRef.current;
     const storedJobId = sessionStorage.getItem(STORAGE_KEY);
     if (storedJobId) {
       void refresh(storedJobId);
     }
+    return () => {
+      mountedRef.current = false;
+      for (const controller of requestControllers) {
+        controller.abort();
+      }
+      requestControllers.clear();
+    };
   }, [refresh]);
 
   useEffect(() => {
@@ -131,27 +192,46 @@ export function useAssetComparisonJob() {
   }, [job, refresh]);
 
   const start = useCallback(async (inputs: AssetComparisonInputs) => {
+    const controller = createRequestController();
     setError('');
-    const response = await api.post<AssetComparisonJob>(
-      '/tools/asset/jobs',
-      {
-        ...inputs,
-        clientRequestId: createClientRequestId(),
-      },
-    );
-    updateJob(response.data);
-    return response.data;
-  }, [updateJob]);
+    setExpiredJobId('');
+    setIsStarting(true);
+    try {
+      const response = await api.post<AssetComparisonJob>(
+        '/tools/asset/jobs',
+        {
+          ...inputs,
+          clientRequestId: createClientRequestId(),
+        },
+        { signal: controller.signal },
+      );
+      updateJob(response.data);
+      return response.data;
+    } catch (startError: unknown) {
+      if (!isRequestCancelled(startError) && mountedRef.current) {
+        setError(readError(startError));
+      }
+      throw startError;
+    } finally {
+      releaseRequestController(controller);
+      if (mountedRef.current) setIsStarting(false);
+    }
+  }, [createRequestController, releaseRequestController, updateJob]);
 
   const saveAnnotations = useCallback((
     remarks: Record<string, string>,
     reviews: Record<string, string>,
   ) => {
+    const generation = annotationGenerationRef.current + 1;
+    annotationGenerationRef.current = generation;
+    setAnnotationSaveStatus('saving');
     annotationQueueRef.current = annotationQueueRef.current
       .catch(() => null)
       .then(async () => {
+        if (!mountedRef.current) return null;
         const currentJob = jobRef.current;
         if (!currentJob) return null;
+        const controller = createRequestController();
         try {
           const response = await api.patch<AssetComparisonJob>(
             `/tools/asset/jobs/${currentJob.jobId}/annotations`,
@@ -160,68 +240,115 @@ export function useAssetComparisonJob() {
               remarks,
               reviews,
             },
+            { signal: controller.signal },
           );
-          setError('');
+          if (mountedRef.current) setError('');
           updateJob(response.data);
+          if (
+            mountedRef.current
+            && annotationGenerationRef.current === generation
+          ) {
+            setAnnotationSaveStatus('saved');
+          }
           return response.data;
         } catch (saveError: unknown) {
+          if (isRequestCancelled(saveError)) return null;
           if (detachedJobIdsRef.current.has(currentJob.jobId)) {
             return null;
           }
-          setError(readError(saveError));
-          if (
-            (saveError as { response?: { status?: number } }).response?.status
-            === 409
-          ) {
+          if (mountedRef.current) {
+            setError(readError(saveError));
+            setAnnotationSaveStatus('error');
+          }
+          if (readStatus(saveError) === 409) {
             await refresh(currentJob.jobId);
           }
           throw saveError;
+        } finally {
+          releaseRequestController(controller);
         }
       });
     return annotationQueueRef.current;
-  }, [refresh, updateJob]);
+  }, [
+    createRequestController,
+    refresh,
+    releaseRequestController,
+    updateJob,
+  ]);
 
   const finalize = useCallback(async () => {
     const currentJob = jobRef.current;
     if (!currentJob) return null;
+    const controller = createRequestController();
+    setIsFinalizing(true);
     try {
       const response = await api.post<AssetComparisonJob>(
         `/tools/asset/jobs/${currentJob.jobId}/finalize`,
+        undefined,
+        { signal: controller.signal },
       );
-      setError('');
+      if (mountedRef.current) setError('');
       updateJob(response.data);
       return response.data;
     } catch (finalizeError: unknown) {
-      setError(readError(finalizeError));
+      if (!isRequestCancelled(finalizeError) && mountedRef.current) {
+        setError(readError(finalizeError));
+      }
       throw finalizeError;
+    } finally {
+      releaseRequestController(controller);
+      if (mountedRef.current) setIsFinalizing(false);
     }
-  }, [updateJob]);
+  }, [createRequestController, releaseRequestController, updateJob]);
 
   const retry = useCallback(async (artifactKey: string) => {
     const currentJob = jobRef.current;
     if (!currentJob) return null;
+    const controller = createRequestController();
+    setRetryingArtifact(artifactKey);
     try {
       const response = await api.post<AssetComparisonJob>(
         `/tools/asset/jobs/${currentJob.jobId}/artifacts/${artifactKey}/retry`,
+        undefined,
+        { signal: controller.signal },
       );
-      setError('');
+      if (mountedRef.current) setError('');
       updateJob(response.data);
       return response.data;
     } catch (retryError: unknown) {
-      setError(readError(retryError));
+      if (!isRequestCancelled(retryError) && mountedRef.current) {
+        setError(readError(retryError));
+      }
       throw retryError;
+    } finally {
+      releaseRequestController(controller);
+      if (mountedRef.current) setRetryingArtifact('');
     }
-  }, [updateJob]);
+  }, [createRequestController, releaseRequestController, updateJob]);
 
   const cancel = useCallback(async () => {
     const currentJob = jobRef.current;
     if (!currentJob) return null;
-    const response = await api.delete<AssetComparisonJob>(
-      `/tools/asset/jobs/${currentJob.jobId}`,
-    );
-    updateJob(response.data);
-    return response.data;
-  }, [updateJob]);
+    const controller = createRequestController();
+    setIsCancelling(true);
+    try {
+      const response = await api.delete<AssetComparisonJob>(
+        `/tools/asset/jobs/${currentJob.jobId}`,
+        { signal: controller.signal },
+      );
+      if (mountedRef.current) setError('');
+      updateJob(response.data);
+      return response.data;
+    } catch (cancelError: unknown) {
+      if (!isRequestCancelled(cancelError) && mountedRef.current) {
+        setError(readError(cancelError));
+      }
+      throw cancelError;
+    } finally {
+      releaseRequestController(controller);
+      if (mountedRef.current) setIsCancelling(false);
+    }
+  }, [createRequestController, releaseRequestController, updateJob]);
 
   const reset = useCallback(async () => {
     const currentJobId = (
@@ -243,9 +370,12 @@ export function useAssetComparisonJob() {
       detachedJobIdsRef.current.add(currentJobId);
     }
     annotationQueueRef.current = Promise.resolve(null);
+    annotationGenerationRef.current += 1;
     jobRef.current = null;
     setJob(null);
     setError('');
+    setExpiredJobId('');
+    setAnnotationSaveStatus('idle');
     sessionStorage.removeItem(STORAGE_KEY);
   }, []);
 
@@ -263,6 +393,12 @@ export function useAssetComparisonJob() {
   return {
     job,
     error,
+    expiredJobId,
+    isStarting,
+    isFinalizing,
+    isCancelling,
+    retryingArtifact,
+    annotationSaveStatus,
     start,
     refresh,
     saveAnnotations,
