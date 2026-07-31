@@ -227,6 +227,13 @@ class AssetComparisonJobManager:
         }
         with self._lock, SessionLocal() as db:
             job = self._get_owned_job(db, user_id, job_id)
+            current_remarks = _loads(job.remarks_json, {})
+            current_reviews = _loads(job.reviews_json, {})
+            if (
+                current_remarks == normalized_remarks
+                and current_reviews == normalized_reviews
+            ):
+                return self._serialize(job)
             if job.annotation_revision != expected_revision:
                 raise AssetComparisonJobConflictError("备注已被更新，请刷新后重试")
 

@@ -1578,8 +1578,9 @@ def _build_complete_export(
             SAVE_CHECK_PATH, f"TE&PE资产对比_{this_month_str}对比总结.pdf"
         )
 
-        if os.path.exists(save_all_path):
-            os.remove(save_all_path)
+        for output_path in (save_all_path, save_pdf_path):
+            if os.path.exists(output_path):
+                os.remove(output_path)
 
         # Step 1: 结果表 Excel 模版导出
         step1_started_at = perf_counter()
@@ -1982,15 +1983,15 @@ def _build_complete_export(
         )
 
         try:
-            summary_ok = False
             try:
                 summary_ok = excel_sheet_to_pdf(
                     save_all_path, "差异总结", summary_pdf_path
                 )
             except Exception as sum_e:
-                logger.warning(f"总结PDF生成失败: {sum_e}")
+                raise RuntimeError("总结 PDF 生成失败") from sum_e
+            if not summary_ok or not os.path.exists(summary_pdf_path):
+                raise RuntimeError("总结 PDF 生成失败")
 
-            detail_ok = False
             if sheet_data_dict:
                 try:
                     detail_ok = create_pdf_from_sheets(
@@ -1999,32 +2000,30 @@ def _build_complete_export(
                         f"TE&PE资产对比_{this_month_str}详细差异",
                     )
                 except Exception as det_e:
-                    logger.warning(f"明细PDF生成失败: {det_e}")
+                    raise RuntimeError("明细 PDF 生成失败") from det_e
+                if not detail_ok or not os.path.exists(detail_pdf_path):
+                    raise RuntimeError("明细 PDF 生成失败")
 
-            if (
-                summary_ok
-                and detail_ok
-                and os.path.exists(summary_pdf_path)
-                and os.path.exists(detail_pdf_path)
-            ):
+                merger = PdfMerger()
                 try:
-                    merger = PdfMerger()
                     merger.append(summary_pdf_path)  # 差异总结
                     merger.append(detail_pdf_path)  # 详细差异
                     merger.write(save_pdf_path)
-                    merger.close()
-                    pdf_ok = True
                 except Exception as merge_e:
-                    logger.warning(f"PDF合并失败: {merge_e}")
-
-            if not pdf_ok and summary_ok and os.path.exists(summary_pdf_path):
-                import shutil
-
+                    raise RuntimeError("PDF 合并失败") from merge_e
+                finally:
+                    merger.close()
+            else:
                 shutil.copy2(summary_pdf_path, save_pdf_path)
-                pdf_ok = True
 
+            pdf_ok = (
+                os.path.isfile(save_pdf_path) and os.path.getsize(save_pdf_path) > 0
+            )
+            if not pdf_ok:
+                raise RuntimeError("PDF 文件生成失败")
         except Exception as pdf_e:
             logger.warning(f"PDF生成处理出错: {pdf_e}")
+            raise
 
         finally:
             for tmp in [summary_pdf_path, detail_pdf_path]:
