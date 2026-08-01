@@ -39,3 +39,7 @@ design-demos/
 
 # Browser automation artifacts
 .playwright-mcp/
+
+# Build artifacts (scripts/build-bundle.py)
+build/
+*.egg-info/

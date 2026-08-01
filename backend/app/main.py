@@ -1,8 +1,10 @@
 import asyncio
 from contextlib import suppress
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from loguru import logger
 from starlette.formparsers import MultiPartParser
 
@@ -48,6 +50,37 @@ app.add_middleware(
 
 # Mount all API routes from the single API aggregator
 app.include_router(api_router, prefix="/api/v1")
+
+# ===== 前端打包产物托管（可选挂载） =====
+# 前端构建产物目录的候选定位方式（按优先级依次尝试）：
+#   1) 仓库布局：backend/app/main.py 的 ../.. = 仓库根，其下 frontend/dist；
+#      开发模式（源码直接运行）时使用。
+#   2) Nuitka frozen 布局：打包时用 --include-data-dir=<dist>=frontend/dist
+#      把构建产物放进 bundle，运行时位于 <bundle>/frontend/dist/。
+#      Nuitka 编译后 app/main.py 的 __file__ 指向 <bundle>/app/main.py（虚拟路径），
+#      因此 parents[1] 即 bundle 目录（实测：parents[2] 是 bundle 的父目录、
+#      parent 是 <bundle>/app，均不对），与 --output-dir/产物重命名无关，
+#      见 docs/research/windows-offline-deployment.md §7）。
+# Nuitka 检测：__compiled__ 是 Nuitka 注入的模块级内置（类似 __file__），
+# 普通 CPython 下不存在（NameError），官方推荐用法即 try/except 属性访问。
+# （注意：import __compiled__ 在 Nuitka 4.1.3 下不可用，实测 ModuleNotFoundError；
+#  必须以模块属性形式访问，且其 containing_dir 是 bundle 的父目录，因此数据路径
+#  用 __file__ 的 parents[1] 定位，而不是 containing_dir。）
+try:
+    __compiled__  # noqa: B018 - Nuitka 注入的伪模块，用于检测 frozen 运行
+    _NUITKA_FROZEN = True
+except NameError:
+    _NUITKA_FROZEN = False
+
+FRONTEND_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+if not FRONTEND_DIST_DIR.is_dir() and _NUITKA_FROZEN:
+    FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+HAS_FRONTEND_BUILD = FRONTEND_DIST_DIR.is_dir()
+
+if HAS_FRONTEND_BUILD:
+    # 低优先级挂载：普通 path operation（含 /api/v1/*）优先，
+    # fallback="auto" 使 SPA 路由回退到 index.html。
+    app.frontend("/", directory=FRONTEND_DIST_DIR)
 
 artifact_cleanup_task: asyncio.Task[None] | None = None
 
@@ -128,4 +161,9 @@ async def shutdown_task_artifact_cleanup() -> None:
 
 @app.get("/")
 def read_root():
+    if HAS_FRONTEND_BUILD:
+        # 存在前端构建产物时直接返回入口页内容（而非 307 重定向到 /index.html）：
+        # 重定向会让浏览器地址栏停在 /index.html，而 React Router（BrowserRouter）
+        # 路由表里没有该路径，导致 "No routes matched" 白屏。
+        return FileResponse(FRONTEND_DIST_DIR / "index.html")
     return {"message": "Welcome to ToolHub API"}
