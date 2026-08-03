@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import api from '../api/axios';
+import { realtimeClient } from '../lib/realtime';
+import { useToolsMetaRealtimeInvalidation } from '../hooks/useToolsMeta';
 import { AuthContext, type User } from '../context/AuthContext';
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  useToolsMetaRealtimeInvalidation();
 
   const login = useCallback((authenticatedUser: User) => {
     setUser(authenticatedUser);
@@ -18,6 +21,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(null);
     }
   }, []);
+
+  // 登录后建立全站唯一实时通道；登出或未认证时断开
+  useEffect(() => {
+    if (!user) {
+      realtimeClient.stop();
+      return;
+    }
+    realtimeClient.start();
+    return () => {
+      realtimeClient.stop();
+    };
+  }, [user]);
 
   useEffect(() => {
     let ignore = false;

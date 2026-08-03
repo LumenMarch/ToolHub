@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
-import { queryOptions, useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo } from 'react';
+import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../api/axios';
 import { toolsConfig } from '../config/tools';
 import type { ToolDefinition } from '../config/tools';
+import { realtimeClient } from '../lib/realtime';
 
 export interface ToolMetaOverride {
   tool_id: string;
@@ -44,6 +45,18 @@ function resolveVisibleTools(overrides: ToolMetaOverride[]) {
   }
 
   return visibleTools.sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+/** 登录后全局订阅：tools_meta.updated → 失效缓存并 REST 重拉。 */
+export function useToolsMetaRealtimeInvalidation() {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    return realtimeClient.subscribe((event) => {
+      if (event.type === 'tools_meta.updated') {
+        void queryClient.invalidateQueries({ queryKey: toolsMetaQueryKey });
+      }
+    });
+  }, [queryClient]);
 }
 
 export function useVisibleTools() {

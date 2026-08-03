@@ -9,6 +9,7 @@ from app.api.endpoints import (
     asset_comparison,
     attendance,
     auth,
+    realtime,
     sixty_seconds,
     string_tools,
     tools_meta,
@@ -22,6 +23,9 @@ api_router = APIRouter()
 # Register core endpoints
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
+
+# 实时通知 WebSocket（登录后单一通道，事件仅通知）
+api_router.include_router(realtime.router, prefix="/realtime", tags=["realtime"])
 
 # Register Tool endpoints dynamically
 # To add a new tool, import its router and include it here

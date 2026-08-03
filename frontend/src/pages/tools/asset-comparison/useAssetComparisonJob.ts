@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../../../api/axios';
+import { realtimeClient } from '../../../lib/realtime';
 import type { AssetComparisonInputs, AssetComparisonJob } from './types';
 
 const STORAGE_KEY = 'asset-comparison-active-job';
@@ -183,13 +184,37 @@ export function useAssetComparisonJob() {
     };
   }, [refresh]);
 
+  // WS 健康时靠 job.updated/terminal 触发 refresh；断开则恢复 1s 轮询
+  const [wsConnected, setWsConnected] = useState(() =>
+    realtimeClient.isConnected(),
+  );
+
+  useEffect(() => {
+    return realtimeClient.subscribeConnection(setWsConnected);
+  }, []);
+
+  useEffect(() => {
+    return realtimeClient.subscribe((event) => {
+      if (event.type !== 'job.updated' && event.type !== 'job.terminal') {
+        return;
+      }
+      const jobId = typeof event.job_id === 'string' ? event.job_id : '';
+      if (!jobId) return;
+      const activeId = jobRef.current?.jobId;
+      const storedId = sessionStorage.getItem(STORAGE_KEY);
+      if (jobId !== activeId && jobId !== storedId) return;
+      void refresh(jobId);
+    });
+  }, [refresh]);
+
   useEffect(() => {
     if (!job || !POLLING_STATUSES.has(job.status)) return;
+    if (wsConnected) return;
     const timer = window.setTimeout(() => {
       void refresh(job.jobId);
     }, 1000);
     return () => window.clearTimeout(timer);
-  }, [job, refresh]);
+  }, [job, refresh, wsConnected]);
 
   const start = useCallback(async (inputs: AssetComparisonInputs) => {
     const controller = createRequestController();
