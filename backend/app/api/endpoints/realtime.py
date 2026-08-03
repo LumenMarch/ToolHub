@@ -20,6 +20,15 @@ from app.services.realtime.hub import realtime_hub
 router = APIRouter()
 
 
+def _token_version_from_payload(payload: dict) -> int:
+    """从 JWT payload 读取 tv；缺省或非法视为 0。"""
+    raw = payload.get("tv", 0)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _resolve_user_id_from_cookie(websocket: WebSocket) -> int | None:
     """从会话 Cookie 解析当前用户 id；无效则返回 None。"""
     token = websocket.cookies.get(settings.AUTH_COOKIE_NAME)
@@ -35,6 +44,7 @@ def _resolve_user_id_from_cookie(websocket: WebSocket) -> int | None:
         username = payload.get("sub")
         if not username or not isinstance(username, str):
             return None
+        token_version = _token_version_from_payload(payload)
     except InvalidTokenError:
         return None
 
@@ -42,6 +52,9 @@ def _resolve_user_id_from_cookie(websocket: WebSocket) -> int | None:
     try:
         user = get_user_by_username(db, username=username)
         if user is None or not user.is_active:
+            return None
+        # 与 HTTP get_current_user 一致：tv 不匹配则拒绝握手
+        if int(user.token_version or 0) != token_version:
             return None
         return int(user.id)
     finally:
@@ -72,7 +85,7 @@ async def realtime_ws(websocket: WebSocket) -> None:
                 await websocket.send_text(
                     json.dumps({"type": "pong"}, separators=(",", ":"))
                 )
-            # 其它客户端消息 Phase-1 忽略
+            # 其它客户端消息忽略（WS 不做命令通道）
     except WebSocketDisconnect:
         pass
     finally:

@@ -34,6 +34,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [user]);
 
+  // C2/C3：权限变更刷新 /users/me；会话吊销立即清本地态
+  useEffect(() => {
+    if (!user) return;
+
+    return realtimeClient.subscribe((event) => {
+      if (event.type === 'permissions.updated') {
+        void api
+          .get<User>('/users/me')
+          .then((response) => {
+            setUser(response.data);
+          })
+          .catch(() => {
+            // 401 等由 axios unauthorized 处理
+          });
+        return;
+      }
+
+      if (event.type === 'session.revoked') {
+        realtimeClient.stop();
+        setUser(null);
+        // 尽力清 cookie；失败也已本地登出
+        void api.post('/auth/logout').catch(() => undefined);
+      }
+    });
+  }, [user]);
+
   useEffect(() => {
     let ignore = false;
 

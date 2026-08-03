@@ -47,7 +47,6 @@ ToolHub Phase-1 使用 **WebSocket** 作为登录后的实时通知通道；**RE
 - tus 上传进度、WS 帧内全量快照、客户端经 WS 发业务命令
 - Redis 或其它外部 broker
 
-## Phase-2（仅备忘，本 ADR 不实现）
+## Phase-2
 
-- C2 / C3：结合 `token_version` 的权限与会话失效实时通知
-- 多实例：`publish` 后端换 Redis（或等价）并保持事件契约不变
+- C2 / C3 与可选 Redis：见 [ADR-0002](./0002-session-token-version-and-permission-events.md)

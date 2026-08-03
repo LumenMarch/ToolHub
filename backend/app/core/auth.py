@@ -31,6 +31,15 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return encoded_jwt
 
 
+def _token_version_from_payload(payload: dict) -> int:
+    """从 JWT payload 读取 tv；缺省或非法视为 0。"""
+    raw = payload.get("tv", 0)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
 def get_current_user(
     db: Session = Depends(deps.get_db),
     bearer_token: str | None = Depends(oauth2_scheme),
@@ -55,6 +64,7 @@ def get_current_user(
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
+        token_version = _token_version_from_payload(payload)
     except InvalidTokenError:
         raise credentials_exception
 
@@ -62,6 +72,9 @@ def get_current_user(
     if user is None:
         raise credentials_exception
     if not user.is_active:
+        raise credentials_exception
+    # Cookie 与 Bearer 均校验 token_version，吊销后旧会话立即 401
+    if int(user.token_version or 0) != token_version:
         raise credentials_exception
     return user
 

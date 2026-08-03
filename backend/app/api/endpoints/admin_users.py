@@ -14,6 +14,10 @@ from app.crud.crud_user import (
 from app.models.user import User
 from app.schemas.user import UserCreateByAdmin, UserResponse, UserUpdate
 from app.services.audit import log_action
+from app.services.realtime.sessions import (
+    notify_permissions_updated,
+    revoke_user_sessions,
+)
 
 router = APIRouter()
 
@@ -99,6 +103,11 @@ def update_user_endpoint(
             detail="Cannot modify a user with higher privileges",
         )
 
+    # 记录变更意图（update 前），用于安全相关吊销与权限推送
+    roles_changed = user_in.role_ids is not None
+    password_changed = user_in.password is not None
+    deactivated = user_in.is_active is False
+
     updated = update_user(db, user, user_in)
     log_action(
         db,
@@ -110,6 +119,14 @@ def update_user_endpoint(
         # 排除 password，防止明文密码写入审计日志
         detail=user_in.model_dump(exclude_none=True, exclude={"password"}),
     )
+
+    # 停用 / 重置密码：递增 token_version，踢掉全部旧会话
+    if deactivated or password_changed:
+        updated = revoke_user_sessions(db, updated)
+    elif roles_changed:
+        # 仅角色变更：推权限刷新，不强制重新登录
+        notify_permissions_updated(int(updated.id))
+
     return _user_to_response(updated, db)
 
 
@@ -140,6 +157,8 @@ def delete_user_endpoint(
             detail="Cannot delete a user with higher privileges",
         )
     deleted_username = user.username
+    # 先吊销会话（通知在线客户端），再物理删除
+    revoke_user_sessions(db, user)
     delete_user(db, user)
     log_action(
         db,

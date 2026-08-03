@@ -35,10 +35,11 @@ def _authenticate_user(
     return user
 
 
-def _create_user_access_token(username: str) -> str:
+def _create_user_access_token(user) -> str:
+    """签发 access token，嵌入当前 token_version（tv）。"""
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     return create_access_token(
-        data={"sub": username},
+        data={"sub": user.username, "tv": int(user.token_version or 0)},
         expires_delta=access_token_expires,
     )
 
@@ -117,7 +118,7 @@ def login_for_access_token(
         action="user.login",
         detail={"method": "token"},
     )
-    access_token = _create_user_access_token(user.username)
+    access_token = _create_user_access_token(user)
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -137,7 +138,7 @@ def login_for_session(
         action="user.login",
         detail={"method": "session"},
     )
-    access_token = _create_user_access_token(user.username)
+    access_token = _create_user_access_token(user)
     _set_session_cookie(response, access_token)
     return _user_to_response(user, db)
 

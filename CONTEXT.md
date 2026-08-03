@@ -10,3 +10,9 @@ _Avoid_: 伪造百分比进度、与上传进度（tus）混为一谈。
 
 **Tools Meta（工具元数据）**: 管理员对工具目录项的运行时覆盖（启用/禁用、排序、自定义名称与描述），影响主控台可见工具列表。  
 _Avoid_: 与前端静态 `toolsConfig` 定义本身混淆；静态配置仍是代码源，元数据是覆盖层。
+
+**Session Revocation（会话吊销）**: 通过递增用户 `token_version` 使既有 JWT（Cookie 与 Bearer）立即失效，并可选推送 `session.revoked` 通知客户端登出。用于停用、重置密码、删除用户等安全操作；普通登出只清本机 Cookie，不吊销其它设备。  
+_Avoid_: 把登出当成全设备踢下线；把推送帧当作鉴权真相（HTTP 401 / `tv` 校验才是）。
+
+**Permission Push（权限推送）**: 用户角色、角色权限变更或角色删除后的 `permissions.updated` 通知，提示客户端重新拉取 `/users/me` 以更新守卫与菜单，默认不强制重新登录。  
+_Avoid_: 与会话吊销混淆；在 WS 帧内携带完整权限列表作为真相源。

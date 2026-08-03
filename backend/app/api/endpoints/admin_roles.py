@@ -17,6 +17,10 @@ from app.crud.crud_role import (
 from app.crud.crud_user import get_user_by_id
 from app.models.user import User
 from app.services.audit import log_action
+from app.services.realtime.sessions import (
+    notify_permissions_updated,
+    notify_role_permissions_updated,
+)
 
 router = APIRouter()
 
@@ -151,6 +155,9 @@ def delete_role_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete a role assigned to yourself",
         )
+    # 删除前记下受影响用户；CASCADE 去掉关联后权限集已变
+    affected_user_ids = sorted({int(user.id) for user in role.users})
+    role_name = role.name
     delete_role(db, role)
     log_action(
         db,
@@ -159,8 +166,10 @@ def delete_role_endpoint(
         action="role.delete",
         target_type="role",
         target_id=role_id,
-        detail={"name": role.name},
+        detail={"name": role_name},
     )
+    for uid in affected_user_ids:
+        notify_permissions_updated(uid)
 
 
 # ===== 角色权限管理 =====
@@ -201,6 +210,8 @@ def update_role_permissions(
         target_id=role.id,
         detail={"permission_ids": perm_in.permission_ids},
     )
+    # 持有该角色的用户权限集已变，推送刷新 /users/me
+    notify_role_permissions_updated(db, int(updated.id))
     return updated
 
 
@@ -278,6 +289,7 @@ def update_user_roles(
         target_id=user.id,
         detail={"username": user.username, "role_ids": roles_in.role_ids},
     )
+    notify_permissions_updated(int(user.id))
     return [
         {
             "id": r.id,
