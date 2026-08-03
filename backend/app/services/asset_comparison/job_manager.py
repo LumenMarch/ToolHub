@@ -663,6 +663,8 @@ class AssetComparisonJobManager:
     def cleanup(self) -> None:
         now = _utcnow()
         expired_job_files = []
+        # 提交后再推送，避免持锁 publish；收集 (job_id, user_id, status)
+        expired_notifies: list[tuple[str, int, str]] = []
         with self._lock, SessionLocal() as db:
             active_expired = (
                 db.query(AssetComparisonJob)
@@ -698,6 +700,7 @@ class AssetComparisonJobManager:
                 self._mark_expired_state(job, artifacts)
                 self._store_artifacts(job, artifacts)
                 expired_job_files.append((job.user_id, job.id))
+                expired_notifies.append((job.id, job.user_id, job.status))
 
             terminal_jobs = (
                 db.query(AssetComparisonJob)
@@ -709,6 +712,10 @@ class AssetComparisonJobManager:
                 self._delete_job_files(job.user_id, job.id)
                 db.delete(job)
             db.commit()
+
+        # 过期终态通知：前端已停轮询，需靠 job.terminal 刷新 UI
+        for job_id, user_id, status in expired_notifies:
+            self._notify_job(job_id=job_id, user_id=user_id, status=status)
 
         for user_id, job_id in expired_job_files:
             self._delete_job_files(user_id, job_id)

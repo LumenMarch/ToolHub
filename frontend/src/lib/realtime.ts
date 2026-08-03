@@ -123,13 +123,15 @@ class RealtimeClient {
 
     socket.onopen = () => {
       if (this.socket !== socket) return;
-      this.backoffMs = INITIAL_BACKOFF_MS;
+      // 不在 onopen 重置退避：后端可能 accept 后立刻 1008 关闭
       this.setState('open');
       this.startPing();
     };
 
     socket.onmessage = (message) => {
       if (this.socket !== socket) return;
+      // 收到任意消息才视为连接健康，重置重连退避
+      this.backoffMs = INITIAL_BACKOFF_MS;
       let event: RealtimeEvent;
       try {
         event = JSON.parse(String(message.data)) as RealtimeEvent;
@@ -151,14 +153,22 @@ class RealtimeClient {
       // onclose 会处理重连
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (this.socket !== socket) return;
       this.socket = null;
       this.clearPing();
       this.setState('closed');
-      if (this.shouldRun) {
-        this.scheduleReconnect();
+      if (!this.shouldRun) return;
+
+      // 鉴权/策略失败：停止重连，复用 unauthorized 清会话
+      if (event.code === 1008) {
+        this.shouldRun = false;
+        this.clearReconnect();
+        window.dispatchEvent(new Event('unauthorized'));
+        return;
       }
+
+      this.scheduleReconnect();
     };
   }
 
