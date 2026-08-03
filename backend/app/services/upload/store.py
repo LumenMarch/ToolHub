@@ -4,7 +4,6 @@
 完成后发布到用户级内容缓存，上传句柄只保留摘要引用。
 """
 
-import fcntl
 import hashlib
 import json
 import os
@@ -13,6 +12,8 @@ import time
 import uuid
 from collections.abc import AsyncIterable
 from pathlib import Path
+
+import portalocker
 
 from app.services.task_artifacts import (
     CachedBlob,
@@ -100,21 +101,21 @@ class UploadStore:
         os.replace(temporary_path, path)
 
     def _lock_file(self, fp) -> None:
-        """获取 POSIX 排他锁（写锁）。"""
+        """获取跨平台排他锁（写锁，非阻塞）。"""
         try:
-            Lockable = getattr(fp, "buffer", None) or fp  # noqa: B009
-            fcntl.flock(Lockable, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
+            lockable = getattr(fp, "buffer", None) or fp  # noqa: B009
+            portalocker.lock(lockable, portalocker.LOCK_EX | portalocker.LOCK_NB)
+        except portalocker.AlreadyLocked as exc:
             raise UploadWriteConflictError("上传资源正在写入，请稍后重试") from exc
-        except OSError:
-            # 部分平台不支持 flock，退化为无锁（风险可接受）
+        except portalocker.LockException:
+            # 部分平台不支持文件锁，退化为无锁（风险可接受）
             pass
 
     def _unlock_file(self, fp) -> None:
         try:
-            Lockable = getattr(fp, "buffer", None) or fp  # noqa: B009
-            fcntl.flock(Lockable, fcntl.LOCK_UN)
-        except OSError:
+            lockable = getattr(fp, "buffer", None) or fp  # noqa: B009
+            portalocker.unlock(lockable)
+        except portalocker.LockException:
             pass
 
     # --------------------------------------------------------------- public API
