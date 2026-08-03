@@ -16,6 +16,8 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     last_login_at = Column(DateTime, nullable=True)
+    # JWT 会话版本：递增后旧 token（cookie / bearer）全部失效
+    token_version = Column(Integer, nullable=False, default=0, server_default="0")
 
     roles = relationship(
         "Role",

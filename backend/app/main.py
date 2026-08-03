@@ -10,7 +10,7 @@ from starlette.formparsers import MultiPartParser
 
 from app.api.api_router import api_router
 from app.db.base_class import Base
-from app.db.session import engine
+from app.db.session import engine, ensure_schema_compat
 from app.seed import run_seed
 
 # 增大 Starlette multipart 上传限制（默认 max_part_size 仅 1MB，Excel 文件轻松超标）
@@ -18,6 +18,8 @@ MultiPartParser.max_part_size = 100 * 1024 * 1024  # 单个 part 最大 100MB
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
+ensure_schema_compat()
+
 
 # 写入默认权限与角色（幂等 — 已有数据时跳过）
 run_seed()
@@ -120,10 +122,13 @@ async def cleanup_task_artifacts_periodically() -> None:
 
 @app.on_event("startup")
 async def bind_realtime_hub_loop() -> None:
-    """绑定实时 hub 到主事件循环，供工作线程跨线程 publish。"""
+    """绑定实时 hub 到主事件循环，并尝试启用可选 Redis fan-out。"""
+    from app.core.config import settings
     from app.services.realtime.hub import realtime_hub
 
     realtime_hub.set_event_loop(asyncio.get_running_loop())
+    if settings.REDIS_URL:
+        await realtime_hub.start_redis(settings.REDIS_URL)
 
 
 @app.on_event("startup")
@@ -152,6 +157,14 @@ async def shutdown_asset_comparison_jobs() -> None:
     from app.api.endpoints.asset_comparison import asset_comparison_job_manager
 
     asset_comparison_job_manager.shutdown()
+
+
+@app.on_event("shutdown")
+async def shutdown_realtime_redis() -> None:
+    """关闭可选 Redis Pub/Sub 订阅。"""
+    from app.services.realtime.hub import realtime_hub
+
+    await realtime_hub.stop_redis()
 
 
 @app.on_event("shutdown")

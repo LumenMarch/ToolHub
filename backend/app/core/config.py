@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     AUTH_COOKIE_NAME: str = "toolhub_session"
     AUTH_COOKIE_SECURE: bool = False
+
+    # 可选 Redis：设置后 realtime hub 用 Pub/Sub 跨实例 fan-out；
+    # 未设置或连接失败时自动回落进程内 hub（单实例仍可用）
+    REDIS_URL: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("REDIS_URL", "TOOLHUB_REDIS_URL"),
+    )
 
     # Database
     SQLALCHEMY_DATABASE_URI: str = "sqlite:///./toolhub.db"

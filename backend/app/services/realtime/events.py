@@ -51,3 +51,21 @@ def tools_meta_updated_event() -> dict[str, Any]:
         "type": "tools_meta.updated",
         "at": _at(),
     }
+
+
+def permissions_updated_event(*, user_id: int) -> dict[str, Any]:
+    """用户角色/权限变更通知；客户端应重新 GET /users/me。"""
+    return {
+        "type": "permissions.updated",
+        "user_id": user_id,
+        "at": _at(),
+    }
+
+
+def session_revoked_event(*, user_id: int) -> dict[str, Any]:
+    """会话吊销通知（token_version 已递增）；客户端应登出。"""
+    return {
+        "type": "session.revoked",
+        "user_id": user_id,
+        "at": _at(),
+    }

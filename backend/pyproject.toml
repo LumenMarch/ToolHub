@@ -30,6 +30,11 @@ dependencies = [
     "websockets>=17.0.1",
 ]
 
+[project.optional-dependencies]
+redis = [
+    "redis>=5.0.0",
+]
+
 [dependency-groups]
 dev = [
     "ruff>=0.16.0",

@@ -7,6 +7,8 @@ export type RealtimeEventType =
   | 'job.updated'
   | 'job.terminal'
   | 'tools_meta.updated'
+  | 'permissions.updated'
+  | 'session.revoked'
   | 'pong';
 
 export interface RealtimeEvent {

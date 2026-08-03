@@ -17,6 +17,10 @@ from app.crud.crud_role import (
 from app.crud.crud_user import get_user_by_id
 from app.models.user import User
 from app.services.audit import log_action
+from app.services.realtime.sessions import (
+    notify_permissions_updated,
+    notify_role_permissions_updated,
+)
 
 router = APIRouter()
 
@@ -201,6 +205,8 @@ def update_role_permissions(
         target_id=role.id,
         detail={"permission_ids": perm_in.permission_ids},
     )
+    # 持有该角色的用户权限集已变，推送刷新 /users/me
+    notify_role_permissions_updated(db, int(updated.id))
     return updated
 
 
@@ -278,6 +284,7 @@ def update_user_roles(
         target_id=user.id,
         detail={"username": user.username, "role_ids": roles_in.role_ids},
     )
+    notify_permissions_updated(int(user.id))
     return [
         {
             "id": r.id,
