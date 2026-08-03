@@ -57,8 +57,8 @@ app.include_router(api_router, prefix="/api/v1")
 # 前端构建产物目录的候选定位方式（按优先级依次尝试）：
 #   1) 仓库布局：backend/app/main.py 的 ../.. = 仓库根，其下 frontend/dist；
 #      开发模式（源码直接运行）时使用。
-#   2) Nuitka frozen 布局：打包时用 --include-data-dir=<dist>=frontend/dist
-#      把构建产物放进 bundle，运行时位于 <bundle>/frontend/dist/。
+#   2) Nuitka frozen 布局：打包时用 --include-data-dir=<dist>=frontend
+#      把构建产物放进 bundle，运行时位于 <bundle>/frontend/。
 #      Nuitka 编译后 app/main.py 的 __file__ 指向 <bundle>/app/main.py（虚拟路径），
 #      因此 parents[1] 即 bundle 目录（实测：parents[2] 是 bundle 的父目录、
 #      parent 是 <bundle>/app，均不对），与 --output-dir/产物重命名无关，
@@ -76,7 +76,7 @@ except NameError:
 
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if not FRONTEND_DIST_DIR.is_dir() and _NUITKA_FROZEN:
-    FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+    FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend"
 HAS_FRONTEND_BUILD = FRONTEND_DIST_DIR.is_dir()
 
 if HAS_FRONTEND_BUILD:
