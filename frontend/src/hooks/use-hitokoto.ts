@@ -1,11 +1,27 @@
 import { queryOptions, useQuery } from '@tanstack/react-query';
+import axios from 'axios';
 import api from '../api/axios';
-
-const FALLBACK_HITOKOTO = '落霞与孤鹜齐飞，秋水共长天一色。';
 
 interface HitokotoState {
   text: string | null;
   loading: boolean;
+  /** 后端/API 不可用（网络错误、网关 5xx、或探测失败） */
+  unreachable: boolean;
+  error: boolean;
+}
+
+/** 判断请求失败是否表示后端/API 不可达，供登录页探测与提交共用。 */
+export function isBackendUnreachable(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) {
+    // 非 axios 异常（如空响应抛错）对登录探测同样视为不可用
+    return true;
+  }
+  if (!err.response || err.code === 'ERR_NETWORK' || err.code === 'ECONNABORTED') {
+    return true;
+  }
+  const status = err.response.status;
+  // 开发代理/反向代理在上游挂掉时常返回 502/503/504
+  return status === 502 || status === 503 || status === 504;
 }
 
 const hitokotoQueryOptions = queryOptions({
@@ -13,16 +29,27 @@ const hitokotoQueryOptions = queryOptions({
   queryFn: () =>
     api
       .get<{ hitokoto: string }>('/tools/sixty-seconds/hitokoto')
-      .then((response) => response.data?.hitokoto?.trim() || FALLBACK_HITOKOTO),
+      .then((response) => {
+        const text = response.data?.hitokoto?.trim();
+        if (!text) {
+          throw new Error('每日一言响应为空');
+        }
+        return text;
+      }),
   staleTime: Infinity,
   retry: 1,
 });
 
 export function useHitokoto(): HitokotoState {
   const query = useQuery(hitokotoQueryOptions);
+  // 登录页用 hitokoto 作 API 探活：任何失败都视为服务不可用，避免左侧空白
+  const isUnreachable = Boolean(query.isError);
+
   return {
-    text: query.data ?? (query.isError ? FALLBACK_HITOKOTO : null),
+    text: query.data ?? null,
     loading: query.isPending,
+    unreachable: isUnreachable,
+    error: query.isError,
   };
 }
 

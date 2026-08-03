@@ -1,11 +1,14 @@
 import React, { useState, useContext, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
+import axios from 'axios';
 import api from '../api/axios';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { LoadingSignal } from '../components/LoadingSignal';
 import { gsap } from 'gsap';
-import { useHitokoto, splitIntoLines } from '../hooks/use-hitokoto';
+import { useHitokoto, splitIntoLines, isBackendUnreachable } from '../hooks/use-hitokoto';
+
+const UNREACHABLE_ERROR = '暂时无法连接，请稍后重试';
 
 const Login: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -19,7 +22,8 @@ const Login: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
-  const { text: hitokotoText, loading: hitokotoLoading } = useHitokoto();
+  const { text: hitokotoText, loading: hitokotoLoading, unreachable } = useHitokoto();
+  const displayError = error || (unreachable ? UNREACHABLE_ERROR : '');
   const lines = hitokotoText ? splitIntoLines(hitokotoText, 3) : [];
   let lineOffset = 0;
   const displayLines = lines.map((text) => {
@@ -91,8 +95,17 @@ const Login: React.FC = () => {
           );
         }
       }
-    } catch (err: any) {
-      setError(err.response?.data?.detail || '系统发生错误。');
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        if (isBackendUnreachable(err)) {
+          setError(UNREACHABLE_ERROR);
+        } else {
+          const detail = err.response?.data?.detail;
+          setError(typeof detail === 'string' ? detail : '系统发生错误。');
+        }
+      } else {
+        setError(UNREACHABLE_ERROR);
+      }
       if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         gsap.fromTo('.form-wrapper',
           { x: -10 },
@@ -124,7 +137,7 @@ const Login: React.FC = () => {
               detail="等待远端响应"
               className="pt-4"
             />
-          ) : (
+          ) : hitokotoText ? (
             <h1
               ref={titleRef}
               className="text-3xl font-bold leading-[1.2] tracking-tight md:text-4xl lg:text-5xl"
@@ -135,6 +148,15 @@ const Login: React.FC = () => {
                 </div>
               ))}
             </h1>
+          ) : (
+            <div className="space-y-2 font-mono" role="status">
+              <div className="text-sm text-primary uppercase tracking-widest">
+                暂时无法连接
+              </div>
+              <div className="text-xs text-muted-foreground tracking-wider">
+                请检查网络后重试，或稍后再试。
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -142,9 +164,13 @@ const Login: React.FC = () => {
       {/* 右侧极简粗野主义表单 */}
       <div className="flex-1 flex flex-col justify-center p-8 md:p-16 lg:p-24 relative z-10 form-wrapper max-w-2xl">
         <form onSubmit={handleSubmit} className="space-y-12 w-full">
-          {error && (
-            <div id="auth-error" role="alert" className="text-sm font-mono text-primary bg-primary/10 p-4 border-l-2 border-primary uppercase tracking-widest">
-              [ 异常: {error} ]
+          {displayError && (
+            <div
+              id="auth-error"
+              role="alert"
+              className="text-sm font-mono text-primary bg-primary/10 p-4 border-l-2 border-primary uppercase tracking-widest"
+            >
+              [ 异常: {displayError} ]
             </div>
           )}
           
@@ -158,8 +184,8 @@ const Login: React.FC = () => {
               autoComplete="off"
               required
               id="username"
-              aria-invalid={Boolean(error)}
-              aria-describedby={error ? 'auth-error' : undefined}
+              aria-invalid={Boolean(displayError)}
+              aria-describedby={displayError ? 'auth-error' : undefined}
             />
             <label htmlFor="username" className="absolute left-0 top-4 text-muted-foreground font-mono text-sm tracking-widest uppercase transition-[color,font-size,transform] duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-[11px] group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px]">
               身份标识
@@ -175,8 +201,8 @@ const Login: React.FC = () => {
               placeholder=" "
               required
               id="password"
-              aria-invalid={Boolean(error)}
-              aria-describedby={error ? 'auth-error' : undefined}
+              aria-invalid={Boolean(displayError)}
+              aria-describedby={displayError ? 'auth-error' : undefined}
             />
             <label htmlFor="password" className="absolute left-0 top-4 text-muted-foreground font-mono text-sm tracking-widest uppercase transition-[color,font-size,transform] duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-[11px] group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px]">
               安全密钥
@@ -186,8 +212,8 @@ const Login: React.FC = () => {
           <div className="pt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-8">
             <button
               type="submit"
-              disabled={loading}
-              className="text-4xl md:text-5xl font-bold uppercase tracking-tighter hover:text-primary transition-colors active:scale-95 origin-left"
+              disabled={loading || unreachable}
+              className="text-4xl md:text-5xl font-bold uppercase tracking-tighter hover:text-primary transition-colors active:scale-95 origin-left disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? '等待...' : (isLogin ? '授权访问 ↗' : '创建身份 ↗')}
             </button>
