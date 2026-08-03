@@ -119,6 +119,14 @@ async def cleanup_task_artifacts_periodically() -> None:
 
 
 @app.on_event("startup")
+async def bind_realtime_hub_loop() -> None:
+    """绑定实时 hub 到主事件循环，供工作线程跨线程 publish。"""
+    from app.services.realtime.hub import realtime_hub
+
+    realtime_hub.set_event_loop(asyncio.get_running_loop())
+
+
+@app.on_event("startup")
 async def start_task_artifact_cleanup() -> None:
     """启动清理任务并定期回收缓存空间。"""
     global artifact_cleanup_task

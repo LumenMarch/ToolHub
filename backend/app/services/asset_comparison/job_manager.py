@@ -37,6 +37,8 @@ from app.services.asset_comparison.domain import (
     normalize_module_results,
     transition_allowed,
 )
+from app.services.realtime.events import job_terminal_event, job_updated_event
+from app.services.realtime.hub import realtime_hub
 from app.services.task_artifacts import TaskArtifactStore, task_artifact_store
 
 TASK_TOOL = "asset-comparison"
@@ -121,6 +123,14 @@ class AssetComparisonJobManager:
                 f"不允许的资产核对任务状态转换: {job.status} -> {next_status}"
             )
         job.status = next_status
+
+    def _notify_job(self, *, job_id: str, user_id: int, status: str) -> None:
+        """任务状态落库后推送实时通知（仅 owner；终态用 job.terminal）。"""
+        if status in JOB_TERMINAL_STATUSES:
+            event = job_terminal_event(job_id=job_id, user_id=user_id, status=status)
+        else:
+            event = job_updated_event(job_id=job_id, user_id=user_id, status=status)
+        realtime_hub.publish(event, user_id=user_id)
 
     def create_job(
         self,
@@ -252,6 +262,7 @@ class AssetComparisonJobManager:
             ),
             annotation_revision=0,
         )
+        self._notify_job(job_id=job_id, user_id=user_id, status="queued")
         self._executor.submit(self._execute_worker, job_id)
         return response, False
 
@@ -344,16 +355,19 @@ class AssetComparisonJobManager:
 
             artifacts = self._load_artifacts(job)
             final_artifact = artifacts.get("final_bundle", {})
+            status_changed = False
             if final_artifact.get("status") == "ready":
                 final_artifact["status"] = "stale"
                 artifacts["final_bundle"] = final_artifact
                 self._store_artifacts(job, artifacts)
                 if job.status == "complete":
                     self._transition(job, "base_ready")
+                    status_changed = True
 
             db.commit()
             db.refresh(job)
             response = self._serialize(job)
+            notify = (job.id, job.user_id, job.status) if status_changed else None
             self._log_stage(
                 job_id=job.id,
                 user_id=job.user_id,
@@ -361,7 +375,9 @@ class AssetComparisonJobManager:
                 status="ready",
                 annotation_revision=job.annotation_revision,
             )
-            return response
+        if notify is not None:
+            self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])
+        return response
 
     def finalize(self, *, user_id: int, job_id: str) -> dict:
         with self._lock, SessionLocal() as db:
@@ -393,7 +409,9 @@ class AssetComparisonJobManager:
             remarks = _loads(job.remarks_json, {})
             reviews = _loads(job.reviews_json, {})
             db.commit()
+            notify = (job.id, job.user_id, job.status)
 
+        self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])
         self._log_stage(
             job_id=job_id,
             user_id=user_id,
@@ -435,6 +453,7 @@ class AssetComparisonJobManager:
             self._transition(job, "running")
             job.updated_at = _utcnow()
             db.commit()
+            notify = (job.id, job.user_id, job.status)
 
         self._log_stage(
             job_id=job_id,
@@ -443,6 +462,7 @@ class AssetComparisonJobManager:
             status="building",
             artifact_key=artifact_key,
         )
+        self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])
         self._executor.submit(self._retry_worker, job_id, artifact_key)
         return self.get_job(user_id=user_id, job_id=job_id)
 
@@ -469,13 +489,22 @@ class AssetComparisonJobManager:
             job.updated_at = _utcnow()
             db.commit()
             db.refresh(job)
+            notify_status = job.status
+            notify_job_id = job.id
+            notify_user_id = job.user_id
             self._log_stage(
                 job_id=job.id,
                 user_id=job.user_id,
                 stage="job_cancel",
                 status=job.status,
             )
-            return self._serialize(job)
+            serialized = self._serialize(job)
+        self._notify_job(
+            job_id=notify_job_id,
+            user_id=notify_user_id,
+            status=notify_status,
+        )
+        return serialized
 
     def purge(self, *, user_id: int, job_id: str) -> None:
         with self._lock, SessionLocal() as db:
@@ -686,6 +715,7 @@ class AssetComparisonJobManager:
         self._cleanup_storage_limit()
 
     def _begin_execute(self, job_id: str) -> int | None:
+        notify: tuple[str, int, str] | None = None
         with self._lock, SessionLocal() as db:
             job = db.get(AssetComparisonJob, job_id)
             if job is None:
@@ -699,29 +729,36 @@ class AssetComparisonJobManager:
                 job.progress_json = _dumps(progress)
                 job.results_json = _dumps(results)
                 db.commit()
+                notify = (job.id, job.user_id, job.status)
+                user_id = None
+            elif job.status != "queued":
                 return None
-            if job.status != "queued":
-                return None
-            self._transition(job, "validating")
-            job.started_at = _utcnow()
-            job.error_message = None
-            job.progress_json = _dumps(
-                calculate_progress(
-                    results,
-                    artifacts,
-                    validation_status="running",
+            else:
+                self._transition(job, "validating")
+                job.started_at = _utcnow()
+                job.error_message = None
+                job.progress_json = _dumps(
+                    calculate_progress(
+                        results,
+                        artifacts,
+                        validation_status="running",
+                    )
                 )
-            )
-            db.commit()
-            self._log_stage(
-                job_id=job.id,
-                user_id=job.user_id,
-                stage="job_validate_inputs",
-                status="running",
-            )
-            return job.user_id
+                db.commit()
+                self._log_stage(
+                    job_id=job.id,
+                    user_id=job.user_id,
+                    stage="job_validate_inputs",
+                    status="running",
+                )
+                notify = (job.id, job.user_id, job.status)
+                user_id = job.user_id
+        if notify is not None:
+            self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])
+        return user_id
 
     def _finish_cancel_if_requested(self, job_id: str) -> bool:
+        notify: tuple[str, int, str] | None = None
         with self._lock, SessionLocal() as db:
             job = db.get(AssetComparisonJob, job_id)
             if job is None:
@@ -739,13 +776,16 @@ class AssetComparisonJobManager:
             job.results_json = _dumps(results)
             job.updated_at = _utcnow()
             db.commit()
+            notify = (job.id, job.user_id, job.status)
             self._log_stage(
                 job_id=job.id,
                 user_id=job.user_id,
                 stage="job_cancel",
                 status="cancelled",
             )
-            return True
+        if notify is not None:
+            self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])
+        return True
 
     def _execute_worker(self, job_id: str) -> None:
         stage_started_at = perf_counter()
@@ -850,6 +890,8 @@ class AssetComparisonJobManager:
                 job.completed_at = _utcnow()
                 job.updated_at = _utcnow()
                 db.commit()
+                notify = (job.id, job.user_id, job.status)
+            self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])
             self._log_stage(
                 job_id=job_id,
                 stage="job_finalize",
@@ -1023,6 +1065,7 @@ class AssetComparisonJobManager:
         )
 
     def _mutate(self, job_id: str, mutator: Callable) -> None:
+        notify: tuple[str, int, str] | None = None
         with self._lock, SessionLocal() as db:
             job = db.get(AssetComparisonJob, job_id)
             if job is None:
@@ -1043,8 +1086,12 @@ class AssetComparisonJobManager:
             job.results_json = _dumps(results)
             job.updated_at = _utcnow()
             db.commit()
+            notify = (job.id, job.user_id, job.status)
+        if notify is not None:
+            self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])
 
     def _refresh_overall_status(self, job_id: str) -> None:
+        notify: tuple[str, int, str] | None = None
         with self._lock, SessionLocal() as db:
             job = db.get(AssetComparisonJob, job_id)
             if job is None or job.status in {
@@ -1077,8 +1124,12 @@ class AssetComparisonJobManager:
             )
             job.updated_at = _utcnow()
             db.commit()
+            notify = (job.id, job.user_id, job.status)
+        if notify is not None:
+            self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])
 
     def _mark_job_failed(self, job_id: str, message: str) -> None:
+        notify: tuple[str, int, str] | None = None
         with self._lock, SessionLocal() as db:
             job = db.get(AssetComparisonJob, job_id)
             if job is None:
@@ -1092,11 +1143,15 @@ class AssetComparisonJobManager:
                 job.progress_json = _dumps(progress)
                 job.results_json = _dumps(results)
                 db.commit()
-                return
-            self._transition(job, "failed")
-            job.error_message = message
-            job.updated_at = _utcnow()
-            db.commit()
+                notify = (job.id, job.user_id, job.status)
+            else:
+                self._transition(job, "failed")
+                job.error_message = message
+                job.updated_at = _utcnow()
+                db.commit()
+                notify = (job.id, job.user_id, job.status)
+        if notify is not None:
+            self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])
 
     def _mark_cancelled_state(
         self,

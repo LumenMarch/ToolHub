@@ -11,6 +11,8 @@ from app.schemas.tool_meta import (
     ToolMetaUpdate,
 )
 from app.services.audit import log_action
+from app.services.realtime.events import tools_meta_updated_event
+from app.services.realtime.hub import realtime_hub
 
 router = APIRouter()
 
@@ -43,6 +45,7 @@ def update_tool_meta(
         target_id=tool_id,
         detail=meta_in.model_dump(exclude_none=True),
     )
+    realtime_hub.publish(tools_meta_updated_event())
     return meta
 
 
@@ -63,4 +66,5 @@ def bulk_update_tool_metas(
         target_type="tool",
         detail={"count": len(payload.items)},
     )
+    realtime_hub.publish(tools_meta_updated_event())
     return metas
