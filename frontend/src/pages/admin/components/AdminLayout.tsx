@@ -121,7 +121,7 @@ const AdminLayout: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3 md:gap-6 shrink-0">
-              <ThemeToggle variant="ghost" />
+              <ThemeToggle />
               <span className="hidden text-[0.8125rem] font-mono tracking-widest uppercase opacity-50 lg:block">
                 [ 管理员: {user?.username} ]
               </span>
