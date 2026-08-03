@@ -19,8 +19,8 @@ from fastapi import WebSocket
 from loguru import logger
 from starlette.websockets import WebSocketState
 
-# Redis 频道：仅承载 notify-only JSON 信封，事件契约与单机一致
-REDIS_CHANNEL = "toolhub:realtime"
+# 默认频道名；start_redis 可用部署级配置覆盖，避免多部署共用 Redis 串台
+DEFAULT_REDIS_CHANNEL = "toolhub:realtime"
 
 
 class RealtimeHub:
@@ -36,6 +36,7 @@ class RealtimeHub:
         self._redis_pubsub: Any | None = None
         self._redis_task: asyncio.Task[None] | None = None
         self._redis_enabled = False
+        self._redis_channel = DEFAULT_REDIS_CHANNEL
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """在应用 startup 时绑定主事件循环，供工作线程跨线程调度。"""
@@ -126,10 +127,11 @@ class RealtimeHub:
             "event": event,
         }
         text = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+        channel = self._redis_channel
 
         async def do_publish() -> None:
             try:
-                await client.publish(REDIS_CHANNEL, text)
+                await client.publish(channel, text)
             except Exception:
                 logger.warning(
                     "realtime hub: Redis publish 失败 type={}，仅本进程已投递",
@@ -190,10 +192,19 @@ class RealtimeHub:
             for websocket in dead:
                 self.disconnect(uid, websocket)
 
-    async def start_redis(self, url: str) -> None:
+    async def start_redis(
+        self,
+        url: str,
+        *,
+        channel: str | None = None,
+    ) -> None:
         """尝试启用 Redis Pub/Sub；失败则保持进程内 hub，不阻塞启动。"""
         if not url or not url.strip():
             return
+
+        resolved_channel = (channel or DEFAULT_REDIS_CHANNEL).strip()
+        if not resolved_channel:
+            resolved_channel = DEFAULT_REDIS_CHANNEL
 
         try:
             import redis.asyncio as redis_async
@@ -213,7 +224,7 @@ class RealtimeHub:
             )
             await asyncio.wait_for(client.ping(), timeout=2.0)
             pubsub = client.pubsub()
-            await pubsub.subscribe(REDIS_CHANNEL)
+            await pubsub.subscribe(resolved_channel)
         except Exception:
             logger.warning(
                 "realtime hub: Redis 连接失败，回落进程内 hub",
@@ -229,18 +240,23 @@ class RealtimeHub:
 
         self._redis = client
         self._redis_pubsub = pubsub
+        self._redis_channel = resolved_channel
         self._redis_enabled = True
         self._redis_task = asyncio.create_task(
             self._redis_subscriber(),
             name="realtime-redis-subscriber",
         )
-        logger.info("realtime hub: 已启用 Redis Pub/Sub 跨实例 fan-out")
+        logger.info(
+            "realtime hub: 已启用 Redis Pub/Sub 跨实例 fan-out channel={}",
+            resolved_channel,
+        )
 
     async def _redis_subscriber(self) -> None:
         """订阅 Redis 频道，将来自其它实例的事件投递到本机连接。"""
         pubsub = self._redis_pubsub
         if pubsub is None:
             return
+        channel = self._redis_channel
         try:
             while True:
                 message = await pubsub.get_message(
@@ -275,7 +291,7 @@ class RealtimeHub:
             self._redis_enabled = False
         finally:
             with contextlib.suppress(Exception):
-                await pubsub.unsubscribe(REDIS_CHANNEL)
+                await pubsub.unsubscribe(channel)
                 await pubsub.aclose()
 
     async def stop_redis(self) -> None:
@@ -283,6 +299,7 @@ class RealtimeHub:
         task = self._redis_task
         self._redis_task = None
         self._redis_enabled = False
+        channel = self._redis_channel
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -291,7 +308,7 @@ class RealtimeHub:
         self._redis_pubsub = None
         if pubsub is not None:
             with contextlib.suppress(Exception):
-                await pubsub.unsubscribe(REDIS_CHANNEL)
+                await pubsub.unsubscribe(channel)
                 await pubsub.aclose()
         client = self._redis
         self._redis = None

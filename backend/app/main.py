@@ -128,7 +128,10 @@ async def bind_realtime_hub_loop() -> None:
 
     realtime_hub.set_event_loop(asyncio.get_running_loop())
     if settings.REDIS_URL:
-        await realtime_hub.start_redis(settings.REDIS_URL)
+        await realtime_hub.start_redis(
+            settings.REDIS_URL,
+            channel=settings.REALTIME_REDIS_CHANNEL,
+        )
 
 
 @app.on_event("startup")

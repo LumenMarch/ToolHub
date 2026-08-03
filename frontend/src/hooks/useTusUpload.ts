@@ -89,8 +89,17 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
 
   const [state, setState] = useState<UploadState>(createInitialState);
 
-  const uploadRefs = useRef(new Set<tus.Upload>());
-  const abortControllers = useRef(new Set<AbortController>());
+  const uploadRefs = useRef<Set<tus.Upload> | null>(null);
+  if (uploadRefs.current === null) {
+    uploadRefs.current = new Set<tus.Upload>();
+  }
+  const uploads = uploadRefs.current;
+
+  const abortControllers = useRef<Set<AbortController> | null>(null);
+  if (abortControllers.current === null) {
+    abortControllers.current = new Set<AbortController>();
+  }
+  const aborts = abortControllers.current;
 
   const upload = useCallback(
     ({
@@ -102,7 +111,7 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
       const run = async (): Promise<string> => {
         const controller = new AbortController();
         const filename = metadata?.filename || file.name;
-        abortControllers.current.add(controller);
+        aborts.add(controller);
         setState({
           ...createInitialState(),
           status: 'hashing',
@@ -231,12 +240,12 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
                   cacheHit: false,
                   error: null,
                 });
-                uploadRefs.current.delete(uploadInstance);
+                uploads.delete(uploadInstance);
                 onSuccess?.(uploadId);
                 resolve(uploadId);
               },
               onError(err) {
-                uploadRefs.current.delete(uploadInstance);
+                uploads.delete(uploadInstance);
                 reject(err);
               },
               // 关键：允许凭据（Cookie）随请求发送
@@ -247,7 +256,7 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
               storeFingerprintForResuming: false,
             });
 
-            uploadRefs.current.add(uploadInstance);
+            uploads.add(uploadInstance);
             uploadInstance.start();
           });
         } catch (error) {
@@ -266,39 +275,41 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
           onError?.(normalizedError);
           throw normalizedError;
         } finally {
-          abortControllers.current.delete(controller);
+          aborts.delete(controller);
         }
       };
 
       return run();
     },
     [
+      aborts,
       endpoint,
       chunkSize,
       onProgress,
       onChunkComplete,
       onSuccess,
       onError,
+      uploads,
     ],
   );
 
   const abort = useCallback(() => {
-    for (const uploadInstance of uploadRefs.current) {
+    for (const uploadInstance of uploads) {
       void uploadInstance.abort(true);
     }
-    uploadRefs.current.clear();
-    for (const controller of abortControllers.current) {
+    uploads.clear();
+    for (const controller of aborts) {
       controller.abort();
     }
-    abortControllers.current.clear();
+    aborts.clear();
     setState({ ...createInitialState(), status: 'aborted' });
-  }, []);
+  }, [aborts, uploads]);
 
   const reset = useCallback(() => {
-    uploadRefs.current.clear();
-    abortControllers.current.clear();
+    uploads.clear();
+    aborts.clear();
     setState(createInitialState());
-  }, []);
+  }, [aborts, uploads]);
 
   return { ...state, upload, abort, reset };
 }

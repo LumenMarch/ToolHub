@@ -155,6 +155,9 @@ def delete_role_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete a role assigned to yourself",
         )
+    # 删除前记下受影响用户；CASCADE 去掉关联后权限集已变
+    affected_user_ids = sorted({int(user.id) for user in role.users})
+    role_name = role.name
     delete_role(db, role)
     log_action(
         db,
@@ -163,8 +166,10 @@ def delete_role_endpoint(
         action="role.delete",
         target_type="role",
         target_id=role_id,
-        detail={"name": role.name},
+        detail={"name": role_name},
     )
+    for uid in affected_user_ids:
+        notify_permissions_updated(uid)
 
 
 # ===== 角色权限管理 =====

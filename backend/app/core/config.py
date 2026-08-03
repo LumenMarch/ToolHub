@@ -22,6 +22,16 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("REDIS_URL", "TOOLHUB_REDIS_URL"),
     )
+    # 部署级频道名：多套 ToolHub 共用同一 Redis 时必须互不相同，
+    # 避免 user_id 重叠导致 session/permission 事件串台
+    REALTIME_REDIS_CHANNEL: str = Field(
+        default="toolhub:realtime",
+        min_length=1,
+        validation_alias=AliasChoices(
+            "REALTIME_REDIS_CHANNEL",
+            "TOOLHUB_REALTIME_REDIS_CHANNEL",
+        ),
+    )
 
     # Database
     SQLALCHEMY_DATABASE_URI: str = "sqlite:///./toolhub.db"
