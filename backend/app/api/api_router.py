@@ -7,6 +7,7 @@ from app.api.endpoints import (
     admin_tools,
     admin_users,
     asset_comparison,
+    atlas_merge,
     attendance,
     auth,
     realtime,
@@ -37,6 +38,9 @@ api_router.include_router(
 )
 api_router.include_router(
     attendance.router, prefix="/tools/attendance", tags=["attendance"]
+)
+api_router.include_router(
+    atlas_merge.router, prefix="/tools/atlas-merge", tags=["atlas_merge"]
 )
 api_router.include_router(
     sixty_seconds.router, prefix="/tools/sixty-seconds", tags=["sixty_seconds"]
