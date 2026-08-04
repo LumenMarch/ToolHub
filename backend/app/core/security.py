@@ -15,3 +15,12 @@ def get_password_hash(password: str) -> str:
     password_bytes = password.encode("utf-8")[:72]
     hashed_bytes = bcrypt.hashpw(password_bytes, salt)
     return hashed_bytes.decode("utf-8")
+
+
+def _token_version_from_payload(payload: dict) -> int:
+    """从 JWT payload 读取 tv；缺省或非法视为 0。"""
+    raw = payload.get("tv", 0)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0

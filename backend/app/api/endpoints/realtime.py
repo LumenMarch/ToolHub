@@ -13,20 +13,12 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from jwt.exceptions import InvalidTokenError
 
 from app.core.config import settings
+from app.core.security import _token_version_from_payload
 from app.crud.crud_user import get_user_by_username
 from app.db.session import SessionLocal
 from app.services.realtime.hub import realtime_hub
 
 router = APIRouter()
-
-
-def _token_version_from_payload(payload: dict) -> int:
-    """从 JWT payload 读取 tv；缺省或非法视为 0。"""
-    raw = payload.get("tv", 0)
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _resolve_user_id_from_cookie(websocket: WebSocket) -> int | None:
