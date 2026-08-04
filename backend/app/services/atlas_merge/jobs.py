@@ -159,21 +159,22 @@ class AtlasMergeJobRegistry:
             archive_root = extract_archive_zip(content, tmp_dir / "archive")
             report = merge(archive_root, progress=self._make_progress(entry))
             output = csv_text(report).encode("utf-8")
-        except Exception as exc:  # noqa: BLE001 - 终态错误统一由 job 携带
+            timestamp = datetime.now().strftime("%Y%m%d")
+            filename = f"unit_archive_merged_{timestamp}.csv"
+            cached = atlas_merge_result_cache.put(
+                user_id=entry.user_id,
+                filename=filename,
+                content=output,
+            )
+            payload = _build_done_payload(report, cached, filename)
+        except Exception as exc:  # noqa: BLE001 - 终态错误统一由 job 携带（含缓存写入失败）
             logger.exception(f"atlas-merge job 执行失败 job_id={entry.job_id}")
             self._fail(entry, str(exc) or "合并任务执行失败，请稍后重试")
             return
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d")
-        filename = f"unit_archive_merged_{timestamp}.csv"
-        cached = atlas_merge_result_cache.put(
-            user_id=entry.user_id,
-            filename=filename,
-            content=output,
-        )
-        self._complete(entry, _build_done_payload(report, cached, filename))
+        self._complete(entry, payload)
 
         # 成功后才清理源上传，失败保留以便用户重试
         try:

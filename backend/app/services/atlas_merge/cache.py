@@ -74,6 +74,12 @@ class AtlasMergeResultCache:
         filename: str,
         content: bytes,
     ) -> CachedAtlasMergeResult:
+        # 单结果超过缓存上限：明确失败（调用方转 job error），不写入 artifact，
+        # 避免 _evict_overflow 把刚写入的 entry 删掉后仍返回 → dangling entry
+        if len(content) > self.max_bytes:
+            raise ValueError(
+                f"合并结果大小 {len(content)} 字节超过缓存上限 {self.max_bytes} 字节，无法缓存"
+            )
         now_monotonic = time.monotonic()
         result_id = secrets.token_urlsafe(32)
         expires_at = datetime.now(UTC) + timedelta(seconds=self.ttl_seconds)
