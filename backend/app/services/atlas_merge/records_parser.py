@@ -15,6 +15,7 @@ records.csv 列顺序（17 列）：
 from __future__ import annotations
 
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -25,7 +26,17 @@ from app.services.atlas_merge.models import MeasurementItem, PivotData
 # 原 Swift 实现使用 TimeZone.current（运行机器时区），移植时按业务约定固定时区，
 # 保证同一份数据在任何机器上产出完全一致的时间字符串。
 _TIMESTAMP_FORMAT = "%Y/%m/%d %H:%M:%S.%f"
-_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+
+
+@lru_cache(maxsize=1)
+def _shanghai_tz() -> ZoneInfo:
+    """Asia/Shanghai 时区对象（惰性解析）。
+
+    部署环境含 air-gapped Windows，可能无系统 IANA 时区库；解析推迟到首次格式化时
+    执行，并由 tzdata 依赖兜底，避免 import 期 ZoneInfoNotFoundError 拖垮整个后端。
+    """
+    return ZoneInfo("Asia/Shanghai")
+
 
 # records.csv 列索引
 _COL_TEST_NAME = 2
@@ -48,7 +59,7 @@ def _format_timestamp(unix_seconds: str) -> str:
         secs = float(unix_seconds)
     except ValueError:
         return unix_seconds
-    return datetime.fromtimestamp(secs, tz=_SHANGHAI_TZ).strftime(_TIMESTAMP_FORMAT)
+    return datetime.fromtimestamp(secs, tz=_shanghai_tz()).strftime(_TIMESTAMP_FORMAT)
 
 
 def parse_text(text: str, start_time: str, stop_time: str) -> PivotData:
