@@ -29,6 +29,7 @@ dependencies = [
     "rustpy-xlsxwriter>=0.1.0",
     "websockets>=17.0.1",
     "portalocker>=4.1.0",
+    "tzdata>=2026.3",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +39,8 @@ redis = [
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.0",
+    "pytest>=8.0.0",
     "ruff>=0.16.0",
 ]
 

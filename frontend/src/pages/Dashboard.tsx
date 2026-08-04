@@ -58,7 +58,7 @@ const Dashboard: React.FC = () => {
               <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 group-hover:text-primary-foreground transition-colors duration-300">
                 <div className="flex items-baseline gap-6">
                   <span className="text-[12px] font-mono tracking-[0.2em] opacity-40 group-hover:opacity-80 transition-opacity">0{index + 1}</span>
-                  <h3 className="text-3xl md:text-5xl font-bold tracking-tighter uppercase group-hover:-translate-y-1 transition-transform duration-500">
+                  <h3 className="text-3xl md:text-5xl font-bold tracking-tighter group-hover:-translate-y-1 transition-transform duration-500">
                     {tool.name}
                   </h3>
                 </div>

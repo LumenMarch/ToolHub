@@ -26,7 +26,10 @@ from app.services.upload.store import (
 router = APIRouter()
 store = UploadStore()
 
-MAX_SIZE = 100 * 1024 * 1024  # 100 MB
+# 256 MB：atlas-merge 周批数据包（unit-archive zip）实测可达约 58MB，
+# 默认 100MB 偏紧，留出余量避免接近上限时上传失败。
+# 该值同时用于 Tus-Max-Size 能力声明与缓存解析的大小上限。
+MAX_SIZE = 256 * 1024 * 1024  # 256 MB
 
 
 class UploadCacheResolveRequest(BaseModel):
