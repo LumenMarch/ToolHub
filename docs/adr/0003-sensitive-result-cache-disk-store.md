@@ -12,8 +12,8 @@ Accepted
 
 - 结果存于磁盘，TTL 600 秒，过期后从磁盘删除；
 - 缓存键绑定当前认证用户，并附带不可预测标识；
-- 限制条目数量与字节数（`max_entries` / `max_bytes`），淘汰条目同步删除磁盘文件；
-- 单机部署假设：磁盘存储跨进程共享、重启后保留；多实例部署须共享同一 `TASK_ARTIFACT_ROOT` 卷并保持一致 `SECRET_KEY`。
+- `max_entries` / `max_bytes` 为进程内索引上限；磁盘总量仅由 TTL 过期与启动/周期清理兜底约束，重启后或跨 Worker 时可能瞬时超出条目/字节上限，淘汰条目同步删除磁盘文件；
+- 单进程假设：`TaskArtifactStore` 的锁为进程内锁（`threading.RLock`），`publish_blob()` 的检查-执行（check-then-act）与容量淘汰的 `protected_paths` 均不跨进程安全；多 Worker / 多实例共享同一 `TASK_ARTIFACT_ROOT` 卷部署前必须补上文件级锁与原子发布/淘汰，否则不支持。
 
 ## 背景
 
@@ -30,7 +30,8 @@ PR #9 承诺「员工详情不写入数据库或文件系统」；PR #30（commi
 
 - DESIGN.md §2.3 已修订为磁盘存储契约，移除「进程内缓存」表述。
 - 敏感员工数据在 TTL 窗口内落盘：要求私有目录与严格文件权限（建议 0o600），并保证过期/淘汰条目从磁盘清除。
-- 多实例部署需共享同一 `TASK_ARTIFACT_ROOT` 卷（或共享存储），并保持 `SECRET_KEY` 一致。
+- 多实例部署前需先补上文件级锁与原子发布/淘汰（当前仅支持单进程共享同一 `TASK_ARTIFACT_ROOT` 卷），并保持 `SECRET_KEY` 一致。
+- Windows 部署注意：`os.chmod(0o700 / 0o600)` 在 Windows 上仅切换只读属性，不会改变继承的 ACL。默认根目录（用户临时目录）在 Windows 上按用户私有，但自定义 `TASK_ARTIFACT_ROOT`（如文档化的 `D:\ToolHub\data`）须配置用户/管理员专属 ACL，否则按父目录 ACL，员工工作簿仍可被其他用户读取。建议校验 ACL 或限制使用默认目录。
 - 过期条目由懒清理与启动/周期清理任务（`TASK_ARTIFACT_CLEANUP_INTERVAL_HOURS`）兜底删除。
 
 ## 与先前 ADR 关系

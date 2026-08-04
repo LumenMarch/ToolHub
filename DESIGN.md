@@ -39,9 +39,10 @@
 ### 2.3. 敏感结果缓存 (Sensitive Result Cache)
 - 出勤整理等包含员工资料的工具，其分析结果存放于统一任务产物存储（`TASK_ARTIFACT_ROOT`，磁盘），仅作为短时承接分析与下载的辅助缓存，不写入数据库；REST 仍是唯一真相源。
 - 缓存键绑定当前认证用户并附带不可预测标识，下载与删除均校验归属。
-- 设置明确有效期（TTL 600 秒），并同时限制条目数量与字节占用（`max_entries` / `max_bytes`）。
+- 设置明确有效期（TTL 600 秒）；`max_entries` / `max_bytes` 为进程内索引上限，磁盘总量由 TTL 过期与启动/周期清理兜底，重启或跨 Worker 时可能瞬时超出。
 - 过期或淘汰的条目必须同步从磁盘删除（懒清理、进程内淘汰与启动/周期清理均执行磁盘删除）。
-- 单机部署假设：磁盘存储跨进程共享、重启后仍可恢复（进程内索引未命中时从磁盘重新加载）；多实例部署必须共享同一 `TASK_ARTIFACT_ROOT` 卷（或共享存储），并保持一致 `SECRET_KEY`。
+- 单进程假设：`TaskArtifactStore` 锁为进程内锁（`threading.RLock`），`publish_blob()` 检查-执行与容量淘汰的 `protected_paths` 不跨进程安全；多 Worker 共享同一 `TASK_ARTIFACT_ROOT` 卷前须补文件级锁与原子发布/淘汰。
+- Windows 上 `os.chmod(0o700/0o600)` 仅切换只读属性、不改变继承 ACL；自定义 `TASK_ARTIFACT_ROOT` 须配置用户/管理员专属 ACL，否则按父目录 ACL 暴露。
 
 ---
 
