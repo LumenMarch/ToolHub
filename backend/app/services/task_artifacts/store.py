@@ -94,8 +94,12 @@ class TaskArtifactStore:
         if not 0 < self.blob_max_disk_ratio < 1:
             raise ValueError("缓存磁盘比例必须大于 0 且小于 1")
         self._blob_lock = RLock()
+        self.root.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.root, 0o700)
         self.upload_root.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.upload_root, 0o700)
         self.user_root.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.user_root, 0o700)
 
     def task_dir(
         self,
@@ -125,6 +129,7 @@ class TaskArtifactStore:
     ) -> Path:
         task_dir = self.task_dir(user_id=user_id, tool=tool, task_id=task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(task_dir, 0o700)
         manifest_path = task_dir / "manifest.json"
         now = time.time()
         current = self._read_json(manifest_path, fallback={})
@@ -190,8 +195,10 @@ class TaskArtifactStore:
             relative_path=relative_path,
         )
         path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)
         temporary_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         temporary_path.write_bytes(content)
+        os.chmod(temporary_path, 0o600)
         os.replace(temporary_path, path)
         return path
 
@@ -216,15 +223,18 @@ class TaskArtifactStore:
             relative_path=f"inputs/{safe_filename}",
         )
         destination.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(destination.parent, 0o700)
         destination.unlink(missing_ok=True)
         if link_source:
             try:
                 os.link(source_path, destination)
+                os.chmod(destination, 0o600)
                 return destination
             except OSError:
                 pass
         if source_path.resolve() != destination.resolve():
             shutil.copy2(source_path, destination)
+            os.chmod(destination, 0o600)
         return destination
 
     def contains_path(self, path: Path) -> bool:
@@ -279,6 +289,7 @@ class TaskArtifactStore:
             path = self._blob_path(user_id, digest.sha256)
             metadata_path = self._blob_metadata_path(user_id, digest.sha256)
             path.parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(path.parent, 0o700)
             if path.is_file():
                 if path.stat().st_size != digest.size:
                     raise ValueError("缓存文件大小与摘要记录不一致")
@@ -421,6 +432,7 @@ class TaskArtifactStore:
             os.link(source_path, destination_path)
         except OSError:
             shutil.copy2(source_path, destination_path)
+        os.chmod(destination_path, 0o600)
 
     @staticmethod
     def _safe_user_id(user_id: int) -> int:
@@ -447,6 +459,7 @@ class TaskArtifactStore:
     @staticmethod
     def _write_json_atomic(path: Path, value: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -457,6 +470,7 @@ class TaskArtifactStore:
         ) as temporary_file:
             json.dump(value, temporary_file, ensure_ascii=False, separators=(",", ":"))
             temporary_path = Path(temporary_file.name)
+        os.chmod(temporary_path, 0o600)
         os.replace(temporary_path, path)
 
 
