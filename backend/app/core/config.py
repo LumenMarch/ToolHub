@@ -1,8 +1,10 @@
+import json
 import tempfile
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import AliasChoices, Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, NoDecode
 
 
 class Settings(BaseSettings):
@@ -61,14 +63,32 @@ class Settings(BaseSettings):
     # （如 "@example.com"），即用户名必须以任一白名单项结尾。
     # 环境变量支持两种写法：JSON 数组（["@example.com"]）或逗号分隔字符串
     # （"@example.com,@corp.com"）。
-    REGISTRATION_ALLOWED_DOMAINS: list[str] = Field(default_factory=list)
+    # 字段用 NoDecode 注解：pydantic-settings 默认对 list 类型 env 值先做
+    # JSON 解码，逗号分隔字符串不是合法 JSON 会在进入 before validator 前
+    # 抛 SettingsError；NoDecode 让原始字符串直接进入下方 validator 解析。
+    REGISTRATION_ALLOWED_DOMAINS: Annotated[list[str], NoDecode] = Field(
+        default_factory=list
+    )
 
     @field_validator("REGISTRATION_ALLOWED_DOMAINS", mode="before")
     @classmethod
     def _parse_allowed_domains(cls, v: object) -> object:
-        """兼容 JSON 数组与逗号分隔字符串两种环境变量写法。"""
+        """兼容 JSON 数组与逗号分隔字符串两种环境变量写法。
+
+        NoDecode 注解后 env 原始字符串会直接进入本函数：
+        - "[\"@a.com\", \"@b.com\"]" → 先尝试 JSON 解析；
+        - "@a.com,@b.com" → 按逗号切分并去空白。
+        """
         if isinstance(v, str):
-            return [item.strip() for item in v.split(",") if item.strip()]
+            stripped = v.strip()
+            if stripped.startswith("["):
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            return [item.strip() for item in stripped.split(",") if item.strip()]
         return v
 
     # 初始管理员：用户表为空且两项均配置时，启动自动创建超级管理员；

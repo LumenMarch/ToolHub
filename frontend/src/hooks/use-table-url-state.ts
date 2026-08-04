@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type {
   ColumnFiltersState,
@@ -12,7 +12,8 @@ import type {
  *
  * 约定：
  * - 分页：page（1 基）、pageSize，缺省值时不出现在 URL；
- * - 列筛选：string 型用单个查询参数，array 型用重复查询参数（status=a&status=b）。
+ * - 列筛选：string 型用单个查询参数，array 型用重复查询参数（status=a&status=b）；
+ * - 浏览器前进/后退或外部改 URL 时，本地筛选状态会随 URL 同步（back/forward 一致）。
  */
 
 type ColumnFilterConfig = {
@@ -33,7 +34,6 @@ type UseTableUrlStateParams = {
   globalFilter?: {
     enabled?: boolean
     key?: string
-    trim?: boolean
   }
   columnFilters?: ColumnFilterConfig[]
 }
@@ -71,6 +71,34 @@ function applyParamPatch(
   return next
 }
 
+/**
+ * 从 URL 解析列筛选（string 单值 / array 重复参数）。
+ * 初始化与 back/forward 同步共用同一实现，避免双份解析逻辑漂移。
+ */
+function parseColumnFiltersFromUrl(
+  searchParams: URLSearchParams,
+  cfgs: ColumnFilterConfig[]
+): ColumnFiltersState {
+  const collected: ColumnFiltersState = []
+  for (const cfg of cfgs) {
+    const deserialize = cfg.deserialize ?? ((v: unknown) => v)
+    if (cfg.type === 'string') {
+      const raw = searchParams.get(cfg.searchKey)
+      const value = (deserialize(raw) as string) ?? ''
+      if (typeof value === 'string' && value.trim() !== '') {
+        collected.push({ id: cfg.columnId, value })
+      }
+    } else {
+      const raw = searchParams.getAll(cfg.searchKey)
+      const value = (deserialize(raw) as unknown[]) ?? []
+      if (Array.isArray(value) && value.length > 0) {
+        collected.push({ id: cfg.columnId, value })
+      }
+    }
+  }
+  return collected
+}
+
 export function useTableUrlState(
   params: UseTableUrlStateParams
 ): UseTableUrlStateReturn {
@@ -89,34 +117,16 @@ export function useTableUrlState(
 
   const globalFilterKey = globalFilterCfg?.key ?? 'filter'
   const globalFilterEnabled = globalFilterCfg?.enabled ?? true
-  const trimGlobal = globalFilterCfg?.trim ?? true
 
-  // 初始列筛选：从 URL 读取（string 单值 / array 重复参数）
-  const initialColumnFilters: ColumnFiltersState = useMemo(() => {
-    const collected: ColumnFiltersState = []
-    for (const cfg of columnFiltersCfg) {
-      const deserialize = cfg.deserialize ?? ((v: unknown) => v)
-      if (cfg.type === 'string') {
-        const raw = searchParams.get(cfg.searchKey)
-        const value = (deserialize(raw) as string) ?? ''
-        if (typeof value === 'string' && value.trim() !== '') {
-          collected.push({ id: cfg.columnId, value })
-        }
-      } else {
-        const raw = searchParams.getAll(cfg.searchKey)
-        const value = (deserialize(raw) as unknown[]) ?? []
-        if (Array.isArray(value) && value.length > 0) {
-          collected.push({ id: cfg.columnId, value })
-        }
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅初始化一次
-    return collected
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // 初始列筛选：从 URL 读取
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(() =>
+    parseColumnFiltersFromUrl(searchParams, columnFiltersCfg)
+  )
 
-  const [columnFilters, setColumnFilters] =
-    useState<ColumnFiltersState>(initialColumnFilters)
+  const [globalFilter, setGlobalFilter] = useState<string | undefined>(() => {
+    if (!globalFilterEnabled) return undefined
+    return searchParams.get(globalFilterKey) ?? ''
+  })
 
   // 分页直接由 URL 派生（浏览器前进/后退也能跟随）；page/pageSize 均做有限性校验与钳制
   const pagination: PaginationState = useMemo(() => {
@@ -137,6 +147,20 @@ export function useTableUrlState(
     }
   }, [searchParams, pageKey, pageSizeKey, defaultPage, defaultPageSize])
 
+  // 浏览器前进/后退或外部改 URL：把 URL 筛选值同步回本地状态，
+  // 保证工具栏 UI 与查询结果一致。仅写本地 state（URL 只由用户交互写入），不会形成循环。
+  useEffect(() => {
+    const urlFilters = parseColumnFiltersFromUrl(searchParams, columnFiltersCfg)
+    setColumnFilters((prev) => {
+      // 值相等时保持引用不变，避免多余重渲染
+      if (JSON.stringify(prev) === JSON.stringify(urlFilters)) return prev
+      return urlFilters
+    })
+    if (globalFilterEnabled) {
+      setGlobalFilter(searchParams.get(globalFilterKey) ?? '')
+    }
+  }, [searchParams, columnFiltersCfg, globalFilterEnabled, globalFilterKey])
+
   const onPaginationChange: OnChangeFn<PaginationState> = (updater) => {
     const next = typeof updater === 'function' ? updater(pagination) : updater
     const nextPage = next.pageIndex + 1
@@ -152,11 +176,6 @@ export function useTableUrlState(
     )
   }
 
-  const [globalFilter, setGlobalFilter] = useState<string | undefined>(() => {
-    if (!globalFilterEnabled) return undefined
-    return searchParams.get(globalFilterKey) ?? ''
-  })
-
   const onGlobalFilterChange: OnChangeFn<string> | undefined =
     globalFilterEnabled
       ? (updater) => {
@@ -164,14 +183,14 @@ export function useTableUrlState(
             typeof updater === 'function'
               ? updater(globalFilter ?? '')
               : updater
-          // 输入过程保留原始值，序列化进 URL 时才 trim，避免逐键跳变
+          // 原样写入 state 与 URL（round-trip 无损，配合上面的 URL→state 同步，
+          // 输入过程不会被同步打断；消费方需要时自行 trim）
           setGlobalFilter(next)
-          const value = trimGlobal ? next.trim() : next
           setSearchParams(
             (prev) =>
               applyParamPatch(prev, {
                 [pageKey]: null, // 搜索时回到第一页
-                [globalFilterKey]: value ? value : null,
+                [globalFilterKey]: next ? next : null,
               }),
             { replace: false }
           )

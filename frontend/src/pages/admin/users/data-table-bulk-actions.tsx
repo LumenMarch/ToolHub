@@ -28,31 +28,35 @@ export function DataTableBulkActions<TData>({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  // 选中集合以 rowSelection 的稳定行 id 为准（跨页选择不丢）
+  // 选中集合以 rowSelection 的稳定行 id 为准（跨页选择不丢，用于删除与计数）
   const selectedIds = Object.keys(table.getState().rowSelection).map(Number)
-  // 当前页已知的非待审批行（审批动作跳过；跨页未加载的行按 id 直接提交）
-  const nonPendingIds = new Set<number>()
-  for (const row of table.getFilteredSelectedRowModel().rows) {
-    const user = row.original as User
-    if (user.status !== 'pending') nonPendingIds.add(user.id)
-  }
 
   const handleBulkApprove = async () => {
-    const targets = selectedIds.filter((id) => !nonPendingIds.has(id))
-    if (targets.length === 0) {
+    // 批量通过仅作用于"当前页可见且 status=pending"的行：
+    // 跨页/已加载但非待审批的行不参与（避免把跨页被拒用户静默恢复为已批准）
+    const pendingVisibleIds: number[] = []
+    for (const row of table.getFilteredSelectedRowModel().rows) {
+      const user = row.original as User
+      if (user.status === 'pending') pendingVisibleIds.push(user.id)
+    }
+    if (pendingVisibleIds.length === 0) {
       toast.info('所选用户中没有待审批项')
       return
+    }
+    const skipped = selectedIds.length - pendingVisibleIds.length
+    if (skipped > 0) {
+      toast.info(`批量通过仅对当前页可见的待审批项生效，已跳过 ${skipped} 项`)
     }
     setBusy(true)
     try {
       const results = await Promise.allSettled(
-        targets.map((id) => api.approveUser(id)),
+        pendingVisibleIds.map((id) => api.approveUser(id)),
       )
       const ok = results.filter((r) => r.status === 'fulfilled').length
-      if (ok === targets.length) {
+      if (ok === pendingVisibleIds.length) {
         toast.success(`已通过 ${ok} 个注册申请`)
       } else {
-        toast.error(`部分通过成功：${ok}/${targets.length}`)
+        toast.error(`部分通过成功：${ok}/${pendingVisibleIds.length}`)
       }
     } finally {
       setBusy(false)
@@ -93,7 +97,7 @@ export function DataTableBulkActions<TData>({
               onClick={() => void handleBulkApprove()}
               disabled={busy}
               aria-label='批量通过审批'
-              title='批量通过审批（仅待审批）'
+              title='批量通过审批（仅当前页可见的待审批项）'
             >
               <CheckCircle2 />
               <span className='sr-only'>批量通过审批</span>

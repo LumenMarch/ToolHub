@@ -34,6 +34,8 @@ class _SlidingWindowLimiter:
         self.window_seconds = window_seconds
         self._hits: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
+        # 上次整体清理的单调时钟；清理最多每窗口执行一次，避免每请求全量扫描
+        self._last_prune = 0.0
 
     def __call__(self, request: Request) -> None:
         ip = _client_ip(request)
@@ -49,13 +51,25 @@ class _SlidingWindowLimiter:
                     detail="注册请求过于频繁，请稍后再试",
                 )
             queue.append(now)
-            if len(self._hits) >= self._PRUNE_THRESHOLD:
-                self._prune()
+            if (
+                len(self._hits) >= self._PRUNE_THRESHOLD
+                and now - self._last_prune >= self.window_seconds
+            ):
+                self._prune(cutoff)
+                self._last_prune = now
 
-    def _prune(self) -> None:
-        """清理已无有效记录的 IP，避免字典无限增长。"""
-        empty = [ip for ip, queue in self._hits.items() if not queue]
-        for ip in empty:
+    def _prune(self, cutoff: float) -> None:
+        """清理已无有效请求记录的 IP 条目，避免字典无限增长。
+
+        删除条件：deque 为空，或全部时间戳均已过期
+        （最新一条 < cutoff，时间戳按序排列故等价于整条过期）。
+        被清理的 IP 再次请求时会重新建档，不影响限流正确性；
+        未过期但已不活跃的条目保留至下一个清理周期。
+        """
+        stale = [
+            ip for ip, queue in self._hits.items() if not queue or queue[-1] < cutoff
+        ]
+        for ip in stale:
             del self._hits[ip]
 
     def clear(self) -> None:
