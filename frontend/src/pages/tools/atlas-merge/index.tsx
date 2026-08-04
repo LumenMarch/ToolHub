@@ -13,6 +13,7 @@ import {
 import { zip } from 'fflate';
 import { gsap } from 'gsap';
 import React, {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -534,7 +535,7 @@ const AtlasMerge: React.FC = () => {
   const [error, setError] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
   const [isExpired, setIsExpired] = useState(false);
 
   const archiveUpload = useTusUpload();
@@ -573,6 +574,14 @@ const AtlasMerge: React.FC = () => {
     return () => window.clearTimeout(timeout);
   }, [analysis]);
 
+  /** 拉取合并任务状态（供轮询 effect 调用，effect 内不直接发请求）。 */
+  const pollJobStatus = useCallback(async (jobId: string) => {
+    const response = await api.get<AtlasMergeJobResponse>(
+      `/tools/atlas-merge/jobs/${jobId}`,
+    );
+    return response.data;
+  }, []);
+
   // 合并任务轮询：进入 processing 且拿到 job_id 后启动，
   // 直到 done / error / 404 / 连续失败上限；阶段切换或卸载时清理定时器。
   useEffect(() => {
@@ -595,14 +604,11 @@ const AtlasMerge: React.FC = () => {
         return;
       }
       try {
-        const response = await api.get<AtlasMergeJobResponse>(
-          `/tools/atlas-merge/jobs/${jobId}`,
-        );
+        const payload = await pollJobStatus(jobId);
         if (cancelled) {
           return;
         }
 
-        const payload = response.data;
         switch (payload.status) {
           case 'queued':
             setJobProgress({ status: 'queued', done: 0, total: 0 });
@@ -657,7 +663,7 @@ const AtlasMerge: React.FC = () => {
         pollTimerRef.current = null;
       }
     };
-  }, [phase, analyzeStep, jobId]);
+  }, [phase, analyzeStep, jobId, pollJobStatus]);
 
   const handleDirectoryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -773,11 +779,12 @@ const AtlasMerge: React.FC = () => {
 
   /** 删除服务端结果，并回到上传阶段（保留已选目录）。 */
   const handleDeleteResult = async () => {
-    if (!analysis || isDeleting) {
+    // 重入守卫：删除进行中直接返回，避免双击重复触发
+    if (!analysis || isBusy) {
       return;
     }
 
-    setIsDeleting(true);
+    setIsBusy(true);
     setDownloadError('');
     try {
       await api.delete(`/tools/atlas-merge/results/${analysis.result_id}`);
@@ -785,7 +792,7 @@ const AtlasMerge: React.FC = () => {
       setDownloadError(await readErrorMessage(requestError));
       return;
     } finally {
-      setIsDeleting(false);
+      setIsBusy(false);
     }
 
     setAnalysis(null);
@@ -1073,15 +1080,15 @@ const AtlasMerge: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleDeleteResult}
-                      disabled={isDeleting}
+                      disabled={isBusy}
                       className="flex min-h-12 w-full items-center justify-center gap-3 whitespace-nowrap border border-status-danger-foreground/50 px-6 font-bold text-status-danger-foreground transition-colors hover:bg-status-danger-foreground hover:text-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {isDeleting ? (
+                      {isBusy ? (
                         <span className="size-4 animate-spin border-2 border-current border-r-transparent" />
                       ) : (
                         <Trash weight="bold" className="size-4" />
                       )}
-                      {isDeleting ? '正在删除' : '删除结果'}
+                      {isBusy ? '正在删除' : '删除结果'}
                     </button>
                     {downloadError && (
                       <p
