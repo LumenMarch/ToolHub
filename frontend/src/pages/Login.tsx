@@ -137,7 +137,7 @@ const Login: React.FC = () => {
               detail="等待远端响应"
               className="pt-4"
             />
-          ) : hitokotoText ? (
+          ) : !unreachable && hitokotoText ? (
             <h1
               ref={titleRef}
               className="text-3xl font-bold leading-[1.2] tracking-tight md:text-4xl lg:text-5xl"

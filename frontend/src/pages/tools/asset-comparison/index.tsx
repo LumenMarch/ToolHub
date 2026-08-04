@@ -163,6 +163,9 @@ const EMPTY_INPUTS: AssetComparisonInputs = {
   driData: '',
 };
 
+// 核心数据结构推导的常量（避免魔法数字）
+const TOTAL_INPUT_COUNT = Object.keys(EMPTY_INPUTS).length;
+const TOTAL_MODULE_COUNT = Object.keys(RESULT_SOURCES).length;
 function createEmptyModuleProgress(): Record<ModuleKey, ModuleProgress> {
   return {
     finance: { loaded: 0, accepted: 0, total: 0, fileCount: 0, okCount: 0, failCount: 0 },
@@ -237,10 +240,10 @@ function classifyFile(name: string): ModuleKey | 'config' | 'other' {
 
 const Badge: React.FC<{ variant: 'ok' | 'warn' | 'err' | 'info'; children: React.ReactNode }> = ({ variant, children }) => {
   const colors: Record<string, string> = {
-    ok: 'border-green-500/40 text-green-400 bg-green-500/10',
-    warn: 'border-amber-500/40 text-amber-400 bg-amber-500/10',
-    err: 'border-red-500/40 text-red-400 bg-red-500/10',
-    info: 'border-blue-500/40 text-blue-400 bg-blue-500/10',
+    ok: 'border-status-success-foreground/40 text-status-success-foreground bg-status-success-surface',
+    warn: 'border-status-warning-foreground/40 text-status-warning-foreground bg-status-warning-surface',
+    err: 'border-status-danger-foreground/40 text-status-danger-foreground bg-status-danger-surface',
+    info: 'border-primary/40 text-primary bg-primary/10',
   };
   return (
     <span className={`inline-flex items-center gap-1 border px-1.5 py-0.5 font-mono text-[0.65rem] font-bold uppercase tracking-wider ${colors[variant]}`}>
@@ -254,7 +257,7 @@ const ModuleProgressBar: React.FC<{ label: string; progress: ModuleProgress }> =
   const sentPct = progress.total > 0 ? Math.min((progress.loaded / progress.total) * 100, 100) : 0;
   const acceptedPct = progress.total > 0 ? Math.min((progress.accepted / progress.total) * 100, 100) : 0;
   const done = progress.okCount + progress.failCount >= progress.fileCount;
-  const color = done ? (progress.failCount > 0 ? 'bg-amber-400' : 'bg-green-400') : 'bg-primary';
+  const color = done ? (progress.failCount > 0 ? 'bg-status-warning-foreground' : 'bg-status-success-foreground') : 'bg-primary';
   const isConfirming = !done && sentPct >= 100 && acceptedPct < 100;
   return (
     <div className="mt-3 pt-3 border-t border-border/50">
@@ -262,7 +265,7 @@ const ModuleProgressBar: React.FC<{ label: string; progress: ModuleProgress }> =
         <span className="text-muted-foreground">{label}</span>
         <span className="text-muted-foreground">
           {progress.okCount}/{progress.fileCount}
-          {progress.failCount > 0 && <span className="text-amber-400 ml-1">({progress.failCount}失败)</span>}
+          {progress.failCount > 0 && <span className="text-status-warning-foreground ml-1">({progress.failCount}失败)</span>}
         </span>
       </div>
       <div className="relative h-1.5 bg-border/50 rounded-full overflow-hidden">
@@ -556,7 +559,7 @@ const AssetComparison: React.FC = () => {
           setStatusMsg(prev => (
             <div className="flex flex-col gap-1">
               {prev}
-              <span className="flex items-center gap-1 text-xs text-amber-400">
+              <span className="flex items-center gap-1 text-xs text-status-warning-foreground">
                 <Warning className="size-3.5" weight="bold" />
                 {failMsgs.length} 个文件上传失败
               </span>
@@ -865,7 +868,7 @@ const AssetComparison: React.FC = () => {
   })();
   const matchedPathCount = Object.values(paths).filter(value => value.trim()).length;
   const comparisonCompleted = job?.progress.comparison?.completed ?? 0;
-  const comparisonTotal = job?.progress.comparison?.total ?? 7;
+  const comparisonTotal = job?.progress.comparison?.total ?? (checkResults.length || TOTAL_MODULE_COUNT);
   const attentionCount = checkResults.filter(
     result => result.status === 'ready' && result.has_diff,
   ).length;
@@ -974,13 +977,13 @@ const AssetComparison: React.FC = () => {
                   {isJobActive ? '后台核对进行中' : job ? '等待审阅与归档' : '等待输入数据'}
                 </p>
               </div>
-              <span className={`mt-1 size-2 shrink-0 ${isJobActive ? 'bg-primary' : job ? 'bg-green-400' : 'bg-muted-foreground'}`} />
+              <span className={`mt-1 size-2 shrink-0 ${isJobActive ? 'bg-primary' : job ? 'bg-status-success-foreground' : 'bg-muted-foreground'}`} />
             </div>
           </div>
           <div className="px-4 py-4">
             <p className="font-mono text-xs text-muted-foreground">数据源</p>
             <p className="mt-1 font-mono text-lg font-bold tabular-nums">
-              {matchedPathCount}<span className="text-xs text-muted-foreground"> / 11</span>
+              {matchedPathCount}<span className="text-xs text-muted-foreground"> / {TOTAL_INPUT_COUNT}</span>
             </p>
           </div>
           <div className="px-4 py-4">
@@ -1013,7 +1016,7 @@ const AssetComparison: React.FC = () => {
             )}
             数据源与任务设置
             <span className="font-mono text-xs font-normal text-muted-foreground">
-              {matchedPathCount}/11 READY
+              {matchedPathCount}/{TOTAL_INPUT_COUNT} READY
             </span>
           </button>
           <div className="flex flex-wrap items-center gap-2">
@@ -1022,7 +1025,7 @@ const AssetComparison: React.FC = () => {
                 type="button"
                 onClick={handleCancelJob}
                 disabled={isCancelling || job?.status === 'cancel_requested'}
-                className="flex min-h-11 items-center justify-center gap-2 border border-red-500/50 px-4 font-bold text-red-400 outline-none transition-colors hover:bg-red-500/10 focus-visible:ring-2 focus-visible:ring-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex min-h-11 items-center justify-center gap-2 border border-status-danger-foreground/50 px-4 font-bold text-status-danger-foreground outline-none transition-colors hover:bg-status-danger-surface focus-visible:ring-2 focus-visible:ring-status-danger-foreground disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isCancelling || job?.status === 'cancel_requested' ? (
                   <CircleNotch weight="bold" className="size-4 animate-spin" />
@@ -1138,7 +1141,7 @@ const AssetComparison: React.FC = () => {
                 {isStarting ? '正在创建任务' : job ? '重新核对' : '开始核对'}
               </button>
               <p className="font-mono text-xs text-muted-foreground">
-                全部 11 项输入就绪后可启动；运行中的任务会自动恢复。
+                全部 {TOTAL_INPUT_COUNT} 项输入就绪后可启动；运行中的任务会自动恢复。
               </p>
             </div>
           </div>
@@ -1149,7 +1152,7 @@ const AssetComparison: React.FC = () => {
             <div className="flex flex-col gap-2">
               {statusMsg && <div>{statusMsg}</div>}
               {expiredJobId && (
-                <div className="text-amber-400">
+                <div className="text-status-warning-foreground">
                   <Badge variant="warn">已过期</Badge>{' '}
                   上次任务及文件已清理，请重新扫描并开始核对。
                 </div>
@@ -1157,13 +1160,13 @@ const AssetComparison: React.FC = () => {
               {job && (
                 <div className="flex flex-wrap gap-x-6 gap-y-1 text-muted-foreground">
                   <span>验证 {job.progress.validation?.status === 'ready' ? '完成' : job.progress.validation?.status === 'failed' ? '失败' : '处理中'}</span>
-                  <span>核对 {job.progress.comparison?.completed ?? 0}/{job.progress.comparison?.total ?? 7}</span>
-                  <span>模块文件 {job.progress.moduleArtifacts?.completed ?? 0}/{job.progress.moduleArtifacts?.total ?? 7}</span>
+                  <span>核对 {job.progress.comparison?.completed ?? 0}/{comparisonTotal}</span>
+                  <span>模块文件 {job.progress.moduleArtifacts?.completed ?? 0}/{job.progress.moduleArtifacts?.total ?? comparisonTotal}</span>
                   <span>原始数据 {job.progress.rawData?.status === 'ready' ? '完成' : job.progress.rawData?.status === 'failed' ? '失败' : '生成中'}</span>
                 </div>
               )}
               {(jobError || job?.error) && (
-                <div className="text-red-400">
+                <div className="text-status-danger-foreground">
                   <Badge variant="err">错误</Badge> {jobError || job?.error}
                 </div>
               )}
@@ -1179,7 +1182,7 @@ const AssetComparison: React.FC = () => {
               <div className="flex items-baseline justify-between gap-3">
                 <h2 className="text-sm font-bold">核对模块</h2>
                 <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                  {reviewedCount}/{checkResults.length || 7} 已复核
+                  {reviewedCount}/{checkResults.length || TOTAL_MODULE_COUNT} 已复核
                 </span>
               </div>
             </div>
@@ -1201,12 +1204,12 @@ const AssetComparison: React.FC = () => {
                   >
                     <span className={`mt-1.5 size-2 shrink-0 ${
                       result.status === 'failed'
-                        ? 'bg-red-400'
+                        ? 'bg-status-danger-foreground'
                         : result.status === 'pending' || result.status === 'running'
                           ? 'bg-primary'
                           : result.has_diff
-                            ? 'bg-amber-400'
-                            : 'bg-green-400'
+                            ? 'bg-status-warning-foreground'
+                            : 'bg-status-success-foreground'
                     }`} />
                     <span className="min-w-0 flex-1">
                       <span className="flex min-w-0 items-center justify-between gap-2">
@@ -1214,16 +1217,16 @@ const AssetComparison: React.FC = () => {
                           {result.label.replace(/【|】/g, '')}
                         </span>
                         {reviewSaved && (
-                          <CheckCircle weight="fill" className="size-4 shrink-0 text-green-400" aria-label="已复核" />
+                          <CheckCircle weight="fill" className="size-4 shrink-0 text-status-success-foreground" aria-label="已复核" />
                         )}
                       </span>
                       <span className="mt-1.5 flex items-center gap-3 font-mono text-xs tabular-nums min-[80rem]:mt-1">
-                        <span className="text-green-500">+{counts.new}</span>
-                        <span className="text-red-400">−{counts.removed}</span>
-                        <span className={counts.anomaly ? 'text-amber-400' : 'text-muted-foreground'}>!{counts.anomaly}</span>
+                        <span className="text-status-success-foreground">+{counts.new}</span>
+                        <span className="text-status-danger-foreground">−{counts.removed}</span>
+                        <span className={counts.anomaly ? 'text-status-warning-foreground' : 'text-muted-foreground'}>!{counts.anomaly}</span>
                       </span>
                       <span className={`mt-1 block truncate text-xs ${
-                        remarkMissing ? 'text-amber-400' : 'text-muted-foreground'
+                        remarkMissing ? 'text-status-warning-foreground' : 'text-muted-foreground'
                       }`}>
                         {result.status === 'failed'
                           ? '核对失败'
@@ -1244,14 +1247,14 @@ const AssetComparison: React.FC = () => {
                 );
               }) : (
                 <div className="px-4 py-8 text-sm leading-relaxed text-muted-foreground">
-                  {isJobActive ? '正在建立核对队列…' : '准备 11 项数据源并启动任务后，这里会显示七个核对模块。'}
+                  {isJobActive ? '正在建立核对队列…' : `准备 ${TOTAL_INPUT_COUNT} 项数据源并启动任务后，这里会显示${TOTAL_MODULE_COUNT}个核对模块。`}
                 </div>
               )}
             </nav>
             <div className="shrink-0 border-t border-border px-4 py-4 min-[80rem]:py-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-bold">来源健康</p>
-                <span className="font-mono text-xs text-muted-foreground">{matchedPathCount}/11</span>
+                <span className="font-mono text-xs text-muted-foreground">{matchedPathCount}/{TOTAL_INPUT_COUNT}</span>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
                 {SOURCE_GROUPS.map(group => {
@@ -1259,7 +1262,7 @@ const AssetComparison: React.FC = () => {
                   return (
                     <div key={group.key} className="flex items-center justify-between gap-2 text-xs">
                       <span className="truncate text-muted-foreground">{group.label}</span>
-                      <span className={`font-mono tabular-nums ${ready === group.fields.length ? 'text-green-400' : 'text-amber-400'}`}>
+                      <span className={`font-mono tabular-nums ${ready === group.fields.length ? 'text-status-success-foreground' : 'text-status-warning-foreground'}`}>
                         {ready}/{group.fields.length}
                       </span>
                     </div>
@@ -1341,9 +1344,9 @@ const AssetComparison: React.FC = () => {
                 <div className="grid shrink-0 grid-cols-2 border-b border-border sm:grid-cols-4">
                   {([
                     ['全部差异', activeCounts.all, 'text-foreground'],
-                    ['异常', activeCounts.anomaly, 'text-amber-400'],
-                    ['新增', activeCounts.new, 'text-green-500'],
-                    ['减少', activeCounts.removed, 'text-red-400'],
+                    ['异常', activeCounts.anomaly, 'text-status-warning-foreground'],
+                    ['新增', activeCounts.new, 'text-status-success-foreground'],
+                    ['减少', activeCounts.removed, 'text-status-danger-foreground'],
                   ] as const).map(([label, value, color], index) => (
                     <div key={label} className={`px-4 py-3 min-[80rem]:py-2.5 ${index < 3 ? 'border-r border-border' : ''} ${index < 2 ? 'border-b border-border sm:border-b-0' : ''}`}>
                       <p className="text-xs text-muted-foreground">{label}</p>
@@ -1394,8 +1397,8 @@ const AssetComparison: React.FC = () => {
 
                 <div className="difference-scroll min-h-[24rem] flex-1 overflow-x-auto min-[80rem]:min-h-0 min-[80rem]:overflow-y-auto">
                   {activeResult.status === 'failed' ? (
-                    <div className="m-5 border border-red-400/50 p-5">
-                      <p className="font-bold text-red-400">本模块核对失败</p>
+                    <div className="m-5 border border-status-danger-foreground/50 p-5">
+                      <p className="font-bold text-status-danger-foreground">本模块核对失败</p>
                       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                         请检查输入文件与任务状态，处理后重新启动核对。
                       </p>
@@ -1418,8 +1421,8 @@ const AssetComparison: React.FC = () => {
                       />
                     </div>
                   ) : differenceError ? (
-                    <div className="m-5 border border-red-400/50 p-5">
-                      <p className="font-bold text-red-400">差异明细载入失败</p>
+                    <div className="m-5 border border-status-danger-foreground/50 p-5">
+                      <p className="font-bold text-status-danger-foreground">差异明细载入失败</p>
                       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{differenceError}</p>
                     </div>
                   ) : differenceData && differenceData.records.length > 0 ? (
@@ -1442,10 +1445,10 @@ const AssetComparison: React.FC = () => {
                                 <td className="px-4 py-3">
                                   <span className={`inline-flex whitespace-nowrap px-2 py-1 font-mono text-xs font-bold ${
                                     record.changeType === 'anomaly'
-                                      ? 'bg-amber-500/10 text-amber-400'
+                                      ? 'bg-status-warning-surface text-status-warning-foreground'
                                       : record.changeType === 'new'
-                                        ? 'bg-green-500/10 text-green-500'
-                                        : 'bg-red-500/10 text-red-400'
+                                        ? 'bg-status-success-surface text-status-success-foreground'
+                                        : 'bg-status-danger-surface text-status-danger-foreground'
                                   }`}>
                                     {record.changeType === 'anomaly' ? '异常' : record.changeType === 'new' ? '新增' : '减少'}
                                   </span>
@@ -1470,10 +1473,10 @@ const AssetComparison: React.FC = () => {
                               </div>
                               <span className={`shrink-0 px-2 py-1 font-mono text-xs font-bold ${
                                 record.changeType === 'anomaly'
-                                  ? 'bg-amber-500/10 text-amber-400'
+                                  ? 'bg-status-warning-surface text-status-warning-foreground'
                                   : record.changeType === 'new'
-                                    ? 'bg-green-500/10 text-green-500'
-                                    : 'bg-red-500/10 text-red-400'
+                                    ? 'bg-status-success-surface text-status-success-foreground'
+                                    : 'bg-status-danger-surface text-status-danger-foreground'
                               }`}>
                                 {record.changeType === 'anomaly' ? '异常' : record.changeType === 'new' ? '新增' : '减少'}
                               </span>
@@ -1495,7 +1498,7 @@ const AssetComparison: React.FC = () => {
                   ) : (
                     <div className="flex min-h-72 items-center justify-center px-6 text-center">
                       <div>
-                        <CheckSquareOffset weight="thin" className="mx-auto size-10 text-green-400" />
+                        <CheckSquareOffset weight="thin" className="mx-auto size-10 text-status-success-foreground" />
                         <p className="mt-3 font-bold">
                           {activeCounts.all === 0 ? '本模块没有差异' : '当前筛选没有匹配记录'}
                         </p>
@@ -1606,7 +1609,7 @@ const AssetComparison: React.FC = () => {
                     <label htmlFor={`remark-${activeResult.key}`} className="text-xs font-bold">
                       异常原因{activeResult.has_diff ? '（必填）' : ''}
                     </label>
-                    <span className={`text-xs ${activeResult.has_diff && !remarks[activeResult.key]?.trim() ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                    <span className={`text-xs ${activeResult.has_diff && !remarks[activeResult.key]?.trim() ? 'text-status-warning-foreground' : 'text-muted-foreground'}`}>
                       {activeResult.has_diff && !remarks[activeResult.key]?.trim() ? '尚未填写' : '可随时补充'}
                     </span>
                   </div>
@@ -1622,9 +1625,9 @@ const AssetComparison: React.FC = () => {
                   />
                   <p className={`mt-2 min-h-4 font-mono text-xs ${
                     annotationSaveStatus === 'error'
-                      ? 'text-red-400'
+                      ? 'text-status-danger-foreground'
                       : annotationsDirty
-                        ? 'text-amber-400'
+                        ? 'text-status-warning-foreground'
                         : 'text-muted-foreground'
                   }`} aria-live="polite">
                     {annotationStatusLabel || `上次同步 ${formatTimestamp(job?.updatedAt)}`}
@@ -1724,7 +1727,7 @@ const AssetComparison: React.FC = () => {
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-bold">完整归档包</p>
                 {localMissingRemarks.length > 0 && (
-                  <span className="font-mono text-xs text-amber-400">{localMissingRemarks.length} 项待补</span>
+                  <span className="font-mono text-xs text-status-warning-foreground">{localMissingRemarks.length} 项待补</span>
                 )}
               </div>
               <button

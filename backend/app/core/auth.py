@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.core.config import settings
+from app.core.security import _token_version_from_payload
 from app.crud.crud_role import get_user_permissions
 from app.crud.crud_user import get_user_by_username
 from app.models.user import User
@@ -29,15 +30,6 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
         to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
     )
     return encoded_jwt
-
-
-def _token_version_from_payload(payload: dict) -> int:
-    """从 JWT payload 读取 tv；缺省或非法视为 0。"""
-    raw = payload.get("tv", 0)
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return 0
 
 
 def get_current_user(
