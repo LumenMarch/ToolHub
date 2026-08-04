@@ -4,6 +4,7 @@ import {
   FileMagnifyingGlass,
   Key,
   TextT,
+  TreeStructure,
 } from '@phosphor-icons/react';
 import type { IconProps } from '@phosphor-icons/react';
 
@@ -24,6 +25,7 @@ const AssetComparison = React.lazy(() => import('../pages/tools/asset-comparison
 const AttendanceOrganizer = React.lazy(
   () => import('../pages/tools/attendance-organizer/index')
 );
+const AtlasMerge = React.lazy(() => import('../pages/tools/atlas-merge/index'));
 
 export const toolsConfig: ToolDefinition[] = [
   {
@@ -57,5 +59,13 @@ export const toolsConfig: ToolDefinition[] = [
     path: '/tools/attendance-organizer',
     description: '整理通行记录并标记离岗、用餐、超时及数据异常。',
     component: AttendanceOrganizer
+  },
+  {
+    id: 'atlas-merge',
+    name: 'AtlasLog Merge',
+    icon: TreeStructure,
+    path: '/tools/atlas-merge',
+    description: '合并 unit-archive 测试日志为统一 CSV 结果。',
+    component: AtlasMerge
   }
 ];
