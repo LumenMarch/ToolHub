@@ -47,7 +47,7 @@ const hitokotoQueryOptions = queryOptions({
         // 来源随文本一起返回：探活语义与展示内容解耦
         return { text, source: response.data.source };
       }),
-  staleTime: Infinity,
+  staleTime: (query) => (query.state.data?.source === 'fallback' ? 0 : Infinity),
   retry: 1,
 });
 
