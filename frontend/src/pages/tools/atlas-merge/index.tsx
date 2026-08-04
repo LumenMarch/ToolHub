@@ -10,10 +10,10 @@ import {
   Warning,
   X,
 } from '@phosphor-icons/react';
+import { useQuery } from '@tanstack/react-query';
 import { zip } from 'fflate';
 import { gsap } from 'gsap';
 import React, {
-  useCallback,
   useEffect,
   useRef,
   useState,
@@ -92,6 +92,15 @@ type AnalyzeStep = 'packing' | 'uploading' | 'processing';
 const POLL_INTERVAL_MS = 1600;
 /** 连续轮询网络失败上限，超过即停止并提示（避免无限轮询）。 */
 const MAX_POLL_FAILURES = 3;
+
+/** 判断查询错误是否为 HTTP 404（任务不存在/过期）。 */
+const isHttp404 = (error: unknown): boolean => {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const response = (error as { response?: { status?: number } }).response;
+  return response?.status === 404;
+};
 
 interface SelectedFile {
   file: File;
@@ -539,8 +548,6 @@ const AtlasMerge: React.FC = () => {
   const [isExpired, setIsExpired] = useState(false);
 
   const archiveUpload = useTusUpload();
-  // 轮询定时器句柄：阶段切换 / 卸载时由 effect cleanup 清理
-  const pollTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (
@@ -574,96 +581,86 @@ const AtlasMerge: React.FC = () => {
     return () => window.clearTimeout(timeout);
   }, [analysis]);
 
-  /** 拉取合并任务状态（供轮询 effect 调用，effect 内不直接发请求）。 */
-  const pollJobStatus = useCallback(async (jobId: string) => {
-    const response = await api.get<AtlasMergeJobResponse>(
-      `/tools/atlas-merge/jobs/${jobId}`,
-    );
-    return response.data;
-  }, []);
+  // 合并任务轮询：react-query 承担请求调度与竞态控制（组件卸载/阶段切换自动停止），
+  // 语义与手写轮询一致：1.6s 节奏、连续失败上限、404 立即终止、终态停止。
+  const pollingEnabled =
+    phase === 'analyzing' && analyzeStep === 'processing' && jobId !== null;
 
-  // 合并任务轮询：进入 processing 且拿到 job_id 后启动，
-  // 直到 done / error / 404 / 连续失败上限；阶段切换或卸载时清理定时器。
+  const jobQuery = useQuery({
+    queryKey: ['atlas-merge-job', jobId],
+    queryFn: async ({ queryKey }) => {
+      const [, id] = queryKey;
+      const response = await api.get<AtlasMergeJobResponse>(
+        `/tools/atlas-merge/jobs/${id}`,
+      );
+      return response.data;
+    },
+    enabled: pollingEnabled,
+    refetchInterval: (query) => {
+      if (!pollingEnabled) {
+        return false;
+      }
+      const data = query.state.data;
+      // 终态（done/error）到达后停止轮询
+      if (data && (data.status === 'done' || data.status === 'error')) {
+        return false;
+      }
+      // 任务不存在/过期（404）立即终止，不等失败上限
+      if (isHttp404(query.state.error)) {
+        return false;
+      }
+      // 连续失败达到上限后停止（QueryState 上的连续失败计数，成功时重置）
+      if (query.state.fetchFailureCount >= MAX_POLL_FAILURES) {
+        return false;
+      }
+      return POLL_INTERVAL_MS;
+    },
+    retry: false,
+  });
+
+  // 成功轮询的分发：queued/running 更新进度，done/error 迁移阶段。
   useEffect(() => {
-    if (phase !== 'analyzing' || analyzeStep !== 'processing' || !jobId) {
+    if (!pollingEnabled || !jobQuery.data) {
       return;
     }
-
-    let cancelled = false;
-    let failureCount = 0;
-
-    const scheduleNext = () => {
-      if (cancelled) {
+    switch (jobQuery.data.status) {
+      case 'queued':
+        setJobProgress({ status: 'queued', done: 0, total: 0 });
         return;
-      }
-      pollTimerRef.current = window.setTimeout(poll, POLL_INTERVAL_MS);
-    };
-
-    const poll = async () => {
-      if (cancelled) {
+      case 'running':
+        setJobProgress({
+          status: 'running',
+          done: jobQuery.data.done,
+          total: jobQuery.data.total,
+        });
         return;
-      }
-      try {
-        const payload = await pollJobStatus(jobId);
-        if (cancelled) {
-          return;
-        }
+      case 'done':
+        setAnalysis(jobQuery.data);
+        setPhase('ready');
+        return;
+      case 'error':
+        setError(jobQuery.data.error || '合并任务失败，请重新分析');
+        setPhase('upload');
+        return;
+    }
+  }, [pollingEnabled, jobQuery.data]);
 
-        switch (payload.status) {
-          case 'queued':
-            setJobProgress({ status: 'queued', done: 0, total: 0 });
-            scheduleNext();
-            return;
-          case 'running':
-            failureCount = 0;
-            setJobProgress({
-              status: 'running',
-              done: payload.done,
-              total: payload.total,
-            });
-            scheduleNext();
-            return;
-          case 'done':
-            setAnalysis(payload);
-            setPhase('ready');
-            return;
-          case 'error':
-            setError(payload.error || '合并任务失败，请重新分析');
-            setPhase('upload');
-            return;
-        }
-      } catch (requestError) {
-        if (cancelled) {
-          return;
-        }
-        if (
-          axios.isAxiosError(requestError) &&
-          requestError.response?.status === 404
-        ) {
-          // 任务不存在或已过期
-          setError('合并任务已丢失或过期，请重新分析');
-          setPhase('upload');
-          return;
-        }
-        failureCount += 1;
-        if (failureCount >= MAX_POLL_FAILURES) {
-          setError('无法获取合并进度，请检查网络后重新分析');
-          setPhase('upload');
-          return;
-        }
-        scheduleNext();
-      }
-    };
-
-    poll();
-    return () => {
-      cancelled = true;
-      if (pollTimerRef.current !== null) {
-        window.clearTimeout(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    };
-  }, [phase, analyzeStep, jobId, pollJobStatus]);
+  // 轮询失败的分发：404 视为任务丢失；连续失败达上限才放弃，
+  // 未达上限的瞬时失败由 refetchInterval 继续轮询。
+  useEffect(() => {
+    if (!pollingEnabled || !jobQuery.isError || !jobQuery.error) {
+      return;
+    }
+    if (isHttp404(jobQuery.error)) {
+      setError('合并任务已丢失或过期，请重新分析');
+      setPhase('upload');
+      return;
+    }
+    if (jobQuery.failureCount >= MAX_POLL_FAILURES) {
+      setError('无法获取合并进度，请检查网络后重新分析');
+      setPhase('upload');
+    }
+  }, [pollingEnabled, jobQuery.isError, jobQuery.error, jobQuery.failureCount]);
 
   const handleDirectoryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
