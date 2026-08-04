@@ -2,15 +2,37 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   PencilSimple,
   Plus,
-  Trash,
   ShieldCheck,
+  Trash,
 } from '@phosphor-icons/react';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table';
+import { ConfirmDialog } from '../../components/confirm-dialog';
 import { useAdminApi } from './hooks/use-admin-api';
-import type { Role, RoleDetail, Permission, RoleCreateInput } from './hooks/use-admin-api';
-import DataTable from './components/DataTable';
-import type { Column } from './components/DataTable';
+import type {
+  Permission,
+  Role,
+  RoleCreateInput,
+  RoleDetail,
+} from './hooks/use-admin-api';
 import AdminLoadingState from './components/AdminLoadingState';
-import Modal from './components/Modal';
 import PermissionGuard from '../../components/guards/PermissionGuard';
 
 const AdminRoles: React.FC = () => {
@@ -51,75 +73,15 @@ const AdminRoles: React.FC = () => {
   };
 
   const handleDelete = async (roleId: number) => {
-    await api.deleteRole(roleId);
-    setDeleteTarget(null);
-    refresh();
+    try {
+      await api.deleteRole(roleId);
+      setDeleteTarget(null);
+      refresh();
+    } catch (err) {
+      console.error('删除角色失败', err);
+      setError('删除角色失败');
+    }
   };
-
-  const columns: Column<Role>[] = [
-    {
-      key: 'name',
-      header: '角色名',
-      sortable: true,
-      sortValue: (r) => r.name,
-      render: (r) => (
-        <span className="inline-flex items-center gap-1.5 font-mono">
-          <ShieldCheck className="w-4 h-4 text-muted-foreground" />
-          {r.name}
-        </span>
-      ),
-    },
-    {
-      key: 'description',
-      header: '描述',
-      render: (r) =>
-        r.description ? (
-          <span className="text-sm text-muted-foreground">{r.description}</span>
-        ) : (
-          <span className="text-[11px] font-mono text-muted-foreground">—</span>
-        ),
-    },
-    {
-      key: 'permission_count',
-      header: '权限数',
-      render: (r) => (
-        <span className="font-mono text-sm">{r.permission_count}</span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      render: (r) => (
-        <div className="flex items-center gap-1">
-          <PermissionGuard permission="role:write">
-            <button
-              type="button"
-              onClick={async () => {
-                const perms = await api.getRolePermissions(r.id);
-                setEditTarget({ ...r, permissions: perms });
-              }}
-              className="p-1.5 text-muted-foreground hover:text-primary transition-colors"
-              aria-label="编辑角色"
-              title="编辑"
-            >
-              <PencilSimple className="w-4 h-4" />
-            </button>
-          </PermissionGuard>
-          <PermissionGuard permission="role:write">
-            <button
-              type="button"
-              onClick={() => setDeleteTarget(r)}
-              className="p-1.5 text-muted-foreground hover:text-primary transition-colors"
-              aria-label="删除角色"
-              title="删除"
-            >
-              <Trash className="w-4 h-4" />
-            </button>
-          </PermissionGuard>
-        </div>
-      ),
-    },
-  ];
 
   return (
     <div className="space-y-8">
@@ -128,13 +90,9 @@ const AdminRoles: React.FC = () => {
           管理角色定义与权限分配
         </p>
         <PermissionGuard permission="role:write">
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-mono uppercase tracking-widest border border-border hover:border-primary hover:text-primary transition-colors"
-          >
+          <Button variant="outline" onClick={() => setCreateOpen(true)}>
             <Plus className="w-3.5 h-3.5" /> 新建角色
-          </button>
+          </Button>
         </PermissionGuard>
       </div>
 
@@ -152,23 +110,104 @@ const AdminRoles: React.FC = () => {
         />
       ) : (
         <div className="border border-border">
-          <DataTable
-            columns={columns}
-            data={roles}
-            rowKey={(r) => r.id}
-            emptyHint="暂无角色"
-          />
+          <Table>
+            <TableHeader>
+              <TableRow className="group/row">
+                <TableHead className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+                  角色名
+                </TableHead>
+                <TableHead className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+                  描述
+                </TableHead>
+                <TableHead className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+                  权限数
+                </TableHead>
+                <TableHead className="w-24 text-right text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+                  操作
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {roles.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={4}
+                    className="py-12 text-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground opacity-60"
+                  >
+                    暂无角色
+                  </TableCell>
+                </TableRow>
+              ) : (
+                roles.map((role) => (
+                  <TableRow key={role.id} className="group/row">
+                    <TableCell>
+                      <span className="inline-flex items-center gap-1.5 font-mono">
+                        <ShieldCheck className="w-4 h-4 text-muted-foreground" />
+                        {role.name}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {role.description ? (
+                        <span className="text-sm text-muted-foreground">
+                          {role.description}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-mono text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-mono text-sm">{role.permission_count}</span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <PermissionGuard permission="role:write">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={async () => {
+                              try {
+                                const perms = await api.getRolePermissions(role.id);
+                                setEditTarget({ ...role, permissions: perms });
+                              } catch (err) {
+                                console.error('加载角色权限失败', err);
+                                setError('加载角色权限失败');
+                              }
+                            }}
+                            aria-label="编辑角色"
+                            title="编辑"
+                          >
+                            <PencilSimple className="w-4 h-4" />
+                          </Button>
+                        </PermissionGuard>
+                        <PermissionGuard permission="role:write">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => setDeleteTarget(role)}
+                            aria-label="删除角色"
+                            title="删除"
+                          >
+                            <Trash className="w-4 h-4" />
+                          </Button>
+                        </PermissionGuard>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
         </div>
       )}
 
-      <CreateRoleModal
+      <CreateRoleDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onSubmit={handleCreate}
       />
 
       {editTarget && (
-        <EditRoleModal
+        <EditRoleDialog
           key={editTarget.id}
           target={editTarget}
           onClose={() => setEditTarget(null)}
@@ -176,50 +215,41 @@ const AdminRoles: React.FC = () => {
         />
       )}
 
-      <Modal
+      <ConfirmDialog
         open={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        destructive
         title="确认删除"
-        footer={
-          <>
-            <button
-              type="button"
-              onClick={() => setDeleteTarget(null)}
-              className="px-4 py-2 text-[11px] font-mono uppercase tracking-widest border border-border hover:border-foreground transition-colors"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={() => deleteTarget && handleDelete(deleteTarget.id)}
-              className="px-4 py-2 text-[11px] font-mono uppercase tracking-widest bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-            >
-              确认删除
-            </button>
-          </>
+        desc={
+          <p>
+            确定要删除角色{' '}
+            <span className="font-mono font-bold text-primary">
+              {deleteTarget?.name}
+            </span>{' '}
+            吗？此操作不可撤销，已分配该角色的用户将失去对应权限。
+          </p>
         }
-      >
-        <p className="text-sm">
-          确定要删除角色{' '}
-          <span className="font-mono font-bold text-primary">
-            {deleteTarget?.name}
-          </span>{' '}
-          吗？此操作不可撤销，已分配该角色的用户将失去对应权限。
-        </p>
-      </Modal>
+        confirmText="确认删除"
+        cancelBtnText="取消"
+        handleConfirm={() => {
+          if (deleteTarget) void handleDelete(deleteTarget.id);
+        }}
+      />
     </div>
   );
 };
 
 // ===== 新建角色弹窗 =====
 
-interface CreateRoleModalProps {
+interface CreateRoleDialogProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (input: RoleCreateInput) => Promise<void>;
 }
 
-const CreateRoleModal: React.FC<CreateRoleModalProps> = ({ open, onClose, onSubmit }) => {
+const CreateRoleDialog: React.FC<CreateRoleDialogProps> = ({ open, onClose, onSubmit }) => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
@@ -229,11 +259,6 @@ const CreateRoleModal: React.FC<CreateRoleModalProps> = ({ open, onClose, onSubm
     setName('');
     setDescription('');
     setError('');
-  };
-
-  const handleClose = () => {
-    reset();
-    onClose();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -255,81 +280,75 @@ const CreateRoleModal: React.FC<CreateRoleModalProps> = ({ open, onClose, onSubm
   };
 
   return (
-    <Modal
+    <Dialog
       open={open}
-      onClose={handleClose}
-      title="新建角色"
-      footer={
-        <>
-          <button
+      onOpenChange={(next) => {
+        if (!next) reset();
+        onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader className="text-start">
+          <DialogTitle>新建角色</DialogTitle>
+          <DialogDescription>定义角色名称与描述。</DialogDescription>
+        </DialogHeader>
+        <form id="create-role-form" onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="create-role-name" className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+              角色名
+            </Label>
+            <Input
+              id="create-role-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="create-role-description" className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+              描述
+            </Label>
+            <Input
+              id="create-role-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+          {error && (
+            <p className="text-[11px] font-mono uppercase tracking-widest text-primary">
+              [ {error} ]
+            </p>
+          )}
+        </form>
+        <DialogFooter>
+          <Button
             type="button"
-            onClick={handleClose}
-            className="px-4 py-2 text-[11px] font-mono uppercase tracking-widest border border-border hover:border-foreground transition-colors"
+            variant="outline"
+            onClick={() => {
+              reset();
+              onClose();
+            }}
           >
             取消
-          </button>
-          <button
-            type="submit"
-            form="create-role-form"
-            disabled={submitting}
-            className="px-4 py-2 text-[11px] font-mono uppercase tracking-widest bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
-          >
+          </Button>
+          <Button type="submit" form="create-role-form" disabled={submitting}>
             {submitting ? '创建中...' : '创建'}
-          </button>
-        </>
-      }
-    >
-      <form id="create-role-form" onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label
-            htmlFor="create-role-name"
-            className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1"
-          >
-            角色名
-          </label>
-          <input
-            id="create-role-name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="awwwards-input w-full"
-            required
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="create-role-description"
-            className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1"
-          >
-            描述
-          </label>
-          <input
-            id="create-role-description"
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="awwwards-input w-full"
-          />
-        </div>
-        {error && (
-          <p className="text-[11px] font-mono uppercase tracking-widest text-primary">
-            [ {error} ]
-          </p>
-        )}
-      </form>
-    </Modal>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
 // ===== 编辑角色弹窗 =====
 
-interface EditRoleModalProps {
+interface EditRoleDialogProps {
   target: RoleDetail;
   onClose: () => void;
   onSubmit: (roleId: number, name?: string, description?: string) => Promise<void>;
 }
 
-const EditRoleModal: React.FC<EditRoleModalProps> = ({ target, onClose, onSubmit }) => {
+const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubmit }) => {
   const api = useAdminApi();
 
   const [name, setName] = useState(target.name);
@@ -368,95 +387,76 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ target, onClose, onSubmit
   const selectedPermissionIdSet = new Set(selectedPermIds);
 
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title="编辑角色"
-      footer={
-        <>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-[11px] font-mono uppercase tracking-widest border border-border hover:border-foreground transition-colors"
-          >
-            取消
-          </button>
-          <button
-            type="submit"
-            form="edit-role-form"
-            disabled={submitting}
-            className="px-4 py-2 text-[11px] font-mono uppercase tracking-widest bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
-          >
-            {submitting ? '保存中...' : '保存'}
-          </button>
-        </>
-      }
-    >
-      <form id="edit-role-form" onSubmit={handleSubmit} className="space-y-5">
-        <div>
-          <label
-            htmlFor="edit-role-name"
-            className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1"
-          >
-            角色名
-          </label>
-          <input
-            id="edit-role-name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="awwwards-input w-full"
-            required
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="edit-role-description"
-            className="block text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-1"
-          >
-            描述
-          </label>
-          <input
-            id="edit-role-description"
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="awwwards-input w-full"
-          />
-        </div>
-
-        <div className="border-t border-border pt-4">
-          <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
-            权限 ({selectedPermIds.length}/{allPermissions.length})
-          </p>
-          <div className="space-y-1.5 max-h-56 overflow-y-auto">
-            {allPermissions.map((perm) => (
-              <label
-                key={perm.id}
-                className="flex items-center gap-2 cursor-pointer text-sm"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedPermissionIdSet.has(perm.id)}
-                  onChange={() => togglePermission(perm.id)}
-                  className="w-4 h-4 accent-[var(--color-accent)]"
-                />
-                <code className="text-[11px] font-mono text-muted-foreground w-24 shrink-0">
-                  {perm.codename}
-                </code>
-                <span className="text-sm">{perm.description}</span>
-              </label>
-            ))}
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader className="text-start">
+          <DialogTitle>编辑角色</DialogTitle>
+          <DialogDescription>更新角色信息与权限分配。</DialogDescription>
+        </DialogHeader>
+        <form id="edit-role-form" onSubmit={handleSubmit} className="space-y-5">
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-role-name" className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+              角色名
+            </Label>
+            <Input
+              id="edit-role-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
           </div>
-        </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-role-description" className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+              描述
+            </Label>
+            <Input
+              id="edit-role-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
 
-        {error && (
-          <p className="text-[11px] font-mono uppercase tracking-widest text-primary">
-            [ {error} ]
-          </p>
-        )}
-      </form>
-    </Modal>
+          <div className="border-t border-border pt-4">
+            <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
+              权限 ({selectedPermIds.length}/{allPermissions.length})
+            </p>
+            <div className="space-y-1.5 max-h-56 overflow-y-auto">
+              {allPermissions.map((perm) => (
+                <label
+                  key={perm.id}
+                  className="flex items-center gap-2 cursor-pointer text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedPermissionIdSet.has(perm.id)}
+                    onChange={() => togglePermission(perm.id)}
+                    className="w-4 h-4 accent-[var(--color-brand)]"
+                  />
+                  <code className="text-[11px] font-mono text-muted-foreground w-24 shrink-0">
+                    {perm.codename}
+                  </code>
+                  <span className="text-sm">{perm.description}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-[11px] font-mono uppercase tracking-widest text-primary">
+              [ {error} ]
+            </p>
+          )}
+        </form>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button type="submit" form="edit-role-form" disabled={submitting}>
+            {submitting ? '保存中...' : '保存'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 

@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.security import _token_version_from_payload
 from app.crud.crud_role import get_user_permissions
 from app.crud.crud_user import get_user_by_username
-from app.models.user import User
+from app.models.user import USER_STATUS_REJECTED, User
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/auth/token",
@@ -64,6 +64,10 @@ def get_current_user(
     if user is None:
         raise credentials_exception
     if not user.is_active:
+        raise credentials_exception
+    # 审批被驳回的用户即使持有 token 也一律拒绝访问
+    # （reject 时已吊销会话，此处为纵深防御，覆盖未吊销的边角场景）
+    if user.status == USER_STATUS_REJECTED:
         raise credentials_exception
     # Cookie 与 Bearer 均校验 token_version，吊销后旧会话立即 401
     if int(user.token_version or 0) != token_version:

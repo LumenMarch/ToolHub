@@ -7,16 +7,13 @@ from sqlalchemy.orm import Session
 from app.api import deps
 from app.core.auth import create_access_token
 from app.core.config import settings
+from app.core.rate_limit import rate_limit
 from app.core.security import verify_password
-from app.crud.crud_role import get_role_by_name
-from app.crud.crud_user import (
-    count_users,
-    create_user,
-    get_user_by_username,
-    update_last_login,
-)
+from app.crud.crud_user import create_user, get_user_by_username, update_last_login
+from app.models.user import USER_STATUS_REJECTED
 from app.schemas.user import Token, UserCreate, UserResponse
 from app.services.audit import log_action
+from app.services.realtime.sessions import notify_user_pending
 
 router = APIRouter()
 
@@ -30,6 +27,18 @@ def _authenticate_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if user.status == USER_STATUS_REJECTED:
+        # 与普通密码错误同样返回 401，但给出区分文案；
+        # TTL 到期后用户名会被清理，届时可重新注册。
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "账号申请已被拒绝，用户名将在 "
+                f"{settings.REGISTRATION_PENDING_TTL_DAYS} 天后释放，"
+                "届时可重新注册"
+            ),
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
@@ -63,6 +72,7 @@ def _user_to_response(user, db: Session) -> dict:
         "id": user.id,
         "username": user.username,
         "is_active": user.is_active,
+        "status": user.status,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
         "roles": [role.name for role in user.roles],
@@ -70,13 +80,47 @@ def _user_to_response(user, db: Session) -> dict:
     }
 
 
-@router.post("/register", response_model=UserResponse)
+def _check_registration_domain(username: str) -> None:
+    """域名白名单检查（注册无 email 字段，按 username 后缀匹配）。
+
+    白名单为空表示不限制；非空时 username 必须以任一白名单项结尾
+    （如 "@example.com"）。
+    """
+    allowed = settings.REGISTRATION_ALLOWED_DOMAINS
+    if not allowed:
+        return
+    if not any(username.endswith(domain) for domain in allowed):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="用户名后缀不在注册白名单内，请联系管理员",
+        )
+
+
+@router.post(
+    "/register",
+    response_model=UserResponse,
+    dependencies=[
+        Depends(
+            rate_limit(
+                settings.REGISTRATION_RATE_LIMIT_PER_IP,
+                settings.REGISTRATION_RATE_LIMIT_WINDOW,
+            )
+        )
+    ],
+)
 def register_user(
     user_in: UserCreate,
-    request: Request,
     db: Session = Depends(deps.get_db),
 ):
-    """注册新用户。首个用户自动获得超级管理员角色。"""
+    """注册新用户：创建后为 pending 待审批状态，不分配任何角色。
+
+    - 不再有"首个用户自动超级管理员"逻辑，初始管理员由
+      INITIAL_ADMIN_USERNAME / INITIAL_ADMIN_PASSWORD 引导创建；
+    - 不再默认分配"工具使用者"角色，审批通过时由管理员分配；
+    - 限流按 IP（滑动窗口），白名单按 username 后缀匹配（见
+      REGISTRATION_ALLOWED_DOMAINS）。
+    """
+    _check_registration_domain(user_in.username)
     user = get_user_by_username(db, username=user_in.username)
     if user:
         raise HTTPException(
@@ -85,20 +129,9 @@ def register_user(
         )
     new_user = create_user(db, user_in)
 
-    # 所有用户默认拥有"工具使用者"角色
-    tool_user = get_role_by_name(db, "工具使用者")
-    if tool_user:
-        new_user.roles.append(tool_user)
+    # 广播待审批事件，管理员端刷新待审批计数（hub 无角色过滤）
+    notify_user_pending(int(new_user.id))
 
-    # 创建后判断是否为首个用户（避免并发注册竞态）
-    if count_users(db) == 1:
-        super_admin = get_role_by_name(db, "超级管理员")
-        if super_admin:
-            new_user.roles.append(super_admin)
-
-    if new_user.roles:
-        db.commit()
-        db.refresh(new_user)
     return _user_to_response(new_user, db)
 
 

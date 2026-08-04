@@ -25,3 +25,12 @@ def ensure_schema_compat() -> None:
                     "INTEGER NOT NULL DEFAULT 0"
                 )
             )
+        # 审批状态列：存量用户视为已审批（旧系统注册即通过）；
+        # is_active=False 只表示"被停用"，与审批状态无关，同样回填 approved。
+        # ALTER 后列为 NULL（SQLite 不支持带 CHECK 的 ADD COLUMN），
+        # 由应用层保证新写入值合法；此 UPDATE 幂等且只命中迁移产生的 NULL。
+        if "status" not in column_names:
+            conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR"))
+            conn.execute(
+                text("UPDATE users SET status = 'approved' WHERE status IS NULL")
+            )

@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.core.auth import require_permission
+from app.crud.crud_role import get_role_by_name, get_roles_by_ids
 from app.crud.crud_user import (
     create_user_by_admin,
     delete_user,
@@ -11,27 +13,89 @@ from app.crud.crud_user import (
     get_users,
     update_user,
 )
-from app.models.user import User
+from app.models.user import (
+    USER_STATUS_APPROVED,
+    USER_STATUS_PENDING,
+    USER_STATUS_REJECTED,
+    User,
+)
 from app.schemas.user import UserCreateByAdmin, UserResponse, UserUpdate
 from app.services.audit import log_action
 from app.services.realtime.sessions import (
     notify_permissions_updated,
+    notify_user_status_updated,
     revoke_user_sessions,
 )
 
 router = APIRouter()
 
 
-@router.get("", response_model=list[UserResponse])
+class UserListResponse(BaseModel):
+    """用户列表分页响应，形态与 GET /admin/audit 一致。"""
+
+    items: list[UserResponse]
+    total: int
+
+
+class UserApproveRequest(BaseModel):
+    """审批通过请求体；role_ids 为空时服务端分配默认"工具使用者"角色。"""
+
+    role_ids: list[int] | None = None
+
+
+class UserRejectRequest(BaseModel):
+    """驳回请求体；reason 仅写入审计日志，不展示给用户。"""
+
+    reason: str | None = None
+
+
+def _parse_statuses(raw: str | None) -> list[str] | None:
+    """解析 status 查询参数（逗号分隔多值）；未提供返回 None（不过滤）。"""
+    if not raw:
+        return None
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    allowed = {USER_STATUS_PENDING, USER_STATUS_APPROVED, USER_STATUS_REJECTED}
+    if any(p not in allowed for p in parts):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"status 取值仅支持 {sorted(allowed)}",
+        )
+    return parts
+
+
+def _ensure_can_manage(admin: User, target: User) -> None:
+    """层级保护 — 不能审批/修改比自己权限更高的用户。
+
+    pending/rejected 用户通常无角色，空集合天然满足保护；
+    保留检查以覆盖（罕见的）带角色用户被驳回后重新审批的场景。
+    """
+    admin_role_names = {r.name for r in admin.roles}
+    target_role_names = {r.name for r in target.roles}
+    if not admin_role_names.issuperset(target_role_names):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify a user with higher privileges",
+        )
+
+
+@router.get("", response_model=UserListResponse)
 def list_users(
     skip: int = 0,
     limit: int = 100,
     search: str | None = None,
+    status: str | None = Query(default=None, description="逗号分隔多值"),
     db: Session = Depends(deps.get_db),
     _: User = Depends(require_permission("user:read")),
 ):
-    """列出所有用户，支持按用户名搜索。"""
-    return get_users(db, skip=skip, limit=limit, search=search)
+    """列出所有用户，支持按用户名搜索与审批状态筛选（多值）。"""
+    items, total = get_users(
+        db,
+        skip=skip,
+        limit=limit,
+        search=search,
+        statuses=_parse_statuses(status),
+    )
+    return {"items": items, "total": total}
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -41,7 +105,7 @@ def create_user_endpoint(
     db: Session = Depends(deps.get_db),
     admin: User = Depends(require_permission("user:write")),
 ):
-    """管理员创建用户。"""
+    """管理员创建用户（创建即 approved）。"""
     if get_user_by_username(db, user_in.username):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -95,13 +159,7 @@ def update_user_endpoint(
             )
 
     # 层级保护 — 不能修改比自己权限更高的用户（拥有自己不具备的角色）
-    admin_role_names = {r.name for r in admin.roles}
-    target_role_names = {r.name for r in user.roles}
-    if not admin_role_names.issuperset(target_role_names):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot modify a user with higher privileges",
-        )
+    _ensure_can_manage(admin, user)
 
     # 记录变更意图（update 前），用于安全相关吊销与权限推送
     roles_changed = user_in.role_ids is not None
@@ -130,6 +188,133 @@ def update_user_endpoint(
     return _user_to_response(updated, db)
 
 
+@router.post("/{user_id}/approve", response_model=UserResponse)
+def approve_user_endpoint(
+    user_id: int,
+    request: Request,
+    approve_in: UserApproveRequest | None = None,
+    db: Session = Depends(deps.get_db),
+    admin: User = Depends(require_permission("user:write")),
+):
+    """审批通过：pending → approved，也用于恢复 rejected 用户（re-approve）。
+
+    role_ids 为空时服务端分配"工具使用者"角色（查不到该角色则 400）。
+    审计 action=user.approve；定向推送 user.status.updated。
+    """
+    user = get_user_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    if user.status not in (USER_STATUS_PENDING, USER_STATUS_REJECTED):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending or rejected users can be approved",
+        )
+    _ensure_can_manage(admin, user)
+
+    role_ids = (approve_in or UserApproveRequest()).role_ids
+    if role_ids:
+        # 去重后校验角色存在性，防止无效 ID 被 get_roles_by_ids 静默丢弃
+        unique_ids = list(dict.fromkeys(role_ids))
+        roles = get_roles_by_ids(db, unique_ids)
+        if len(roles) != len(unique_ids):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="包含不存在的角色 ID",
+            )
+        # 提权防护：显式授予的角色必须是当前管理员自身角色的子集，
+        # 防止低阶管理员借此给自己/他人授予超管等高权限角色。
+        admin_role_ids = {r.id for r in admin.roles}
+        granted_role_ids = {r.id for r in roles}
+        if not granted_role_ids.issubset(admin_role_ids):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="不能授予高于自身权限的角色",
+            )
+    else:
+        # 默认分配"工具使用者"（低权角色），不受提权校验限制
+        tool_role = get_role_by_name(db, "工具使用者")
+        if tool_role is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='未找到默认角色"工具使用者"，请检查权限种子数据',
+            )
+        roles = [tool_role]
+    previous_status = user.status
+    user.roles = roles
+    user.status = USER_STATUS_APPROVED
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    log_action(
+        db,
+        request=request,
+        user=admin,
+        action="user.approve",
+        target_type="user",
+        target_id=user.id,
+        detail={
+            "username": user.username,
+            "role_ids": [r.id for r in roles],
+            "previous_status": previous_status,
+        },
+    )
+    notify_user_status_updated(int(user.id), USER_STATUS_APPROVED)
+    return _user_to_response(user, db)
+
+
+@router.post("/{user_id}/reject", response_model=UserResponse)
+def reject_user_endpoint(
+    user_id: int,
+    request: Request,
+    reject_in: UserRejectRequest | None = None,
+    db: Session = Depends(deps.get_db),
+    admin: User = Depends(require_permission("user:write")),
+):
+    """驳回注册：仅允许 pending 用户；审计 action=user.reject。
+
+    被驳回用户登录时返回区分文案；TTL 到期后用户名释放。
+    rejected 用户恢复走 /approve（re-approve），不单独提供 restore 端点。
+    reason 仅用于审计留痕，不展示给被驳回用户。
+    """
+    user = get_user_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    if user.status != USER_STATUS_PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending users can be rejected",
+        )
+    _ensure_can_manage(admin, user)
+
+    user.status = USER_STATUS_REJECTED
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    # 与停用语义一致：递增 token_version 吊销全部旧会话并推送 session.revoked，
+    # 防止被驳回用户持有审批前的 token 继续访问接口
+    user = revoke_user_sessions(db, user)
+
+    detail: dict = {"username": user.username}
+    if reject_in is not None and reject_in.reason:
+        detail["reason"] = reject_in.reason
+    log_action(
+        db,
+        request=request,
+        user=admin,
+        action="user.reject",
+        target_type="user",
+        target_id=user.id,
+        detail=detail,
+    )
+    notify_user_status_updated(int(user.id), USER_STATUS_REJECTED)
+    return _user_to_response(user, db)
+
+
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user_endpoint(
     user_id: int,
@@ -149,13 +334,7 @@ def delete_user_endpoint(
             detail="Cannot delete yourself",
         )
     # 层级保护
-    admin_role_names = {r.name for r in admin.roles}
-    target_role_names = {r.name for r in user.roles}
-    if not admin_role_names.issuperset(target_role_names):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete a user with higher privileges",
-        )
+    _ensure_can_manage(admin, user)
     deleted_username = user.username
     # 先吊销会话（通知在线客户端），再物理删除
     revoke_user_sessions(db, user)
@@ -179,6 +358,7 @@ def _user_to_response(user: User, db: Session) -> dict:
         "id": user.id,
         "username": user.username,
         "is_active": user.is_active,
+        "status": user.status,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
         "roles": [role.name for role in user.roles],

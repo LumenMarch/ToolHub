@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet, useLocation, Navigate } from 'react-router-dom';
 import { useVisibleTools } from '../../hooks/useToolsMeta';
+import RouteLoadingState from './RouteLoadingState';
 
 /**
  * 工具路由守卫 — 已禁用的工具重定向到首页。
@@ -12,13 +13,12 @@ const ToolGuard: React.FC = () => {
 
   if (isPending) {
     return (
-      <div
-        role="status"
-        aria-label="正在验证工具状态"
-        className="flex min-h-[40vh] items-center justify-center"
-      >
-        <span className="size-5 animate-spin rounded-full border-[1.5px] border-border border-t-foreground" />
-      </div>
+      <RouteLoadingState
+        fullScreen={false}
+        label="[ 工具 · 校验中 ]"
+        detail="等待元数据"
+        meta="Tools / Access"
+      />
     );
   }
 

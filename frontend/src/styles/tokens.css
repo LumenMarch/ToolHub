@@ -2,15 +2,28 @@
  * macrostructure: Awwwards Split Canvas · tone: brutalist-kinetic
  * theme: original dual-mode · anchor hue: modern-blue / acid-green
  * display: Noto Serif SC 700 · body: Geist Sans 400 · outlier: Geist Mono 400
+ *
+ * shadcn/ui 主题变量已并入本体系（单一来源）：
+ *  - 品牌色使用 --color-brand / --color-brand-ink（原 --color-accent 语义），
+ *    避免与 shadcn 的 neutral accent（悬停高亮）撞名；
+ *  - shadcn 原始变量（--background/--foreground/--primary/--ring/...）在 :root
+ *    直接引用设计令牌，暗色模式只改令牌，一处定义、双主题生效；
+ *  - --radius 为 0 保持 Kinetic Brutalism 方角。
  */
 
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+/* ---break---
+ */
+@custom-variant dark (&:is(.dark *));
 
 :root {
+  /* ===== Kinetic Brutalism 设计令牌 ===== */
   --color-paper: #ffffff;
   --color-ink: #09090b;
-  --color-accent: #3b82f6;
-  --color-accent-ink: #ffffff;
+  --color-brand: #3b82f6;
+  --color-brand-ink: #ffffff;
   --color-surface: transparent;
   --color-rule: #e4e4e7;
   --color-muted-surface: #f4f4f5;
@@ -25,13 +38,35 @@
   --font-display: "Noto Serif SC", "Songti SC", ui-serif, serif;
   --font-body: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
   --font-outlier: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* ===== shadcn/ui 原始变量（引用上方令牌，暗色自动跟随） ===== */
+  --background: var(--color-paper);
+  --foreground: var(--color-ink);
+  --card: var(--color-paper);
+  --card-foreground: var(--color-ink);
+  --popover: var(--color-paper);
+  --popover-foreground: var(--color-ink);
+  --primary: var(--color-brand);
+  --primary-foreground: var(--color-brand-ink);
+  --secondary: var(--color-muted-surface);
+  --secondary-foreground: var(--color-muted-ink);
+  --muted: var(--color-muted-surface);
+  --muted-foreground: var(--color-muted-ink);
+  --accent: var(--color-muted-surface);
+  --accent-foreground: var(--color-muted-ink);
+  --destructive: var(--status-danger-ink);
+  --destructive-foreground: var(--status-danger-surface);
+  --border: var(--color-rule);
+  --input: var(--color-rule);
+  --ring: var(--color-brand);
+  --radius: 0px;
 }
 
 html.dark {
   --color-paper: #050505;
   --color-ink: #f4f4f5;
-  --color-accent: #d4ff00;
-  --color-accent-ink: #000000;
+  --color-brand: #d4ff00;
+  --color-brand-ink: #000000;
   --color-rule: #27272a;
   --color-muted-surface: #18181b;
   --color-muted-ink: #767680;
@@ -46,8 +81,8 @@ html.dark {
 @theme inline {
   --color-background: var(--color-paper);
   --color-foreground: var(--color-ink);
-  --color-primary: var(--color-accent);
-  --color-primary-foreground: var(--color-accent-ink);
+  --color-primary: var(--color-brand);
+  --color-primary-foreground: var(--color-brand-ink);
   --color-card: var(--color-surface);
   --color-card-foreground: var(--color-ink);
   --color-border: var(--color-rule);
@@ -61,6 +96,25 @@ html.dark {
   --color-status-warning-foreground: var(--status-warning-ink);
   --font-sans: var(--font-body);
   --font-mono: var(--font-outlier);
+  --font-heading: var(--font-display);
+  /* shadcn/ui 语义色 → 设计令牌 */
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 body {
@@ -206,5 +260,18 @@ body {
 
   .clip-text > span {
     transform: none !important;
+  }
+}
+
+/* shadcn 基座：全局默认边框色 + 页面底色/字体。 */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
   }
 }

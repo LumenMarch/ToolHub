@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -49,6 +49,35 @@ class Settings(BaseSettings):
     ASSET_COMPARISON_JOB_TTL_HOURS: int = 24
     ASSET_COMPARISON_MAX_STORED_JOBS: int = 20
     ASSET_COMPARISON_MAX_STORAGE_BYTES: int = 1024 * 1024 * 1024
+
+    # ===== 用户注册审批 =====
+    # 注册接口限流（单实例内存滑动窗口，按 IP）。多实例部署时建议在
+    # 网关层统一限流，本配置仅兜底。
+    REGISTRATION_RATE_LIMIT_PER_IP: int = Field(default=10, ge=1)
+    REGISTRATION_RATE_LIMIT_WINDOW: int = Field(default=3600, ge=1)  # 秒
+
+    # 注册域名白名单：为空表示不限制。
+    # 注意：注册流程没有独立 email 字段，白名单按 username 后缀匹配
+    # （如 "@example.com"），即用户名必须以任一白名单项结尾。
+    # 环境变量支持两种写法：JSON 数组（["@example.com"]）或逗号分隔字符串
+    # （"@example.com,@corp.com"）。
+    REGISTRATION_ALLOWED_DOMAINS: list[str] = Field(default_factory=list)
+
+    @field_validator("REGISTRATION_ALLOWED_DOMAINS", mode="before")
+    @classmethod
+    def _parse_allowed_domains(cls, v: object) -> object:
+        """兼容 JSON 数组与逗号分隔字符串两种环境变量写法。"""
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
+
+    # 初始管理员：用户表为空且两项均配置时，启动自动创建超级管理员；
+    # 仅配置一项视为配置错误，健康检查将返回 503。
+    INITIAL_ADMIN_USERNAME: str = ""
+    INITIAL_ADMIN_PASSWORD: str = ""
+
+    # 待审批/被驳回注册用户保留天数，超过后周期清理任务物理删除。
+    REGISTRATION_PENDING_TTL_DAYS: int = Field(default=7, ge=1)
 
     class Config:
         case_sensitive = True

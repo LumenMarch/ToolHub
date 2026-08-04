@@ -110,7 +110,7 @@ const Layout: React.FC = () => {
         <div className="flex items-center gap-3 pointer-events-auto md:gap-8">
           <ThemeToggle />
           <span className="hidden text-[0.8125rem] font-mono tracking-widest uppercase opacity-50 lg:block">
-            [ 标识: {user?.username} ]
+            [ 用户: {user?.username} ]
           </span>
           {user && user.permissions.some((p) => p !== 'tool:use') && (
             <Link
@@ -126,7 +126,7 @@ const Layout: React.FC = () => {
             onClick={() => void handleLogout()}
             className="group relative inline-flex min-h-11 items-center overflow-hidden whitespace-nowrap px-1 text-[0.8125rem] font-mono uppercase tracking-widest transition-colors hover:text-primary active:translate-y-px"
           >
-            <span className="relative z-10">断开连接</span>
+            <span className="relative z-10">退出登录</span>
             <div className="absolute bottom-0 left-0 w-full h-[1px] bg-primary -translate-x-[101%] group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
           </button>
         </div>

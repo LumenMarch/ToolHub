@@ -7,9 +7,11 @@ import {
   ShieldCheck,
   Users,
 } from '@phosphor-icons/react';
+import { Toaster } from 'sonner';
 import { AuthContext } from '../../../context/AuthContext';
 import { ThemeToggle } from '../../../components/ThemeToggle';
 import { cn } from '../../../lib/cn';
+import { usePendingApprovalCount } from '../hooks/use-pending-approval-count';
 
 interface NavItem {
   to: string;
@@ -31,6 +33,7 @@ const AdminLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useContext(AuthContext);
+  const pendingCount = usePendingApprovalCount();
 
   // 按当前用户权限过滤可见导航项
   const NAV_ITEMS = useMemo(
@@ -68,6 +71,7 @@ const AdminLayout: React.FC = () => {
   return (
     <div className="h-dvh bg-background flex overflow-hidden">
       <div className="grain-overlay" />
+      <Toaster position="bottom-right" toastOptions={{ className: 'rounded-none border-border font-mono' }} />
 
       {/* 侧边栏 */}
       <aside className="hidden md:flex w-60 flex-col border-r border-border relative z-10 shrink-0">
@@ -98,6 +102,19 @@ const AdminLayout: React.FC = () => {
               >
                 <Icon className="w-4 h-4 shrink-0" />
                 <span>{item.label}</span>
+                {item.to === '/admin/users' && pendingCount > 0 && (
+                  <span
+                    className={cn(
+                      'ml-auto px-1.5 py-0.5 text-[10px] font-mono leading-none',
+                      active
+                        ? 'bg-primary-foreground text-primary'
+                        : 'bg-primary text-primary-foreground',
+                    )}
+                    title={`${pendingCount} 个待审批用户`}
+                  >
+                    {pendingCount}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -137,7 +154,7 @@ const AdminLayout: React.FC = () => {
                 onClick={handleLogout}
                 className="group relative inline-flex h-9 items-center overflow-hidden whitespace-nowrap px-1 text-[0.8125rem] font-mono uppercase tracking-widest transition-colors hover:text-primary active:translate-y-px"
               >
-                <span className="relative z-10">断开连接</span>
+                <span className="relative z-10">退出登录</span>
                 <div className="absolute bottom-0 left-0 w-full h-[1px] bg-primary -translate-x-[101%] group-hover:translate-x-0 transition-transform duration-500 ease-out" />
               </button>
             </div>
@@ -161,6 +178,11 @@ const AdminLayout: React.FC = () => {
                 >
                   <Icon className="w-3.5 h-3.5" />
                   {item.label}
+                  {item.to === '/admin/users' && pendingCount > 0 && (
+                    <span className="bg-primary px-1 text-[10px] font-mono leading-none text-primary-foreground">
+                      {pendingCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}

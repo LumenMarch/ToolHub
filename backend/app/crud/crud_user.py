@@ -4,7 +4,12 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash
 from app.crud.crud_role import get_roles_by_ids
-from app.models.user import User
+from app.models.user import (
+    USER_STATUS_APPROVED,
+    USER_STATUS_PENDING,
+    USER_STATUS_REJECTED,
+    User,
+)
 from app.schemas.user import UserCreate, UserCreateByAdmin, UserUpdate
 
 
@@ -21,11 +26,20 @@ def get_users(
     skip: int = 0,
     limit: int = 100,
     search: str | None = None,
-) -> list[User]:
+    statuses: list[str] | None = None,
+) -> tuple[list[User], int]:
+    """按条件查询用户，返回 (列表, 总数)，形态与 get_logs 一致。
+
+    statuses 为允许的审批状态列表（多选），None 表示不过滤。
+    """
     query = db.query(User)
     if search:
         query = query.filter(User.username.ilike(f"%{search}%"))
-    return query.order_by(User.created_at.desc()).offset(skip).limit(limit).all()
+    if statuses:
+        query = query.filter(User.status.in_(statuses))
+    total = query.count()
+    items = query.order_by(User.created_at.desc()).offset(skip).limit(limit).all()
+    return items, total
 
 
 def count_users(db: Session) -> int:
@@ -33,8 +47,13 @@ def count_users(db: Session) -> int:
 
 
 def create_user(db: Session, user_in: UserCreate) -> User:
+    """自助注册：新用户一律 pending，不分配任何角色。"""
     hashed_password = get_password_hash(user_in.password)
-    db_user = User(username=user_in.username, hashed_password=hashed_password)
+    db_user = User(
+        username=user_in.username,
+        hashed_password=hashed_password,
+        status=USER_STATUS_PENDING,
+    )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
@@ -42,11 +61,12 @@ def create_user(db: Session, user_in: UserCreate) -> User:
 
 
 def create_user_by_admin(db: Session, user_in: UserCreateByAdmin) -> User:
-    """管理员创建用户，可指定初始角色。"""
+    """管理员创建用户，可指定初始角色；管理员显式创建即视为已审批。"""
     hashed_password = get_password_hash(user_in.password)
     db_user = User(
         username=user_in.username,
         hashed_password=hashed_password,
+        status=USER_STATUS_APPROVED,
     )
     if user_in.role_ids:
         roles = get_roles_by_ids(db, user_in.role_ids)
@@ -55,6 +75,19 @@ def create_user_by_admin(db: Session, user_in: UserCreateByAdmin) -> User:
     db.commit()
     db.refresh(db_user)
     return db_user
+
+
+def get_unapproved_users_older_than(db: Session, cutoff: datetime) -> list[User]:
+    """查询创建时间早于 cutoff 且仍未审批（pending/rejected）的用户。"""
+    return (
+        db.query(User)
+        .filter(
+            User.status.in_([USER_STATUS_PENDING, USER_STATUS_REJECTED]),
+            User.created_at < cutoff,
+        )
+        .order_by(User.id)
+        .all()
+    )
 
 
 def update_user(db: Session, user: User, user_in: UserUpdate) -> User:

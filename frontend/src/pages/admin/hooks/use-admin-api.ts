@@ -7,10 +7,17 @@ export interface AdminUser {
   id: number;
   username: string;
   is_active: boolean;
+  /** 审批状态：pending 待审批 / approved 已批准 / rejected 已拒绝 */
+  status: 'pending' | 'approved' | 'rejected';
   roles: string[];
   permissions: string[];
   created_at: string;
   last_login_at: string | null;
+}
+
+export interface AdminUserList {
+  items: AdminUser[];
+  total: number;
 }
 
 export interface AuditLog {
@@ -121,9 +128,23 @@ export interface RoleUpdateInput {
 export function useAdminApi() {
   // 用户管理
   const listUsers = useCallback(
-    (params?: { search?: string; skip?: number; limit?: number }) =>
+    (params?: {
+      search?: string;
+      /** 审批状态过滤（契约：逗号分隔多值） */
+      status?: string[];
+      skip?: number;
+      limit?: number;
+    }) =>
       api
-        .get<AdminUser[]>('/admin/users', { params })
+        .get<AdminUserList>('/admin/users', {
+          params: {
+            ...params,
+            // 契约要求 status 为逗号分隔字符串（如 "pending,approved"）
+            status: params?.status?.length
+              ? params.status.join(',')
+              : undefined,
+          },
+        })
         .then((r) => r.data),
     [],
   );
@@ -143,6 +164,29 @@ export function useAdminApi() {
   const deleteUser = useCallback(
     (userId: number) =>
       api.delete(`/admin/users/${userId}`).then((r) => r.data),
+    [],
+  );
+
+  // 审批流：批准（可指定角色，空则服务端默认"工具使用者"）/ 拒绝
+  // 说明：rejected → approved 的恢复复用 approve 端点，后端无 /restore。
+  const approveUser = useCallback(
+    (userId: number, roleIds?: number[]) =>
+      api
+        .post<AdminUser>(`/admin/users/${userId}/approve`, {
+          role_ids: roleIds,
+        })
+        .then((r) => r.data),
+    [],
+  );
+
+  const rejectUser = useCallback(
+    (userId: number, reason?: string) =>
+      api
+        .post<AdminUser>(
+          `/admin/users/${userId}/reject`,
+          reason ? { reason } : undefined,
+        )
+        .then((r) => r.data),
     [],
   );
 
@@ -280,6 +324,8 @@ export function useAdminApi() {
       createUser,
       updateUser,
       deleteUser,
+      approveUser,
+      rejectUser,
       listAuditLogs,
       listToolMetas,
       updateToolMeta,
@@ -303,6 +349,8 @@ export function useAdminApi() {
       createUser,
       updateUser,
       deleteUser,
+      approveUser,
+      rejectUser,
       listAuditLogs,
       listToolMetas,
       updateToolMeta,

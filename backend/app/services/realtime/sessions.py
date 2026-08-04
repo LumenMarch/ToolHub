@@ -11,6 +11,8 @@ from app.models.user import User
 from app.services.realtime.events import (
     permissions_updated_event,
     session_revoked_event,
+    user_pending_event,
+    user_status_updated_event,
 )
 from app.services.realtime.hub import realtime_hub
 
@@ -58,3 +60,16 @@ def notify_role_permissions_updated(db: Session, role_id: int) -> None:
             continue
         seen.add(uid)
         notify_permissions_updated(uid)
+
+
+def notify_user_status_updated(user_id: int, status: str) -> None:
+    """审批通过/驳回后定向通知目标用户，客户端刷新 /users/me。"""
+    realtime_hub.publish(
+        user_status_updated_event(user_id=int(user_id), status=status),
+        user_id=int(user_id),
+    )
+
+
+def notify_user_pending(user_id: int) -> None:
+    """新注册待审批广播（hub 无角色过滤，管理员端自行刷新计数）。"""
+    realtime_hub.publish(user_pending_event(user_id=int(user_id)))

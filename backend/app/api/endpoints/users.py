@@ -20,6 +20,7 @@ def read_users_me(
         "id": current_user.id,
         "username": current_user.username,
         "is_active": current_user.is_active,
+        "status": current_user.status,
         "created_at": current_user.created_at,
         "last_login_at": current_user.last_login_at,
         "roles": [role.name for role in current_user.roles],
