@@ -3,13 +3,14 @@
 防护措施：
 - zip-slip：拒绝 ``..`` 穿越与绝对路径 entry（含反斜杠变体与盘符路径）
 - 总解压字节上限 1GB，超限拒绝并抛出异常（调用方负责清理临时目录）
-- 所有 entry 共享唯一顶层前缀时剥离该前缀，防止用户误选上一级目录
+- 所有 entry 共享同一顶层分量时剥离该顶层（只剥一层），防止用户误选上一级目录；
+  单 unit 归档（如 unit-archive/U1/... 整体打包）与多 unit 归档都只剥掉最外层目录，
+  保证 unit/run 识别正确（多 unit 场景行为不变）
 """
 
 from __future__ import annotations
 
 import io
-import posixpath
 import re
 import zipfile
 from pathlib import Path
@@ -42,24 +43,29 @@ def _validate_entry_name(name: str) -> str:
 
 
 def _strip_common_prefix(names: list[str]) -> list[str]:
-    """若所有 entry 共享唯一顶层前缀则剥离该前缀；否则原样返回。
+    """若所有 entry 共享同一顶层分量则剥离该顶层；否则原样返回。
 
-    仅处理"唯一顶层目录"（公共前缀不含 /）；更深层的公共目录不剥离（保守）。
+    取第一个 entry 的第一段作为候选顶层，仅当全部 entry 都以该顶层开头时剥离一层，
+    不依赖 commonpath 计算公共前缀深度。多 unit 归档（unit-archive/U1、U2...）剥掉
+    unit-archive；单 unit 归档（unit-archive/U1/... 深层前缀）同样只剥 unit-archive，
+    避免解压根落到 unit-archive/U1 导致 unit/run 识别错位。
     """
     if not names:
         return names
-    common = posixpath.commonpath(names)
-    if common in ("", ".") or "/" in common:
+    first = names[0]
+    sep = first.find("/")
+    top = first[:sep] if sep != -1 else first
+    prefix = top + "/"
+    if any(name != top and not name.startswith(prefix) for name in names):
         return names
-    prefix = common + "/"
     stripped: list[str] = []
     for name in names:
-        if name == common:
-            continue  # 顶层目录 entry 本身（如 "unit1/"）
+        if name == top:
+            continue  # 顶层目录 entry 本身（如 "unit-archive/"）
         if name.startswith(prefix):
             stripped.append(name[len(prefix) :])
         else:
-            return names  # 理论不可达（commonpath 已保证公共前缀）
+            stripped.append("")
     return stripped
 
 
