@@ -2,10 +2,20 @@ import { queryOptions, useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import api from '../api/axios';
 
+/** 后端 /tools/sixty-seconds/hitokoto 的响应模型。 */
+export type HitokotoSource = 'local' | 'remote' | 'fallback';
+
+interface HitokotoResponse {
+  hitokoto: string;
+  source: HitokotoSource;
+}
+
 interface HitokotoState {
   text: string | null;
+  /** 内容来源：内置数据 / 远程 API / 硬编码兜底句；加载失败时为 null */
+  source: HitokotoSource | null;
   loading: boolean;
-  /** 后端/API 不可用（网络错误、网关 5xx、或探测失败） */
+  /** 后端/API 不可用（网络错误、网关 5xx、探测失败，或内容源降级为兜底句） */
   unreachable: boolean;
   error: boolean;
 }
@@ -28,13 +38,14 @@ const hitokotoQueryOptions = queryOptions({
   queryKey: ['hitokoto'],
   queryFn: () =>
     api
-      .get<{ hitokoto: string }>('/tools/sixty-seconds/hitokoto')
+      .get<HitokotoResponse>('/tools/sixty-seconds/hitokoto')
       .then((response) => {
         const text = response.data?.hitokoto?.trim();
         if (!text) {
           throw new Error('每日一言响应为空');
         }
-        return text;
+        // 来源随文本一起返回：探活语义与展示内容解耦
+        return { text, source: response.data.source };
       }),
   staleTime: Infinity,
   retry: 1,
@@ -42,11 +53,12 @@ const hitokotoQueryOptions = queryOptions({
 
 export function useHitokoto(): HitokotoState {
   const query = useQuery(hitokotoQueryOptions);
-  // 登录页用 hitokoto 作 API 探活：任何失败都视为服务不可用，避免左侧空白
-  const isUnreachable = Boolean(query.isError);
+  // 登录页用 hitokoto 作 API 探活：请求失败，或内容源已降级为硬编码兜底句时，都视为服务不可用
+  const isUnreachable = Boolean(query.isError) || query.data?.source === 'fallback';
 
   return {
-    text: query.data ?? null,
+    text: query.data?.text ?? null,
+    source: query.data?.source ?? null,
     loading: query.isPending,
     unreachable: isUnreachable,
     error: query.isError,
