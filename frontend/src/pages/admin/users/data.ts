@@ -28,3 +28,17 @@ export const callTypes: Record<
       'border-status-danger-foreground/30 bg-status-danger-surface text-status-danger-foreground',
   },
 };
+
+/** 日期展示：非法/空值统一显示"从未"，避免 Invalid Date 泄漏。 */
+export function formatAdminDate(value: string | null) {
+  if (!value) return '从未'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '从未'
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}

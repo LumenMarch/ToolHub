@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
+import { Toaster } from 'sonner';
 import { AuthProvider } from './components/AuthProvider';
 import { ThemeProvider } from './components/ThemeProvider';
 import ProtectedRoute from './components/guards/ProtectedRoute';
@@ -38,6 +39,7 @@ function App() {
     <ThemeProvider defaultTheme="system" storageKey="toolhub-theme">
       <BrowserRouter>
         <AuthProvider>
+          <Toaster position="bottom-right" toastOptions={{ className: 'rounded-none border-border font-mono' }} />
           <Routes>
             <Route path="/login" element={<Login />} />
 

@@ -3,9 +3,10 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { DataTableColumnHeader } from '@/components/data-table'
-import { callTypes } from './data'
+import { callTypes, formatAdminDate } from './data'
 import { type User } from './schema'
 import { DataTableRowActions } from './data-table-row-actions'
+import { DataTableStatusCell } from './data-table-status-cell'
 
 /** 状态列展示：审批状态优先，已批准但停用的展示「已停用」，与「已拒绝」区分。 */
 function resolveStatusDisplay(user: User): { label: string; className: string } {
@@ -19,20 +20,6 @@ function resolveStatusDisplay(user: User): { label: string; className: string } 
     }
   }
   return callTypes.approved
-}
-
-/** 日期展示：非法/空值统一显示"从未"，避免 Invalid Date 泄漏。 */
-function formatAdminDate(value: string | null) {
-  if (!value) return '从未'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '从未'
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 export const usersColumns: ColumnDef<User>[] = [
@@ -108,7 +95,7 @@ export const usersColumns: ColumnDef<User>[] = [
   {
     accessorKey: 'status',
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='状态' />
+      <DataTableColumnHeader column={column} title='审批状态' />
     ),
     cell: ({ row }) => {
       const display = resolveStatusDisplay(row.original)
@@ -120,7 +107,7 @@ export const usersColumns: ColumnDef<User>[] = [
         </div>
       )
     },
-    meta: { title: '状态' },
+    meta: { title: '审批状态' },
     enableHiding: false,
     enableSorting: false,
   },
@@ -140,14 +127,11 @@ export const usersColumns: ColumnDef<User>[] = [
   {
     accessorKey: 'last_login_at',
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='上次登录' />
+      <DataTableColumnHeader column={column} title='状态' />
     ),
-    cell: ({ row }) => (
-      <span className='text-[11px] font-mono text-muted-foreground'>
-        {formatAdminDate(row.getValue('last_login_at'))}
-      </span>
-    ),
-    meta: { title: '上次登录' },
+    // 可点击状态单元格：在线 → 绿点+「在线」；离线 → 「上次登录 {时间}」；点击打开会话弹窗
+    cell: ({ row }) => <DataTableStatusCell user={row.original} />,
+    meta: { title: '状态', className: 'w-44' },
     enableSorting: false,
   },
   {

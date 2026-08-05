@@ -1,13 +1,18 @@
 """会话吊销与权限变更实时通知辅助。
 
-REST 仍是真相源；此处只递增 token_version 并 publish 轻量事件。
+REST 仍是真相源；此处只递增 token_version / 标记会话吊销并 publish 轻量事件。
 """
 
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.crud.crud_session import (
+    revoke_all_user_sessions,
+    revoke_user_session,
+)
 from app.models.user import User
+from app.models.user_session import UserSession
 from app.services.realtime.events import (
     permissions_updated_event,
     session_revoked_event,
@@ -18,11 +23,14 @@ from app.services.realtime.hub import realtime_hub
 
 
 def revoke_user_sessions(db: Session, user: User) -> User:
-    """递增 token_version 使旧 JWT 失效，并推送 session.revoked。
+    """全局吊销：递增 token_version 使旧 JWT 失效，并同步吊销全部会话。
 
-    用于：管理员停用、重置密码、删除用户前踢下线等安全相关操作。
+    推送单个 session.revoked（不含 sid 键，表示全部会话被吊销）；
+    客户端比对 current_session_id，事件无 sid 或命中本设备即登出。
+    用于：管理员停用、重置密码、删除用户前踢下线、审批驳回等安全相关操作。
     普通登出（清 cookie）不应调用本函数，以保留其它设备会话。
     """
+    revoke_all_user_sessions(db, int(user.id))
     user.token_version = int(user.token_version or 0) + 1
     db.add(user)
     db.commit()
@@ -32,6 +40,24 @@ def revoke_user_sessions(db: Session, user: User) -> User:
         user_id=int(user.id),
     )
     return user
+
+
+def revoke_single_user_session(db: Session, user_session: UserSession) -> UserSession:
+    """单会话吊销：标记 revoked_at 并定向推送带 sid 的 session.revoked。
+
+    幂等：已吊销的会话不重复推送；不递增 token_version，其余会话不受影响。
+    """
+    was_active = user_session.revoked_at is None
+    user_session = revoke_user_session(db, user_session)
+    if was_active:
+        realtime_hub.publish(
+            session_revoked_event(
+                user_id=int(user_session.user_id),
+                sid=user_session.jti,
+            ),
+            user_id=int(user_session.user_id),
+        )
+    return user_session
 
 
 def notify_permissions_updated(user_id: int) -> None:

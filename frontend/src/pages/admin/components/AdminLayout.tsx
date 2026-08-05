@@ -7,9 +7,9 @@ import {
   ShieldCheck,
   Users,
 } from '@phosphor-icons/react';
-import { Toaster } from 'sonner';
 import { AuthContext } from '../../../context/AuthContext';
 import { ThemeToggle } from '../../../components/ThemeToggle';
+import { NotificationBell } from '../../../components/NotificationBell';
 import { cn } from '../../../lib/cn';
 import { usePendingApprovalCount } from '../hooks/use-pending-approval-count';
 
@@ -71,7 +71,6 @@ const AdminLayout: React.FC = () => {
   return (
     <div className="h-dvh bg-background flex overflow-hidden">
       <div className="grain-overlay" />
-      <Toaster position="bottom-right" toastOptions={{ className: 'rounded-none border-border font-mono' }} />
 
       {/* 侧边栏 */}
       <aside className="hidden md:flex w-60 flex-col border-r border-border relative z-10 shrink-0">
@@ -139,6 +138,7 @@ const AdminLayout: React.FC = () => {
 
             <div className="flex items-center gap-3 md:gap-6 shrink-0">
               <ThemeToggle />
+              <NotificationBell />
               <span className="hidden text-[0.8125rem] font-mono tracking-widest uppercase opacity-50 lg:block">
                 [ 管理员: {user?.username} ]
               </span>

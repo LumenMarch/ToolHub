@@ -3,6 +3,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { toolsConfig } from '../config/tools';
 import { ThemeToggle } from './ThemeToggle';
+import { NotificationBell } from './NotificationBell';
 import { gsap } from 'gsap';
 import { cn } from '../lib/cn';
 import { useVisibleTools } from '../hooks/useToolsMeta';
@@ -109,6 +110,7 @@ const Layout: React.FC = () => {
 
         <div className="flex items-center gap-3 pointer-events-auto md:gap-8">
           <ThemeToggle />
+          <NotificationBell />
           <span className="hidden text-[0.8125rem] font-mono tracking-widest uppercase opacity-50 lg:block">
             [ 用户: {user?.username} ]
           </span>

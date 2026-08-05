@@ -45,3 +45,12 @@ class User(Base):
         lazy="selectin",
         back_populates="users",
     )
+
+    @property
+    def current_session_id(self) -> str | None:
+        """当前请求所用会话的 jti（供前端判断 session.revoked 是否命中本设备）。
+
+        由 get_current_user 在解析 token 时注入 `_current_session_id`；
+        ORM 直出（如管理员列表）时为空。
+        """
+        return getattr(self, "_current_session_id", None)

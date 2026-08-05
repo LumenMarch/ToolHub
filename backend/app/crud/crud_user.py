@@ -27,10 +27,12 @@ def get_users(
     limit: int = 100,
     search: str | None = None,
     statuses: list[str] | None = None,
-) -> tuple[list[User], int]:
-    """按条件查询用户，返回 (列表, 总数)，形态与 get_logs 一致。
+) -> tuple[list[User], int, set[int]]:
+    """按条件查询用户，返回 (列表, 总数, 在线用户 id 集合)。
 
     statuses 为允许的审批状态列表（多选），None 表示不过滤。
+    online_ids 通过单次批量查询获得（见 crud_session.get_online_user_ids），
+    避免每用户 N+1 次会话查询。
     """
     query = db.query(User)
     if search:
@@ -39,7 +41,12 @@ def get_users(
         query = query.filter(User.status.in_(statuses))
     total = query.count()
     items = query.order_by(User.created_at.desc()).offset(skip).limit(limit).all()
-    return items, total
+    online_ids: set[int] = set()
+    if items:
+        from app.crud.crud_session import get_online_user_ids
+
+        online_ids = get_online_user_ids(db)
+    return items, total, online_ids
 
 
 def count_users(db: Session) -> int:

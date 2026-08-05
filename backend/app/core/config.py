@@ -99,6 +99,16 @@ class Settings(BaseSettings):
     # 待审批/被驳回注册用户保留天数，超过后周期清理任务物理删除。
     REGISTRATION_PENDING_TTL_DAYS: int = Field(default=7, ge=1)
 
+    # 通知中心：已读通知保留天数，超过后周期清理任务物理删除。
+    NOTIFICATION_RETENTION_DAYS: int = Field(default=90, ge=1)
+
+    # 用户"在线"判定窗口（分钟）：存在未吊销且 last_seen_at（无则 created_at）
+    # 在此窗口内的 UserSession 即视为在线。
+    SESSION_ONLINE_WINDOW_MINUTES: int = Field(default=5, ge=1)
+
+    # 已吊销会话保留天数，超过后周期清理任务物理删除。
+    SESSION_REVOKED_RETENTION_DAYS: int = Field(default=7, ge=1)
+
     class Config:
         case_sensitive = True
 

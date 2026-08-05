@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react'
 import useDialogState from '@/hooks/use-dialog-state'
 import { type User } from './schema'
 
-type UsersDialogType = 'create' | 'edit' | 'delete' | 'approve' | 'reject'
+type UsersDialogType = 'create' | 'edit' | 'delete' | 'approve' | 'reject' | 'sessions'
 
 type UsersContextType = {
   open: UsersDialogType | null

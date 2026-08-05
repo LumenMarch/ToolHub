@@ -1,5 +1,9 @@
 import { useCallback, useMemo } from 'react';
 import api from '../../../api/axios';
+import type {
+  NotificationList,
+  UnreadCount,
+} from '../../../types/notifications';
 
 // ===== 类型定义 =====
 
@@ -9,6 +13,8 @@ export interface AdminUser {
   is_active: boolean;
   /** 审批状态：pending 待审批 / approved 已批准 / rejected 已拒绝 */
   status: 'pending' | 'approved' | 'rejected';
+  /** 在线判定：存在未吊销且 last_seen_at 在 5 分钟内的会话；字段未上线时缺省视为离线 */
+  online?: boolean;
   roles: string[];
   permissions: string[];
   created_at: string;
@@ -35,6 +41,17 @@ export interface AuditLog {
 export interface AuditLogList {
   items: AuditLog[];
   total: number;
+}
+
+/** 用户登录会话（管理端 / 用户端共用形态） */
+export interface UserSession {
+  id: number;
+  jti: string;
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+  last_seen_at: string | null;
+  revoked_at: string | null;
 }
 
 export interface ToolMeta {
@@ -190,6 +207,48 @@ export function useAdminApi() {
     [],
   );
 
+  // 会话管理（管理端：查看/吊销指定用户会话）
+  const listUserSessions = useCallback(
+    (userId: number) =>
+      api
+        .get<UserSession[]>(`/admin/users/${userId}/sessions`)
+        .then((r) => r.data),
+    [],
+  );
+
+  const revokeUserSession = useCallback(
+    (userId: number, sessionId: number) =>
+      api
+        .post(`/admin/users/${userId}/sessions/${sessionId}/revoke`)
+        .then((r) => r.data),
+    [],
+  );
+
+  // 通知中心（主站 + 控制台共用）
+  const listNotifications = useCallback(
+    (params?: { skip?: number; limit?: number; unread_only?: 0 | 1 }) =>
+      api
+        .get<NotificationList>('/notifications', { params })
+        .then((r) => r.data),
+    [],
+  );
+
+  const getUnreadCount = useCallback(
+    () => api.get<UnreadCount>('/notifications/unread-count').then((r) => r.data),
+    [],
+  );
+
+  const markNotificationRead = useCallback(
+    (notificationId: number) =>
+      api.post(`/notifications/${notificationId}/read`).then((r) => r.data),
+    [],
+  );
+
+  const markAllNotificationsRead = useCallback(
+    () => api.post('/notifications/read-all').then((r) => r.data),
+    [],
+  );
+
   // 审计日志
   const listAuditLogs = useCallback(
     (params?: {
@@ -326,6 +385,12 @@ export function useAdminApi() {
       deleteUser,
       approveUser,
       rejectUser,
+      listUserSessions,
+      revokeUserSession,
+      listNotifications,
+      getUnreadCount,
+      markNotificationRead,
+      markAllNotificationsRead,
       listAuditLogs,
       listToolMetas,
       updateToolMeta,
@@ -351,6 +416,12 @@ export function useAdminApi() {
       deleteUser,
       approveUser,
       rejectUser,
+      listUserSessions,
+      revokeUserSession,
+      listNotifications,
+      getUnreadCount,
+      markNotificationRead,
+      markAllNotificationsRead,
       listAuditLogs,
       listToolMetas,
       updateToolMeta,
