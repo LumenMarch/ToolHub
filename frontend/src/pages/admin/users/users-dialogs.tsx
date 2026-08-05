@@ -4,9 +4,16 @@ import { UsersActionDialog } from './users-action-dialog'
 import { UsersApproveDialog } from './users-approve-dialog'
 import { UsersDeleteDialog } from './users-delete-dialog'
 import { UsersRejectDialog } from './users-reject-dialog'
+import { UsersSessionsDialog } from './users-sessions-dialog'
 import { useUsers } from './users-provider'
 
-type DialogType = 'create' | 'edit' | 'delete' | 'approve' | 'reject'
+type DialogType =
+  | 'create'
+  | 'edit'
+  | 'delete'
+  | 'approve'
+  | 'reject'
+  | 'sessions'
 
 /** 汇总渲染用户页全部弹窗（新建/编辑/删除/通过/拒绝）。 */
 export function UsersDialogs() {
@@ -62,6 +69,13 @@ export function UsersDialogs() {
             currentRow={currentRow}
             open={open === 'delete'}
             onOpenChange={(next) => handleOpenChange('delete', next)}
+          />
+
+          <UsersSessionsDialog
+            key={`user-sessions-${currentRow.id}`}
+            currentRow={currentRow}
+            open={open === 'sessions'}
+            onOpenChange={(next) => handleOpenChange('sessions', next)}
           />
         </>
       )}

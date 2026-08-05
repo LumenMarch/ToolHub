@@ -10,6 +10,7 @@ from app.api.endpoints import (
     atlas_merge,
     attendance,
     auth,
+    notifications,
     realtime,
     sixty_seconds,
     string_tools,
@@ -27,6 +28,11 @@ api_router.include_router(users.router, prefix="/users", tags=["users"])
 
 # 实时通知 WebSocket（登录后单一通道，事件仅通知）
 api_router.include_router(realtime.router, prefix="/realtime", tags=["realtime"])
+
+# 通知中心（登录即可）
+api_router.include_router(
+    notifications.router, prefix="/notifications", tags=["notifications"]
+)
 
 # Register Tool endpoints dynamically
 # To add a new tool, import its router and include it here

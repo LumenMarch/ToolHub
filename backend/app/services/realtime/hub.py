@@ -24,10 +24,16 @@ DEFAULT_REDIS_CHANNEL = "toolhub:realtime"
 
 
 class RealtimeHub:
-    """user_id → WebSocket 集合；支持定向推送、全员广播与可选 Redis 跨实例。"""
+    """user_id → WebSocket 集合；支持定向推送、全员广播与可选 Redis 跨实例。
+
+    同时维护 sid（会话 jti）→ WebSocket 集合，支持单会话吊销时
+    主动关闭指定会话的连接（close_user_session）。
+    """
 
     def __init__(self) -> None:
         self._connections: dict[int, set[WebSocket]] = defaultdict(set)
+        # sid(会话 jti) → 连接集合；与 _connections 互为索引
+        self._connections_by_sid: dict[str, set[WebSocket]] = defaultdict(set)
         self._lock = threading.RLock()
         self._loop: asyncio.AbstractEventLoop | None = None
         # 本进程实例 id：Redis 回环时跳过已本地投递的消息
@@ -47,21 +53,78 @@ class RealtimeHub:
         """当前是否已启用 Redis 跨进程 fan-out。"""
         return self._redis_enabled
 
-    async def connect(self, user_id: int, websocket: WebSocket) -> None:
-        """接受握手并登记连接。"""
+    async def connect(
+        self,
+        user_id: int,
+        websocket: WebSocket,
+        sid: str | None = None,
+    ) -> None:
+        """接受握手并登记连接；sid 非空时同步登记会话索引。"""
         await websocket.accept()
         with self._lock:
             self._connections[user_id].add(websocket)
+            if sid is not None:
+                # 挂在连接对象上，disconnect 时据此清理 sid 索引
+                websocket._toolhub_session_sid = sid  # type: ignore[attr-defined]
+                self._connections_by_sid[sid].add(websocket)
 
     def disconnect(self, user_id: int, websocket: WebSocket) -> None:
         """移除连接；用户无剩余连接时清理键。"""
         with self._lock:
+            sid = getattr(websocket, "_toolhub_session_sid", None)
+            if sid is not None:
+                sid_sockets = self._connections_by_sid.get(sid)
+                if sid_sockets:
+                    sid_sockets.discard(websocket)
+                    if not sid_sockets:
+                        self._connections_by_sid.pop(sid, None)
             sockets = self._connections.get(user_id)
             if not sockets:
                 return
             sockets.discard(websocket)
             if not sockets:
                 self._connections.pop(user_id, None)
+
+    def close_user_session(self, sid: str) -> None:
+        """主动关闭指定会话的全部 WS 连接（单会话吊销后踢下线）。
+
+        可从同步线程调用；调用方应先 publish session.revoked，
+        客户端收到事件后自行登出，此处兜底关闭僵尸连接。
+        """
+        loop = self._resolve_loop()
+        if loop is None:
+            return
+
+        def schedule() -> None:
+            loop.create_task(self._close_session_sockets(sid))
+
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+
+        if running is loop:
+            schedule()
+        else:
+            loop.call_soon_threadsafe(schedule)
+
+    async def _close_session_sockets(self, sid: str) -> None:
+        """从注册表移除并关闭指定会话的全部连接。"""
+        with self._lock:
+            sockets = list(self._connections_by_sid.get(sid, ()))
+            self._connections_by_sid.pop(sid, None)
+            for websocket in sockets:
+                for uid in list(self._connections):
+                    uid_sockets = self._connections[uid]
+                    uid_sockets.discard(websocket)
+                    if not uid_sockets:
+                        del self._connections[uid]
+        for websocket in sockets:
+            try:
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.close(code=1008)
+            except Exception:
+                logger.debug("realtime hub: 关闭会话连接失败 sid={}", sid)
 
     def publish(
         self,

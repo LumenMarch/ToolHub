@@ -125,12 +125,77 @@ class AssetComparisonJobManager:
         job.status = next_status
 
     def _notify_job(self, *, job_id: str, user_id: int, status: str) -> None:
-        """任务状态落库后推送实时通知（仅 owner；终态用 job.terminal）。"""
+        """任务状态落库后推送实时通知（仅 owner；终态用 job.terminal）。
+
+        通知写库为 best-effort：失败仅记日志，不得影响任务状态与
+        realtime 推送——worker 路径中 _notify_job 在任务已 commit 后运行，
+        异常会被 worker 宽 except 捕获，导致已完成任务被错误标记失败。
+        """
         if status in JOB_TERMINAL_STATUSES:
             event = job_terminal_event(job_id=job_id, user_id=user_id, status=status)
+            try:
+                self._create_terminal_notification(
+                    job_id=job_id, user_id=user_id, status=status
+                )
+            except Exception:
+                logger.exception(
+                    "job terminal notification write failed job_id={}",
+                    job_id,
+                )
         else:
             event = job_updated_event(job_id=job_id, user_id=user_id, status=status)
         realtime_hub.publish(event, user_id=user_id)
+
+    @staticmethod
+    def _create_terminal_notification(
+        *, job_id: str, user_id: int, status: str
+    ) -> None:
+        """终态任务写通知中心（type=job.terminal），供 owner 离线后查阅。"""
+        from app.crud.crud_notification import create_notification
+
+        title = {
+            "complete": "资产核对任务已完成",
+            "base_ready": "资产核对任务基础文件已就绪",
+            "failed": "资产核对任务执行失败",
+            "partial_failed": "资产核对任务部分失败",
+            "cancelled": "资产核对任务已取消",
+            "expired": "资产核对任务已过期",
+        }.get(status, "资产核对任务已结束")
+        payload: dict[str, Any] = {"job_id": job_id, "status": status}
+        with SessionLocal() as db:
+            job = (
+                db.query(AssetComparisonJob)
+                .filter(AssetComparisonJob.id == job_id)
+                .first()
+            )
+            if job is None:
+                return
+            # 任务名：取输入快照 files 字典首项的文件名（如有），便于用户区分任务。
+            # 注意 input_json 结构为 {"version": 1, "fingerprint": ..., "files": {...}}，
+            # files 条目为 {"filename": ..., "relativePath": ..., ...}；
+            # 不能直接遍历顶层 values()——version 是整数，会得到 "1 · 任务完成" 这类标题。
+            inputs = _loads(job.input_json, {})
+            files = inputs.get("files") if isinstance(inputs, dict) else None
+            first_filename = None
+            if isinstance(files, dict):
+                first_filename = next(
+                    (
+                        str(info.get("filename"))
+                        for info in files.values()
+                        if isinstance(info, dict) and info.get("filename")
+                    ),
+                    None,
+                )
+            if first_filename:
+                payload["job_name"] = first_filename
+                title = f"{first_filename} · {title}"
+            create_notification(
+                db,
+                user_id=user_id,
+                type="job.terminal",
+                title=title,
+                payload=payload,
+            )
 
     def create_job(
         self,

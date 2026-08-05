@@ -182,7 +182,7 @@ def cleanup_expired_unapproved_users() -> int:
 
 
 async def cleanup_unapproved_users_periodically() -> None:
-    """周期清理待审批/被驳回的过期注册用户（与任务产物清理同节奏）。"""
+    """周期清理：待审批用户 + 过期会话/通知（与任务产物清理同节奏）。"""
     from app.core.config import settings
 
     interval_seconds = settings.TASK_ARTIFACT_CLEANUP_INTERVAL_HOURS * 3600
@@ -190,8 +190,58 @@ async def cleanup_unapproved_users_periodically() -> None:
         await asyncio.sleep(interval_seconds)
         try:
             await asyncio.to_thread(cleanup_expired_unapproved_users)
+            await asyncio.to_thread(cleanup_expired_sessions_and_notifications)
         except Exception:
-            logger.exception("unapproved user periodic cleanup failed")
+            logger.exception("periodic cleanup failed")
+
+
+def cleanup_expired_sessions_and_notifications() -> int:
+    """清理过期会话与已读过期通知，返回删除总数。
+
+    - 会话：revoked_at 超过 SESSION_REVOKED_RETENTION_DAYS（已吊销且长期下线）；
+      或未吊销但 last_seen_at（无则 created_at）早于
+      ACCESS_TOKEN_EXPIRE_MINUTES —— token 早已过期且无活动的死会话；
+    - 通知：read_at 超过 NOTIFICATION_RETENTION_DAYS 天的已读通知。
+    """
+    from sqlalchemy import func
+
+    from app.core.config import settings
+    from app.crud.crud_notification import delete_expired_notifications
+    from app.db.session import SessionLocal
+    from app.models.user_session import UserSession
+
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        revoked_cutoff = now - timedelta(days=settings.SESSION_REVOKED_RETENTION_DAYS)
+        token_ttl = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        removed = 0
+        removed += (
+            db.query(UserSession)
+            .filter(
+                UserSession.revoked_at.isnot(None),
+                UserSession.revoked_at < revoked_cutoff,
+            )
+            .delete(synchronize_session=False)
+        )
+        removed += (
+            db.query(UserSession)
+            .filter(
+                UserSession.revoked_at.is_(None),
+                func.coalesce(UserSession.last_seen_at, UserSession.created_at)
+                < now - token_ttl,
+            )
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+        removed += delete_expired_notifications(
+            db, now - timedelta(days=settings.NOTIFICATION_RETENTION_DAYS)
+        )
+        if removed:
+            logger.info("cleaned {} expired sessions/notifications", removed)
+        return removed
+    finally:
+        db.close()
 
 
 @app.on_event("startup")
@@ -236,14 +286,18 @@ async def bootstrap_initial_admin() -> None:
 
 @app.on_event("startup")
 async def start_unapproved_user_cleanup() -> None:
-    """启动待审批用户周期清理（先立即执行一次，再按周期调度）。"""
+    """启动周期清理（先立即执行一次，再按周期调度）。
+
+    清理范围：待审批用户 + 过期会话/通知。
+    """
     global unapproved_user_cleanup_task
 
     try:
         await asyncio.to_thread(cleanup_expired_unapproved_users)
+        await asyncio.to_thread(cleanup_expired_sessions_and_notifications)
     except Exception:
         # 首轮清理失败不应阻断启动，与周期路径保持一致
-        logger.exception("unapproved user initial cleanup failed")
+        logger.exception("initial cleanup failed")
     unapproved_user_cleanup_task = asyncio.create_task(
         cleanup_unapproved_users_periodically(),
         name="unapproved-user-cleanup",

@@ -1,10 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.core.auth import require_permission
+from app.crud.crud_notification import create_notification
 from app.crud.crud_role import get_role_by_name, get_roles_by_ids
+from app.crud.crud_session import (
+    get_user_session_by_id,
+    get_user_sessions,
+)
 from app.crud.crud_user import (
     create_user_by_admin,
     delete_user,
@@ -20,10 +26,12 @@ from app.models.user import (
     User,
 )
 from app.schemas.user import UserCreateByAdmin, UserResponse, UserUpdate
+from app.schemas.user_session import UserSessionResponse
 from app.services.audit import log_action
 from app.services.realtime.sessions import (
     notify_permissions_updated,
     notify_user_status_updated,
+    revoke_single_user_session,
     revoke_user_sessions,
 )
 
@@ -78,6 +86,23 @@ def _ensure_can_manage(admin: User, target: User) -> None:
         )
 
 
+def _safe_create_notification(db: Session, **kwargs) -> None:
+    """通知写库容错：失败仅记日志，不影响审批结果与审计（与 log_action 同样式）。
+
+    审批动作的状态变更已先于通知 commit；若通知写库抛异常导致 500，
+    客户端重试会被"仅 pending/rejected 可审批"挡住，造成结果已生效
+    但接口报错的假象。
+    """
+    try:
+        create_notification(db, **kwargs)
+    except Exception:
+        logger.exception(
+            "notification write failed type={} title={}",
+            kwargs.get("type"),
+            kwargs.get("title"),
+        )
+
+
 @router.get("", response_model=UserListResponse)
 def list_users(
     skip: int = 0,
@@ -88,14 +113,17 @@ def list_users(
     _: User = Depends(require_permission("user:read")),
 ):
     """列出所有用户，支持按用户名搜索与审批状态筛选（多值）。"""
-    items, total = get_users(
+    items, total, online_ids = get_users(
         db,
         skip=skip,
         limit=limit,
         search=search,
         statuses=_parse_statuses(status),
     )
-    return {"items": items, "total": total}
+    return {
+        "items": [_user_to_response(user, db, online_ids=online_ids) for user in items],
+        "total": total,
+    }
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -262,6 +290,14 @@ def approve_user_endpoint(
         },
     )
     notify_user_status_updated(int(user.id), USER_STATUS_APPROVED)
+    # 通知中心落库：审批结果通知当事用户（写失败不影响审批结果）
+    _safe_create_notification(
+        db,
+        user_id=int(user.id),
+        type="user.status.updated",
+        title="注册申请已通过",
+        payload={"status": USER_STATUS_APPROVED},
+    )
     return _user_to_response(user, db)
 
 
@@ -312,6 +348,17 @@ def reject_user_endpoint(
         detail=detail,
     )
     notify_user_status_updated(int(user.id), USER_STATUS_REJECTED)
+    # 通知中心落库：驳回结果通知当事用户（含 reason，若有；写失败不影响驳回结果）
+    reject_payload: dict = {"status": USER_STATUS_REJECTED}
+    if reject_in is not None and reject_in.reason:
+        reject_payload["reason"] = reject_in.reason
+    _safe_create_notification(
+        db,
+        user_id=int(user.id),
+        type="user.status.updated",
+        title="注册申请被拒绝",
+        payload=reject_payload,
+    )
     return _user_to_response(user, db)
 
 
@@ -350,15 +397,92 @@ def delete_user_endpoint(
     )
 
 
-def _user_to_response(user: User, db: Session) -> dict:
-    """将 User 模型转为 UserResponse 所需字典。"""
+@router.get("/{user_id}/sessions", response_model=list[UserSessionResponse])
+def list_user_sessions_endpoint(
+    user_id: int,
+    db: Session = Depends(deps.get_db),
+    _: User = Depends(require_permission("user:read")),
+):
+    """列出指定用户的全部会话（含已吊销），按创建时间倒序。"""
+    user = get_user_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    return get_user_sessions(db, user_id)
+
+
+@router.post(
+    "/{user_id}/sessions/{session_id}/revoke",
+    response_model=UserSessionResponse,
+)
+def revoke_user_session_endpoint(
+    user_id: int,
+    session_id: int,
+    request: Request,
+    db: Session = Depends(deps.get_db),
+    admin: User = Depends(require_permission("user:write")),
+):
+    """吊销指定用户的单个会话（幂等：重复吊销仍返回 200）。
+
+    定向推送 session.revoked（payload 带 sid，前端据此判断是否命中本设备）；
+    不递增 token_version，该用户其它会话不受影响。审计 action=user.session_revoke。
+    """
+    user = get_user_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    # 层级保护 — 不能吊销比自己权限更高的用户的会话
+    _ensure_can_manage(admin, user)
+    user_session = get_user_session_by_id(db, session_id)
+    if user_session is None or user_session.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+    revoked = revoke_single_user_session(db, user_session)
+    log_action(
+        db,
+        request=request,
+        user=admin,
+        action="user.session_revoke",
+        target_type="user",
+        target_id=user_id,
+        detail={
+            "username": user.username,
+            "session_id": session_id,
+            "revoked_at": revoked.revoked_at.isoformat()
+            if revoked.revoked_at
+            else None,
+        },
+    )
+    return revoked
+
+
+def _user_to_response(
+    user: User, db: Session, online_ids: set[int] | None = None
+) -> dict:
+    """将 User 模型转为 UserResponse 所需字典。
+
+    online_ids 为批量查询得到的在线用户集合（列表场景传入，O(1) 判断）；
+    未传入时对单个用户做一次在线判定查询（单用户响应场景）。
+    """
     from app.crud.crud_role import get_user_permissions
+    from app.crud.crud_session import is_user_online
+
+    online: bool
+    if online_ids is not None:
+        online = user.id in online_ids
+    else:
+        online = is_user_online(db, int(user.id))
 
     return {
         "id": user.id,
         "username": user.username,
         "is_active": user.is_active,
         "status": user.status,
+        "current_session_id": getattr(user, "current_session_id", None),
+        "online": online,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
         "roles": [role.name for role in user.roles],

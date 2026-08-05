@@ -62,13 +62,21 @@ def permissions_updated_event(*, user_id: int) -> dict[str, Any]:
     }
 
 
-def session_revoked_event(*, user_id: int) -> dict[str, Any]:
-    """会话吊销通知（token_version 已递增）；客户端应登出。"""
-    return {
+def session_revoked_event(*, user_id: int, sid: str | None = None) -> dict[str, Any]:
+    """会话吊销通知（token_version 已递增 / 会话已标记 revoked）；客户端应登出。
+
+    sid 为被吊销会话的 jti；**省略该键**表示该用户全部会话被吊销。
+    客户端比对 UserResponse.current_session_id：事件不含 sid（全局吊销）
+    或 sid 等于本设备会话 id 时执行登出。
+    """
+    event: dict[str, Any] = {
         "type": "session.revoked",
         "user_id": user_id,
         "at": _at(),
     }
+    if sid is not None:
+        event["sid"] = sid
+    return event
 
 
 def user_status_updated_event(*, user_id: int, status: str) -> dict[str, Any]:

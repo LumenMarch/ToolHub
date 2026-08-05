@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.models.permission import Permission
-from app.models.role import Role
+from app.models.role import Role, role_permissions, user_roles
 from app.models.user import User
 
 
@@ -61,6 +61,25 @@ def get_user_permissions(db: Session, user: User) -> set[str]:
         for perm in role.permissions:
             permissions.add(perm.codename)
     return permissions
+
+
+def get_user_ids_with_permission(db: Session, codename: str) -> list[int]:
+    """返回拥有指定权限（codename）的全部用户 id（去重）。
+
+    用于注册待审批等场景的通知广播：遍历用户表逐个算权限在
+    内网规模下可接受，但 SQL join 更直接。
+    """
+    rows = (
+        db.query(User.id)
+        .join(user_roles, user_roles.c.user_id == User.id)
+        .join(Role, Role.id == user_roles.c.role_id)
+        .join(role_permissions, role_permissions.c.role_id == Role.id)
+        .join(Permission, Permission.id == role_permissions.c.permission_id)
+        .filter(Permission.codename == codename)
+        .distinct()
+        .all()
+    )
+    return [row[0] for row in rows]
 
 
 def get_user_roles(db: Session, user: User) -> list[Role]:

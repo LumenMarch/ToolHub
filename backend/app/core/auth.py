@@ -10,6 +10,7 @@ from app.api import deps
 from app.core.config import settings
 from app.core.security import _token_version_from_payload
 from app.crud.crud_role import get_user_permissions
+from app.crud.crud_session import get_user_session_by_jti
 from app.crud.crud_user import get_user_by_username
 from app.models.user import USER_STATUS_REJECTED, User
 
@@ -72,6 +73,28 @@ def get_current_user(
     # Cookie 与 Bearer 均校验 token_version，吊销后旧会话立即 401
     if int(user.token_version or 0) != token_version:
         raise credentials_exception
+
+    # 会话级校验（方案 A）：token 的 sid 声明的会话必须存在且未吊销。
+    # sid 缺失（本功能上线前签发的旧 token）时跳过，仍由 token_version
+    # 全局吊销兜底。
+    sid = payload.get("sid")
+    if sid is not None:
+        user_session = get_user_session_by_jti(db, str(sid))
+        if user_session is None or user_session.revoked_at is not None:
+            raise credentials_exception
+        # jti 必须在 commit 前取出：expire_on_commit=True 会在 commit 后
+        # 过期 session 内全部 ORM 实例，再访问 user_session.jti 会触发
+        # 隐藏 SELECT
+        jti = user_session.jti
+        # last_seen_at 节流更新（60 秒一次），避免每请求写库
+        now = datetime.utcnow()
+        last_seen = user_session.last_seen_at
+        if last_seen is None or (now - last_seen).total_seconds() >= 60:
+            user_session.last_seen_at = now
+            db.add(user_session)
+            db.commit()
+        # 注入当前会话 jti，响应层据此返回 current_session_id
+        user._current_session_id = jti  # type: ignore[attr-defined]
     return user
 
 

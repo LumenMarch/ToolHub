@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { toast } from 'sonner';
 import api from '../api/axios';
 import { realtimeClient } from '../lib/realtime';
 import { useToolsMetaRealtimeInvalidation } from '../hooks/useToolsMeta';
+import { useNotificationsRealtimeInvalidation } from '../hooks/use-notifications';
 import { AuthContext, type User } from '../context/AuthContext';
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   useToolsMetaRealtimeInvalidation();
+  useNotificationsRealtimeInvalidation();
 
   const login = useCallback((authenticatedUser: User) => {
     setUser(authenticatedUser);
@@ -63,6 +66,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       if (event.type === 'session.revoked') {
+        const sid = event.sid as string | null | undefined
+        // 事件带 sid：仅命中当前登录会话时才登出；其它设备被踢只提示。
+        // sid 为 null（全局吊销：停用/重置密码/删除等）或 undefined（旧后端）：
+        // 视为本会话被吊销，直接登出。用宽松 != null 统一两种缺省。
+        if (sid != null && user.current_session_id !== undefined) {
+          if (sid === user.current_session_id) {
+            realtimeClient.stop();
+            setUser(null);
+            // 尽力清 cookie；失败也已本地登出
+            void api.post('/auth/logout').catch(() => undefined);
+          } else {
+            toast.info('该账号的其它会话已被强制下线');
+          }
+          return;
+        }
         realtimeClient.stop();
         setUser(null);
         // 尽力清 cookie；失败也已本地登出
