@@ -69,3 +69,25 @@ def session_revoked_event(*, user_id: int) -> dict[str, Any]:
         "user_id": user_id,
         "at": _at(),
     }
+
+
+def user_status_updated_event(*, user_id: int, status: str) -> dict[str, Any]:
+    """用户审批状态变更通知（定向推送目标用户）；客户端刷新 /users/me。"""
+    return {
+        "type": "user.status.updated",
+        "user_id": user_id,
+        "status": status,
+        "at": _at(),
+    }
+
+
+def user_pending_event(*, user_id: int) -> dict[str, Any]:
+    """新注册待审批通知（广播；管理员端据此刷新待审批计数）。
+
+    注：hub 不区分角色推送，前端自行过滤处理。
+    """
+    return {
+        "type": "user.pending",
+        "user_id": user_id,
+        "at": _at(),
+    }

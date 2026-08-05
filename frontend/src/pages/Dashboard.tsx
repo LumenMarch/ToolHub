@@ -8,7 +8,7 @@ import { LoadingSignal } from '../components/LoadingSignal';
 const Dashboard: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const hasAnimatedRef = useRef(false);
-  const { visibleTools, isPending } = useVisibleTools();
+  const { visibleTools, isPending, hasAccess } = useVisibleTools();
 
   useEffect(() => {
     if (
@@ -44,6 +44,20 @@ const Dashboard: React.FC = () => {
               label="[ 工具入口 · 同步中 ]"
               detail="等待权限索引"
             />
+          </div>
+        ) : visibleTools.length === 0 ? (
+          <div className="flex min-h-72 flex-col items-start justify-center gap-3 border-b border-border px-4 md:px-8">
+            <p className="text-[11px] font-mono uppercase tracking-widest text-primary">
+              [ 工具不可用 ]
+            </p>
+            <h3 className="text-2xl font-bold tracking-tight md:text-3xl">
+              当前账号没有可用的工具
+            </h3>
+            <p className="max-w-lg text-sm text-muted-foreground">
+              {hasAccess
+                ? '管理员尚未启用任何工具，请稍后再试或联系管理员。'
+                : '请联系管理员为你的账号分配「工具使用者」等角色后重新登录。'}
+            </p>
           </div>
         ) : visibleTools.map((tool, index) => {
           return (

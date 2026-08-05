@@ -39,11 +39,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return;
 
     return realtimeClient.subscribe((event) => {
-      if (event.type === 'permissions.updated') {
+      if (
+        event.type === 'permissions.updated' ||
+        event.type === 'user.status.updated'
+      ) {
         void api
           .get<User>('/users/me')
           .then((response) => {
-            setUser(response.data);
+            const fresh = response.data;
+            // 被拒用户：本地登出（清 user + 停实时通道），登录页展示后端区分文案
+            if (fresh.status === 'rejected') {
+              realtimeClient.stop();
+              setUser(null);
+              void api.post('/auth/logout').catch(() => undefined);
+              return;
+            }
+            setUser(fresh);
           })
           .catch(() => {
             // 401 等由 axios unauthorized 处理

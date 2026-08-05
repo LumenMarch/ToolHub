@@ -291,7 +291,7 @@ const ToolRow: React.FC<ToolRowProps> = ({
             type="checkbox"
             checked={row.enabled}
             onChange={(e) => onToggleEnabled(e.target.checked)}
-            className="w-4 h-4 accent-[var(--color-accent)]"
+            className="w-4 h-4 accent-[var(--color-brand)]"
             aria-label={row.enabled ? '已启用' : '已禁用'}
           />
         </label>

@@ -24,6 +24,8 @@ const Login: React.FC = () => {
 
   const { text: hitokotoText, loading: hitokotoLoading, unreachable } = useHitokoto();
   const displayError = error || (unreachable ? UNREACHABLE_ERROR : '');
+  // 提交按钮文案：加载中 / 登录 / 注册（避免 JSX 嵌套三元）
+  const submitLabel = loading ? '等待...' : isLogin ? '登录 ↗' : '注册 ↗';
   const lines = hitokotoText ? splitIntoLines(hitokotoText, 3) : [];
   let lineOffset = 0;
   const displayLines = lines.map((text) => {
@@ -188,7 +190,7 @@ const Login: React.FC = () => {
               aria-describedby={displayError ? 'auth-error' : undefined}
             />
             <label htmlFor="username" className="absolute left-0 top-4 text-muted-foreground font-mono text-sm tracking-widest uppercase transition-[color,font-size,transform] duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-[11px] group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px]">
-              身份标识
+              用户名
             </label>
           </div>
           
@@ -205,17 +207,17 @@ const Login: React.FC = () => {
               aria-describedby={displayError ? 'auth-error' : undefined}
             />
             <label htmlFor="password" className="absolute left-0 top-4 text-muted-foreground font-mono text-sm tracking-widest uppercase transition-[color,font-size,transform] duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-[11px] group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px]">
-              安全密钥
+              密码
             </label>
           </div>
 
-          <div className="pt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-8">
+          <div className="pt-4 flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center justify-between gap-6 sm:gap-8">
             <button
               type="submit"
               disabled={loading || unreachable}
-              className="text-4xl md:text-5xl font-bold uppercase tracking-tighter hover:text-primary transition-colors active:scale-95 origin-left disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-4xl md:text-5xl font-bold uppercase tracking-tighter hover:text-primary transition-colors active:scale-95 origin-left disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             >
-              {loading ? '等待...' : (isLogin ? '授权访问 ↗' : '创建身份 ↗')}
+              {submitLabel}
             </button>
             
             <button
@@ -224,9 +226,9 @@ const Login: React.FC = () => {
                 setIsLogin(!isLogin);
                 setError('');
               }}
-              className="text-[11px] font-mono text-muted-foreground hover:text-foreground uppercase tracking-[0.2em] transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-full after:h-[1px] after:bg-muted-foreground hover:after:bg-foreground"
+              className="text-base md:text-lg font-mono text-muted-foreground hover:text-foreground uppercase tracking-[0.2em] transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-full after:h-[1px] after:bg-muted-foreground hover:after:bg-foreground"
             >
-              {isLogin ? "需要获取权限？" : "已持有身份？"}
+              {isLogin ? "注册" : "登录"}
             </button>
           </div>
         </form>

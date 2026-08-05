@@ -31,6 +31,8 @@ class UserResponse(UserBase):
 
     id: int
     is_active: bool
+    # 审批状态：pending / approved / rejected
+    status: str = "pending"
     created_at: datetime
     last_login_at: datetime | None
     roles: list[str] = []

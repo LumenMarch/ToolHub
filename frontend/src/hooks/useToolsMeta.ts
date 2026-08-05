@@ -1,8 +1,9 @@
-import { useEffect, useMemo } from 'react';
+import { useContext, useEffect, useMemo } from 'react';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../api/axios';
 import { toolsConfig } from '../config/tools';
 import type { ToolDefinition } from '../config/tools';
+import { AuthContext } from '../context/AuthContext';
 import { realtimeClient } from '../lib/realtime';
 
 export interface ToolMetaOverride {
@@ -60,8 +61,18 @@ export function useToolsMetaRealtimeInvalidation() {
 }
 
 export function useVisibleTools() {
-  const query = useQuery(toolsMetaQueryOptions);
+  const { user } = useContext(AuthContext);
+  // 后端 GET /tools-meta 要求 tool:use 权限；无权限用户不请求受保护端点，
+  // 工具列表为空（主页显示空态提示）。
+  const hasToolUse = user?.permissions.includes('tool:use') ?? false;
+
+  const query = useQuery({
+    ...toolsMetaQueryOptions,
+    enabled: hasToolUse,
+  });
+
   const visibleTools = useMemo(() => {
+    if (!hasToolUse) return [];
     if (query.data) {
       return resolveVisibleTools(query.data);
     }
@@ -69,10 +80,13 @@ export function useVisibleTools() {
       return resolveVisibleTools([]);
     }
     return [];
-  }, [query.data, query.isError]);
+  }, [query.data, query.isError, hasToolUse]);
 
   return {
     visibleTools,
-    isPending: query.isPending,
+    // 禁用的查询（无权限）不进入 pending，直接渲染空态
+    isPending: hasToolUse ? query.isPending : false,
+    /** 当前用户是否具备 tool:use 权限（用于主页空态文案区分） */
+    hasAccess: hasToolUse,
   };
 }

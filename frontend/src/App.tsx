@@ -31,6 +31,7 @@ const AdminUsers = lazy(() => import('./pages/admin/Users'));
 const AdminAudit = lazy(() => import('./pages/admin/Audit'));
 const AdminTools = lazy(() => import('./pages/admin/Tools'));
 const AdminRoles = lazy(() => import('./pages/admin/Roles'));
+const PendingApproval = lazy(() => import('./pages/PendingApproval'));
 
 function App() {
   return (
@@ -42,6 +43,15 @@ function App() {
 
             {/* 用户区 */}
             <Route element={<ProtectedRoute />}>
+              {/* 待审批用户只能访问等待页（ProtectedRoute 会拦截其它路由） */}
+              <Route
+                path="/pending"
+                element={
+                  <Suspense fallback={<SuspendFallback />}>
+                    <PendingApproval />
+                  </Suspense>
+                }
+              />
               <Route element={<Layout />}>
                 <Route path="/" element={<Dashboard />} />
 

@@ -1,10 +1,11 @@
 import asyncio
 from contextlib import suppress
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 from starlette.formparsers import MultiPartParser
 
@@ -85,6 +86,10 @@ if HAS_FRONTEND_BUILD:
     app.frontend("/", directory=FRONTEND_DIST_DIR)
 
 artifact_cleanup_task: asyncio.Task[None] | None = None
+unapproved_user_cleanup_task: asyncio.Task[None] | None = None
+# 初始管理员引导结果；非 None 表示引导失败（详见 ensure_initial_admin），
+# /healthz 据此返回 503 与原因
+initial_admin_bootstrap_error: str | None = None
 
 
 def cleanup_task_artifacts() -> None:
@@ -120,6 +125,75 @@ async def cleanup_task_artifacts_periodically() -> None:
             logger.exception("task artifact periodic cleanup failed")
 
 
+def cleanup_expired_unapproved_users() -> int:
+    """删除超过 TTL 仍 pending/rejected 的注册用户，返回删除数量。
+
+    删除前先吊销会话（递增 token_version + 推送 session.revoked），
+    与管理员删除用户的语义一致；随后物理删除。
+    """
+    from app.core.config import settings
+    from app.crud.crud_user import get_unapproved_users_older_than
+    from app.db.session import SessionLocal
+    from app.models.user import (
+        USER_STATUS_PENDING,
+        USER_STATUS_REJECTED,
+        User,
+    )
+    from app.services.realtime.sessions import revoke_user_sessions
+
+    db = SessionLocal()
+    try:
+        # created_at 由模型写入 naive UTC（datetime.utcnow），保持同基准比较
+        cutoff = datetime.utcnow() - timedelta(
+            days=settings.REGISTRATION_PENDING_TTL_DAYS
+        )
+        users = get_unapproved_users_older_than(db, cutoff)
+        removed = 0
+        for user in users:
+            # TOCTOU 防护：SELECT 与删除之间用户可能已被管理员审批通过。
+            # 删除前强制重读状态（refresh 绕过身份映射的旧值），
+            # 并仅当仍为 pending/rejected 时执行条件删除。
+            current = db.get(User, user.id)
+            if current is None:
+                continue
+            db.refresh(current)
+            if current.status not in (USER_STATUS_PENDING, USER_STATUS_REJECTED):
+                continue
+            revoke_user_sessions(db, current)
+            deleted = (
+                db.query(User)
+                .filter(
+                    User.id == current.id,
+                    User.status.in_([USER_STATUS_PENDING, USER_STATUS_REJECTED]),
+                )
+                .delete(synchronize_session=False)
+            )
+            db.commit()
+            removed += deleted
+        if removed:
+            logger.info(
+                "cleaned {} expired unapproved users (ttl_days={})",
+                removed,
+                settings.REGISTRATION_PENDING_TTL_DAYS,
+            )
+        return removed
+    finally:
+        db.close()
+
+
+async def cleanup_unapproved_users_periodically() -> None:
+    """周期清理待审批/被驳回的过期注册用户（与任务产物清理同节奏）。"""
+    from app.core.config import settings
+
+    interval_seconds = settings.TASK_ARTIFACT_CLEANUP_INTERVAL_HOURS * 3600
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await asyncio.to_thread(cleanup_expired_unapproved_users)
+        except Exception:
+            logger.exception("unapproved user periodic cleanup failed")
+
+
 @app.on_event("startup")
 async def bind_realtime_hub_loop() -> None:
     """绑定实时 hub 到主事件循环，并尝试启用可选 Redis fan-out。"""
@@ -143,6 +217,36 @@ async def start_task_artifact_cleanup() -> None:
     artifact_cleanup_task = asyncio.create_task(
         cleanup_task_artifacts_periodically(),
         name="task-artifact-cleanup",
+    )
+
+
+@app.on_event("startup")
+async def bootstrap_initial_admin() -> None:
+    """用户表为空时引导创建初始管理员；失败则记录 ERROR 并标记健康检查失败。"""
+    global initial_admin_bootstrap_error
+
+    from app.seed import ensure_initial_admin
+
+    initial_admin_bootstrap_error = await asyncio.to_thread(ensure_initial_admin)
+    if initial_admin_bootstrap_error:
+        logger.error("初始管理员引导失败：{}", initial_admin_bootstrap_error)
+    else:
+        logger.info("初始管理员引导完成")
+
+
+@app.on_event("startup")
+async def start_unapproved_user_cleanup() -> None:
+    """启动待审批用户周期清理（先立即执行一次，再按周期调度）。"""
+    global unapproved_user_cleanup_task
+
+    try:
+        await asyncio.to_thread(cleanup_expired_unapproved_users)
+    except Exception:
+        # 首轮清理失败不应阻断启动，与周期路径保持一致
+        logger.exception("unapproved user initial cleanup failed")
+    unapproved_user_cleanup_task = asyncio.create_task(
+        cleanup_unapproved_users_periodically(),
+        name="unapproved-user-cleanup",
     )
 
 
@@ -181,6 +285,33 @@ async def shutdown_task_artifact_cleanup() -> None:
     with suppress(asyncio.CancelledError):
         await artifact_cleanup_task
     artifact_cleanup_task = None
+
+
+@app.on_event("shutdown")
+async def shutdown_unapproved_user_cleanup() -> None:
+    """停止待审批用户周期清理。"""
+    global unapproved_user_cleanup_task
+
+    if unapproved_user_cleanup_task is None:
+        return
+    unapproved_user_cleanup_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await unapproved_user_cleanup_task
+    unapproved_user_cleanup_task = None
+
+
+@app.get("/healthz")
+def healthz():
+    """健康检查：初始管理员引导失败（如未配置且用户表为空）时返回 503 并带原因。"""
+    if initial_admin_bootstrap_error:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "reason": initial_admin_bootstrap_error,
+            },
+        )
+    return {"status": "ok"}
 
 
 @app.get("/")
