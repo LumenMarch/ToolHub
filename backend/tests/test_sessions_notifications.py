@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta
 
 import jwt as pyjwt
+import pytest
 
 from app.core.config import settings
 from app.main import cleanup_expired_sessions_and_notifications
@@ -426,6 +427,98 @@ def test_job_terminal_title_falls_back_without_files(client, db):
     notification = db.query(Notification).filter(Notification.user_id == bob.id).one()
     assert notification.title == "资产核对任务执行失败"
     assert "job_name" not in json.loads(notification.payload)
+
+
+def test_notify_job_survives_notification_failure(client, db, monkeypatch):
+    """通知写库失败：不抛异常、任务状态不变、realtime 推送仍执行。"""
+    from app.api.endpoints.asset_comparison import asset_comparison_job_manager
+    from app.services.realtime.hub import realtime_hub
+
+    register(client, "alice")
+    alice = db.query(User).filter(User.username == "alice").one()
+    job = AssetComparisonJob(
+        id=str(uuid.uuid4()),
+        user_id=alice.id,
+        client_request_id="req-3",
+        status="running",
+        input_json=json.dumps({"version": 1, "fingerprint": "abc"}),
+        results_json="[]",
+        artifacts_json="{}",
+        remarks_json="{}",
+        reviews_json="{}",
+        progress_json="{}",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(job)
+    db.commit()
+
+    published: list[dict] = []
+    monkeypatch.setattr(
+        realtime_hub, "publish", lambda event, **kwargs: published.append(event)
+    )
+
+    def boom(db_session, **kwargs):
+        raise RuntimeError("db locked")
+
+    monkeypatch.setattr("app.crud.crud_notification.create_notification", boom)
+    # 通知写库失败不抛异常（_notify_job 内部容错）
+    asset_comparison_job_manager._notify_job(
+        job_id=job.id, user_id=alice.id, status="complete"
+    )
+    # realtime 推送仍执行
+    assert [e["type"] for e in published] == ["job.terminal"]
+    # 任务状态未被污染（已完成任务不应被误标失败）
+    fresh = db.query(AssetComparisonJob).filter(AssetComparisonJob.id == job.id).one()
+    assert fresh.status == "running"
+
+
+def test_ws_handshake_rejects_revoked_session(admin_client):
+    """单会话吊销后：旧 token 连 WS 握手被拒，其它会话 token 正常。"""
+    from starlette.websockets import WebSocketDisconnect
+
+    client, admin_token = admin_client
+    register(client, "alice")
+    sid_resp = client.post(
+        "/api/v1/auth/session",
+        data={"username": "alice", "password": "pw-123456"},
+    )
+    assert sid_resp.status_code == 200
+    alice_sid = sid_resp.json()["current_session_id"]
+    alice_id = sid_resp.json()["id"]
+
+    # 会话 A 未吊销：WS 握手正常
+    with client.websocket_connect("/api/v1/realtime/ws") as ws:
+        ws.send_text("ping")
+        assert ws.receive_json()["type"] == "pong"
+
+    # 吊销会话 A
+    sessions = client.get(
+        f"/api/v1/admin/users/{alice_id}/sessions",
+        headers=auth_header(admin_token),
+    ).json()
+    target = next(s["id"] for s in sessions if s["jti"] == alice_sid)
+    assert (
+        client.post(
+            f"/api/v1/admin/users/{alice_id}/sessions/{target}/revoke",
+            headers=auth_header(admin_token),
+        ).status_code
+        == 200
+    )
+
+    # 旧 cookie（会话 A 已吊销）重连 → 握手被拒（服务端 close 1008）
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/api/v1/realtime/ws") as ws:
+            ws.receive_json()
+
+    # 重新登录（会话 B）→ 新 cookie 可正常建立 WS
+    resp2 = client.post(
+        "/api/v1/auth/session",
+        data={"username": "alice", "password": "pw-123456"},
+    )
+    assert resp2.status_code == 200
+    with client.websocket_connect("/api/v1/realtime/ws") as ws:
+        ws.send_text("ping")
+        assert ws.receive_json()["type"] == "pong"
 
 
 # ---------- 通知 API ----------

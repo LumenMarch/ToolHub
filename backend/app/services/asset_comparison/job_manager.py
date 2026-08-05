@@ -125,12 +125,23 @@ class AssetComparisonJobManager:
         job.status = next_status
 
     def _notify_job(self, *, job_id: str, user_id: int, status: str) -> None:
-        """任务状态落库后推送实时通知（仅 owner；终态用 job.terminal）。"""
+        """任务状态落库后推送实时通知（仅 owner；终态用 job.terminal）。
+
+        通知写库为 best-effort：失败仅记日志，不得影响任务状态与
+        realtime 推送——worker 路径中 _notify_job 在任务已 commit 后运行，
+        异常会被 worker 宽 except 捕获，导致已完成任务被错误标记失败。
+        """
         if status in JOB_TERMINAL_STATUSES:
             event = job_terminal_event(job_id=job_id, user_id=user_id, status=status)
-            self._create_terminal_notification(
-                job_id=job_id, user_id=user_id, status=status
-            )
+            try:
+                self._create_terminal_notification(
+                    job_id=job_id, user_id=user_id, status=status
+                )
+            except Exception:
+                logger.exception(
+                    "job terminal notification write failed job_id={}",
+                    job_id,
+                )
         else:
             event = job_updated_event(job_id=job_id, user_id=user_id, status=status)
         realtime_hub.publish(event, user_id=user_id)

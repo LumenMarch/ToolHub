@@ -46,6 +46,8 @@ def revoke_single_user_session(db: Session, user_session: UserSession) -> UserSe
     """单会话吊销：标记 revoked_at 并定向推送带 sid 的 session.revoked。
 
     幂等：已吊销的会话不重复推送；不递增 token_version，其余会话不受影响。
+    推送后主动关闭该 sid 的全部 WS 连接（兜底僵尸连接），
+    客户端收到 session.revoked 后自行登出。
     """
     was_active = user_session.revoked_at is None
     user_session = revoke_user_session(db, user_session)
@@ -57,6 +59,7 @@ def revoke_single_user_session(db: Session, user_session: UserSession) -> UserSe
             ),
             user_id=int(user_session.user_id),
         )
+        realtime_hub.close_user_session(user_session.jti)
     return user_session
 
 
