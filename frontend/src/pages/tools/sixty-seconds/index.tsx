@@ -169,14 +169,15 @@ const SixtySecondsTool: React.FC = () => {
     if (downloadingImage) return;
     setDownloadingImage(true);
     try {
+      const targetDate = dailyResult?.date || queryDate;
       const res = await api.post<{ result: SixtySecondsImageResult }>(
         '/tools/sixty-seconds/image',
-        { date: queryDate || undefined, force_update: false }
+        { date: targetDate || undefined, force_update: false }
       );
       const imgData = res.data.result;
       handleDownloadImage(
         imgData.base64 || imgData.data_uri,
-        imgData.date || queryDate
+        imgData.date || targetDate
       );
     } catch (err) {
       console.error('Failed to fetch image for download:', err);

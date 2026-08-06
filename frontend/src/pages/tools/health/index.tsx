@@ -310,18 +310,18 @@ const HealthTool: React.FC = () => {
                   </span>
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="border border-primary bg-primary/10 px-3 py-1 font-mono text-xs font-bold uppercase tracking-widest text-primary">
-                      {result.bmi?.category_desc || result.bmi?.category || '普通'}
+                      {result.bmi?.category || result.bmi?.category_desc || '普通'}
                     </span>
-                    {(result.bmi?.risk_desc || result.bmi?.risk) && (
+                    {(result.bmi?.risk || result.bmi?.risk_desc) && (
                       <span className="border border-border bg-muted px-3 py-1 font-mono text-xs tracking-wider text-muted-foreground">
-                        {result.bmi?.risk_desc || result.bmi?.risk}
+                        {result.bmi?.risk || result.bmi?.risk_desc}
                       </span>
                     )}
                   </div>
                 </div>
-                {(result.bmi?.evaluation_desc || result.bmi?.evaluation) && (
+                {(result.bmi?.evaluation || result.bmi?.evaluation_desc) && (
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    {result.bmi?.evaluation_desc || result.bmi?.evaluation}
+                    {result.bmi?.evaluation || result.bmi?.evaluation_desc}
                   </p>
                 )}
               </div>
@@ -336,26 +336,26 @@ const HealthTool: React.FC = () => {
                     <div className="flex flex-col gap-1">
                       <span className="font-mono text-xs text-muted-foreground">理想体重范围</span>
                       <span className="font-mono text-lg font-bold text-foreground">
-                        {result.weight_assessment.ideal_weight_range_desc ||
-                          result.weight_assessment.ideal_weight_range ||
+                        {result.weight_assessment.ideal_weight_range ||
+                          result.weight_assessment.ideal_weight_range_desc ||
                           '--'}
                       </span>
                     </div>
                     <div className="flex flex-col gap-1">
                       <span className="font-mono text-xs text-muted-foreground">标准体重</span>
                       <span className="font-mono text-lg font-bold text-foreground">
-                        {result.weight_assessment.standard_weight_desc ||
-                          result.weight_assessment.standard_weight ||
+                        {result.weight_assessment.standard_weight ||
+                          result.weight_assessment.standard_weight_desc ||
                           '--'}
                       </span>
                     </div>
-                    {(result.weight_assessment.status_desc || result.weight_assessment.status) && (
+                    {(result.weight_assessment.status || result.weight_assessment.status_desc) && (
                       <div className="flex flex-col gap-1 md:col-span-2">
                         <span className="font-mono text-xs text-muted-foreground">状态与建议</span>
                         <span className="text-sm text-foreground">
-                          {result.weight_assessment.status_desc || result.weight_assessment.status}
-                          {result.weight_assessment.adjustment_desc || result.weight_assessment.adjustment
-                            ? ` (${result.weight_assessment.adjustment_desc || result.weight_assessment.adjustment})`
+                          {result.weight_assessment.status || result.weight_assessment.status_desc}
+                          {result.weight_assessment.adjustment || result.weight_assessment.adjustment_desc
+                            ? ` (${result.weight_assessment.adjustment || result.weight_assessment.adjustment_desc})`
                             : ''}
                         </span>
                       </div>
@@ -374,31 +374,51 @@ const HealthTool: React.FC = () => {
                     <div className="flex flex-col gap-1 border-b sm:border-b-0 border-border pb-4 sm:pb-0">
                       <span className="font-mono text-xs text-muted-foreground">基础代谢 (BMR)</span>
                       <span className="font-mono text-xl font-bold text-foreground">
-                        {result.metabolism.bmr_desc || (result.metabolism.bmr ? `${result.metabolism.bmr} kcal` : '--')}
+                        {result.metabolism.bmr
+                          ? typeof result.metabolism.bmr === 'number'
+                            ? `${result.metabolism.bmr} kcal`
+                            : result.metabolism.bmr
+                          : result.metabolism.bmr_desc || '--'}
                       </span>
                     </div>
                     <div className="flex flex-col gap-1 border-b sm:border-b-0 border-border pb-4 sm:pb-0">
                       <span className="font-mono text-xs text-muted-foreground">每日总消耗 (TDEE)</span>
                       <span className="font-mono text-xl font-bold text-foreground">
-                        {result.metabolism.tdee_desc || (result.metabolism.tdee ? `${result.metabolism.tdee} kcal` : '--')}
+                        {result.metabolism.tdee
+                          ? typeof result.metabolism.tdee === 'number'
+                            ? `${result.metabolism.tdee} kcal`
+                            : result.metabolism.tdee
+                          : result.metabolism.tdee_desc || '--'}
                       </span>
                     </div>
                     <div className="flex flex-col gap-1 border-b sm:border-b-0 border-border pb-4 sm:pb-0">
                       <span className="font-mono text-xs text-muted-foreground">推荐摄入</span>
                       <span className="font-mono text-xl font-bold text-primary">
-                        {result.metabolism.recommended_calories_desc || (result.metabolism.recommended_calories ? `${result.metabolism.recommended_calories} kcal` : '--')}
+                        {result.metabolism.recommended_calories
+                          ? typeof result.metabolism.recommended_calories === 'number'
+                            ? `${result.metabolism.recommended_calories} kcal`
+                            : result.metabolism.recommended_calories
+                          : result.metabolism.recommended_calories_desc || '--'}
                       </span>
                     </div>
                     <div className="flex flex-col gap-1">
                       <span className="font-mono text-xs text-muted-foreground">减脂建议摄入</span>
                       <span className="font-mono text-lg text-foreground">
-                        {result.metabolism.weight_loss_calories_desc || (result.metabolism.weight_loss_calories ? `${result.metabolism.weight_loss_calories} kcal` : '--')}
+                        {result.metabolism.weight_loss_calories
+                          ? typeof result.metabolism.weight_loss_calories === 'number'
+                            ? `${result.metabolism.weight_loss_calories} kcal`
+                            : result.metabolism.weight_loss_calories
+                          : result.metabolism.weight_loss_calories_desc || '--'}
                       </span>
                     </div>
                     <div className="flex flex-col gap-1">
                       <span className="font-mono text-xs text-muted-foreground">增肌建议摄入</span>
                       <span className="font-mono text-lg text-foreground">
-                        {result.metabolism.weight_gain_calories_desc || (result.metabolism.weight_gain_calories ? `${result.metabolism.weight_gain_calories} kcal` : '--')}
+                        {result.metabolism.weight_gain_calories
+                          ? typeof result.metabolism.weight_gain_calories === 'number'
+                            ? `${result.metabolism.weight_gain_calories} kcal`
+                            : result.metabolism.weight_gain_calories
+                          : result.metabolism.weight_gain_calories_desc || '--'}
                       </span>
                     </div>
                   </div>
@@ -416,7 +436,7 @@ const HealthTool: React.FC = () => {
                       <div className="flex flex-col gap-1">
                         <span className="font-mono text-xs text-muted-foreground">预估体脂率</span>
                         <span className="font-mono text-lg font-bold text-foreground">
-                          {result.body_fat.percentage_desc || result.body_fat.percentage || '--'}
+                          {result.body_fat.percentage || result.body_fat.percentage_desc || '--'}
                         </span>
                       </div>
                     )}
@@ -424,7 +444,7 @@ const HealthTool: React.FC = () => {
                       <div className="flex flex-col gap-1">
                         <span className="font-mono text-xs text-muted-foreground">建议每日饮水量</span>
                         <span className="font-mono text-lg font-bold text-foreground">
-                          {result.health_advice.daily_water_intake_desc || result.health_advice.daily_water_intake}
+                          {result.health_advice.daily_water_intake || result.health_advice.daily_water_intake_desc}
                         </span>
                       </div>
                     )}
