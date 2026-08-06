@@ -5,7 +5,6 @@ import {
   WarningCircle,
   Calendar,
   ArrowUpRight,
-  Quotes,
   DownloadSimple,
 } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
@@ -28,7 +27,7 @@ interface SixtySecondsResult {
   cover?: string;
   image?: string;
   link?: string;
-  api_updated?: boolean;
+  api_updated?: boolean | string;
   api_updated_at?: string;
 }
 
@@ -49,7 +48,6 @@ const getTodayString = (): string => {
 
 const cleanTitle = (rawTitle: string): string => {
   if (!rawTitle) return '';
-  // 移除开头的 "1.", "1、", "01.", "【1】" 等重复编号
   return rawTitle.replace(/^(?:\d+[.、\s]|\d+\s+|【\d+】)\s*/, '').trim();
 };
 
@@ -78,30 +76,15 @@ const handleDownloadImage = (base64Data: string, date: string) => {
 };
 
 const SixtySecondsTool: React.FC = () => {
-  const [viewMode, setViewMode] = useState<'image' | 'text'>('image');
   const [dateInput, setDateInput] = useState<string>(getTodayString());
   const [queryDate, setQueryDate] = useState<string>(getTodayString());
   const [refreshing, setRefreshing] = useState(false);
+  const [downloadingImage, setDownloadingImage] = useState(false);
   const forceUpdateRef = useRef(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const imageQuery = useQuery({
-    queryKey: ['sixty-seconds-image', queryDate],
-    queryFn: async ({ signal }) => {
-      const forceUpdate = forceUpdateRef.current;
-      forceUpdateRef.current = false;
-      const res = await api.post<{ result: SixtySecondsImageResult }>(
-        '/tools/sixty-seconds/image',
-        { date: queryDate || undefined, force_update: forceUpdate },
-        { signal }
-      );
-      return res.data.result;
-    },
-    enabled: viewMode === 'image',
-  });
-
-  const textQuery = useQuery({
+  const dailyQuery = useQuery({
     queryKey: ['sixty-seconds', queryDate],
     queryFn: async ({ signal }) => {
       const forceUpdate = forceUpdateRef.current;
@@ -113,20 +96,17 @@ const SixtySecondsTool: React.FC = () => {
       );
       return res.data.result;
     },
-    enabled: viewMode === 'text',
   });
 
-  const activeQuery = viewMode === 'image' ? imageQuery : textQuery;
-  const loading = activeQuery.isPending || activeQuery.isFetching;
+  const loading = dailyQuery.isPending || dailyQuery.isFetching;
   const error =
-    !activeQuery.isError || activeQuery.isFetching
+    !dailyQuery.isError || dailyQuery.isFetching
       ? ''
-      : axios.isAxiosError(activeQuery.error)
-        ? activeQuery.error.response?.data?.detail || '系统发生错误'
+      : axios.isAxiosError(dailyQuery.error)
+        ? dailyQuery.error.response?.data?.detail || '系统发生错误'
         : '系统发生错误';
 
-  const imageResult = imageQuery.data ?? null;
-  const textResult = textQuery.data ?? null;
+  const dailyResult = dailyQuery.data ?? null;
 
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -147,8 +127,7 @@ const SixtySecondsTool: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const activeResult = viewMode === 'image' ? imageResult : textResult;
-    if (!activeResult || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (!dailyResult || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       return;
     }
     const timer = setTimeout(() => {
@@ -159,16 +138,12 @@ const SixtySecondsTool: React.FC = () => {
       );
     }, 50);
     return () => clearTimeout(timer);
-  }, [imageResult, textResult, viewMode]);
+  }, [dailyResult]);
 
   const handleQuery = (e: React.FormEvent) => {
     e.preventDefault();
     if (dateInput === queryDate) {
-      if (viewMode === 'image') {
-        void imageQuery.refetch();
-      } else {
-        void textQuery.refetch();
-      }
+      void dailyQuery.refetch();
     } else {
       setQueryDate(dateInput);
     }
@@ -178,11 +153,7 @@ const SixtySecondsTool: React.FC = () => {
     const today = getTodayString();
     setDateInput(today);
     if (today === queryDate) {
-      if (viewMode === 'image') {
-        void imageQuery.refetch();
-      } else {
-        void textQuery.refetch();
-      }
+      void dailyQuery.refetch();
     } else {
       setQueryDate(today);
     }
@@ -191,11 +162,28 @@ const SixtySecondsTool: React.FC = () => {
   const handleForceRefresh = () => {
     forceUpdateRef.current = true;
     setRefreshing(true);
-    const activeRefetch = viewMode === 'image' ? imageQuery.refetch() : textQuery.refetch();
-    void activeRefetch.finally(() => setRefreshing(false));
+    void dailyQuery.refetch().finally(() => setRefreshing(false));
   };
 
-  const coverImageUrl = textResult?.cover || textResult?.image;
+  const handleTriggerDownloadImage = async () => {
+    if (downloadingImage) return;
+    setDownloadingImage(true);
+    try {
+      const res = await api.post<{ result: SixtySecondsImageResult }>(
+        '/tools/sixty-seconds/image',
+        { date: queryDate || undefined, force_update: false }
+      );
+      const imgData = res.data.result;
+      handleDownloadImage(
+        imgData.base64 || imgData.data_uri,
+        imgData.date || queryDate
+      );
+    } catch (err) {
+      console.error('Failed to fetch image for download:', err);
+    } finally {
+      setDownloadingImage(false);
+    }
+  };
 
   return (
     <div
@@ -223,33 +211,6 @@ const SixtySecondsTool: React.FC = () => {
             </div>
 
             <div className="flex w-full sm:w-auto items-center gap-4 flex-wrap">
-              {/* 分段按钮：图片版 | 文字版 */}
-              <div className="flex w-full sm:w-auto gap-px bg-border border border-border shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('image')}
-                  aria-pressed={viewMode === 'image'}
-                  className={`flex-1 sm:flex-initial h-12 px-5 flex items-center justify-center font-mono text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
-                    viewMode === 'image'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-background text-muted-foreground hover:text-primary'
-                  }`}
-                >
-                  图片版
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('text')}
-                  aria-pressed={viewMode === 'text'}
-                  className={`flex-1 sm:flex-initial h-12 px-5 flex items-center justify-center font-mono text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
-                    viewMode === 'text'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-background text-muted-foreground hover:text-primary'
-                  }`}
-                >
-                  文字版
-                </button>
-              </div>
 
               <button
                 type="button"
@@ -282,6 +243,20 @@ const SixtySecondsTool: React.FC = () => {
                 <ArrowsClockwise className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                 <span>强制刷新</span>
               </button>
+
+              <button
+                type="button"
+                onClick={handleTriggerDownloadImage}
+                disabled={downloadingImage || loading}
+                className="flex h-12 px-6 flex-1 sm:flex-initial items-center justify-center gap-2 border border-border bg-background font-mono text-xs font-bold uppercase tracking-widest text-foreground hover:border-primary hover:text-primary transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+              >
+                {downloadingImage ? (
+                  <ArrowsClockwise className="h-4 w-4 animate-spin" />
+                ) : (
+                  <DownloadSimple weight="bold" className="h-4 w-4" />
+                )}
+                <span>{downloadingImage ? '下载中...' : '下载长图'}</span>
+              </button>
             </div>
           </form>
 
@@ -293,175 +268,190 @@ const SixtySecondsTool: React.FC = () => {
           )}
         </div>
 
-        {/* 图片版 viewMode === 'image' */}
-        {viewMode === 'image' && (
-          <>
-            {loading && !imageResult && (
-              <div className="flex min-h-72 items-center justify-center border border-border py-12">
-                <LoadingSignal
-                  ariaLabel="正在加载 60s 每日新闻图片"
-                  label="[ 图片加载中... ]"
-                  meta="60s / Image"
-                />
-              </div>
-            )}
-
-            {imageResult && (
-              <div className="result-box flex flex-col gap-8">
-                {/* 头部元信息 & 下载按钮 */}
-                <div className="gsap-reveal flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-6">
-                  <div className="flex flex-col gap-1">
-                    <span className="font-mono text-[0.6875rem] uppercase tracking-[0.2em] text-muted-foreground">
-                      [ 60 SECONDS DAILY NEWS / 60s 每日新闻长图 ]
-                    </span>
-                    <h1 className="font-heading text-3xl sm:text-5xl font-bold tracking-tight text-foreground">
-                      {imageResult.date || queryDate}
-                    </h1>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleDownloadImage(
-                        imageResult.base64 || imageResult.data_uri,
-                        imageResult.date || queryDate
-                      )
-                    }
-                    className="flex h-12 px-6 items-center justify-center gap-2 border border-primary bg-primary font-mono text-xs font-bold uppercase tracking-widest text-primary-foreground transition-all hover:opacity-95 active:scale-95 cursor-pointer w-full sm:w-auto"
-                  >
-                    <DownloadSimple weight="bold" className="h-4 w-4" />
-                    <span>下载图片</span>
-                  </button>
-                </div>
-
-                {/* 图片展示 */}
-                <div className="gsap-reveal border border-border bg-background p-2 sm:p-4 flex flex-col items-center gap-6">
-                  <img
-                    src={imageResult.data_uri}
-                    alt={`60s 每日新闻 ${imageResult.date || queryDate}`}
-                    className="max-w-full h-auto border border-border bg-background"
-                  />
-                  <p className="font-mono text-xs text-muted-foreground text-center">
-                    {imageResult.date || queryDate} · 每日 60s 读懂世界
-                  </p>
-                </div>
-              </div>
-            )}
-          </>
+        {/* 加载状态 */}
+        {loading && !dailyResult && (
+          <div className="flex min-h-72 items-center justify-center border border-border py-12">
+            <LoadingSignal
+              ariaLabel="正在加载 60s 每日新闻"
+              label="[ 新闻要点加载中... ]"
+              meta="60s / News"
+            />
+          </div>
         )}
 
-        {/* 文字版 viewMode === 'text' */}
-        {viewMode === 'text' && (
-          <>
-            {loading && !textResult && (
-              <div className="flex min-h-72 items-center justify-center border border-border py-12">
-                <LoadingSignal
-                  ariaLabel="正在加载 60s 每日新闻文字版"
-                  label="[ 新闻要点加载中... ]"
-                  meta="60s / Text"
-                />
-              </div>
-            )}
-
-            {textResult && (
-              <div className="result-box flex flex-col gap-12">
-                {/* Header / 头部元信息 */}
-                <div className="gsap-reveal flex flex-col gap-4 border-b border-border pb-10">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-[0.6875rem] uppercase tracking-[0.2em] text-muted-foreground">
-                      [ 60 SECONDS DAILY NEWS / 60s 每日新闻 ]
-                    </span>
-                    {textResult.api_updated_at && (
-                      <span className="font-mono text-xs text-muted-foreground border border-border px-3 py-1">
-                        [ 更新于 {textResult.api_updated_at} ]
-                      </span>
-                    )}
-                  </div>
-
-                  <h1 className="font-heading text-4xl sm:text-6xl font-bold tracking-tight text-foreground">
-                    {textResult.date || dateInput} {textResult.day_of_week}
-                  </h1>
-
-                  {textResult.lunar_date && (
-                    <p className="font-mono text-sm text-muted-foreground">
-                      农历: {textResult.lunar_date}
-                    </p>
-                  )}
+        {/* 结果渲染 */}
+        {dailyResult && (
+          <div className="result-box grid grid-cols-1 lg:grid-cols-[minmax(0,672px)_minmax(0,1fr)] gap-10 xl:gap-16 items-start w-full">
+            {/* 左列: 672px 海报 */}
+            <div className="max-w-[672px] w-full mx-auto lg:mx-0 bg-gradient-to-br from-stone-50 via-amber-50/80 to-stone-100 border border-stone-200/60 p-6 sm:p-8 rounded-2xl shadow-xl shadow-stone-200/40 text-stone-800 selection:bg-amber-200">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-stone-200/60 pb-6 mb-6 gap-4">
+                {/* 左侧 */}
+                <div className="flex flex-col gap-1">
+                  <h2 className="text-2xl sm:text-3xl font-bold text-amber-600 tracking-tight">
+                    每天 60 秒读懂世界
+                  </h2>
+                  <p className="font-mono text-xs sm:text-sm text-stone-500 font-normal">
+                    {dailyResult.date || queryDate}
+                    {dailyResult.lunar_date
+                      ? ` · 农历${dailyResult.lunar_date.replace(/^农历/, '')}`
+                      : ''}
+                  </p>
                 </div>
 
-                {/* 封面图片 (Cover / Image) */}
-                {coverImageUrl && (
-                  <div className="gsap-reveal border border-border bg-muted/20 overflow-hidden">
-                    <img
-                      src={coverImageUrl}
-                      alt="60s Daily News Cover"
-                      className="w-full max-h-[32rem] object-contain mx-auto"
-                      loading="lazy"
-                    />
-                  </div>
-                )}
+                {/* 中间斜线 */}
+                <div className="w-[3px] h-10 bg-stone-300/80 skew-x-16 shrink-0 mx-1 sm:mx-2" />
 
-                {/* 新闻列表 (Grid 2 列) */}
-                {textResult.news && textResult.news.length > 0 && (
-                  <div className="gsap-reveal flex flex-col gap-6">
-                    <span className="font-mono text-[0.6875rem] uppercase tracking-[0.2em] text-muted-foreground">
-                      [ BRIEFING ITEMS / 今日新闻要点 ]
-                    </span>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-6 border-t border-border pt-8">
-                      {textResult.news.map((item, idx) => {
-                        const newsNum = String(idx + 1).padStart(2, '0');
-                        const cleaned = cleanTitle(item.title);
-
-                        return (
-                          <div
-                            key={`news-${newsNum}-${item.title}`}
-                            className="flex items-start gap-4 p-4 border border-border bg-card/40 hover:border-primary/50 transition-colors group"
-                          >
-                            <span className="font-mono text-base font-bold text-primary shrink-0 select-none">
-                              {newsNum}.
-                            </span>
-                            <div className="flex-1 flex flex-col gap-1 min-w-0">
-                              {item.link ? (
-                                <a
-                                  href={item.link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-base text-foreground font-medium group-hover:text-primary transition-colors flex items-center justify-between gap-2 break-words"
-                                >
-                                  <span>{cleaned}</span>
-                                  <ArrowUpRight className="h-4 w-4 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
-                                </a>
-                              ) : (
-                                <span className="text-base text-foreground font-medium break-words leading-relaxed">
-                                  {cleaned}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* 60s 微语 / Tips */}
-                {textResult.tip && (
-                  <div className="gsap-reveal border border-border bg-muted/30 p-8 relative flex flex-col gap-4">
-                    <div className="flex items-center gap-2">
-                      <Quotes className="h-6 w-6 text-primary" />
-                      <span className="font-mono text-[0.6875rem] uppercase tracking-[0.2em] text-primary font-bold">
-                        [ 60S TIP / 每日微语 ]
-                      </span>
-                    </div>
-                    <p className="font-mono text-base md:text-lg italic text-foreground leading-relaxed pl-2">
-                      {textResult.tip}
-                    </p>
-                  </div>
-                )}
+                {/* 右侧 */}
+                <div className="text-5xl sm:text-6xl font-bold text-stone-800 shrink-0 font-sans tracking-tight">
+                  {dailyResult.day_of_week || '星期'}
+                </div>
               </div>
-            )}
-          </>
+
+              {/* NewsList */}
+              {dailyResult.news && dailyResult.news.length > 0 && (
+                <div className="space-y-3 my-6">
+                  {dailyResult.news.map((item, idx) => {
+                    const cleaned = cleanTitle(item.title);
+                    return (
+                      <div
+                        key={`poster-item-${item.title}-${item.link || ''}`}
+                        className="flex items-start gap-3 text-stone-800 text-base leading-6"
+                      >
+                        <span className="w-4 h-4 rounded-full bg-stone-200 text-stone-500 text-[10px] font-mono flex items-center justify-center shrink-0 mt-[3px] select-none">
+                          {idx + 1}
+                        </span>
+                        <div className="flex-1 break-words">
+                          {item.link ? (
+                            <a
+                              href={item.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="hover:underline hover:text-amber-700 transition-colors"
+                            >
+                              {cleaned}
+                            </a>
+                          ) : (
+                            <span>{cleaned}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Tip / 微语 */}
+              {dailyResult.tip && (
+                <div className="my-6 px-6 py-4 bg-amber-50/50 rounded-lg text-center text-stone-700 italic text-sm sm:text-base leading-relaxed border border-amber-100/60 relative">
+                  <span className="text-amber-700/30 font-serif text-2xl font-bold mr-1 leading-none select-none">
+                    「
+                  </span>
+                  <span>{dailyResult.tip}</span>
+                  <span className="text-amber-700/30 font-serif text-2xl font-bold ml-1 leading-none select-none">
+                    」
+                  </span>
+                </div>
+              )}
+
+              {/* Footer */}
+              <div className="flex items-end justify-between border-t border-stone-200/60 pt-4 mt-6 text-[0.625rem] text-stone-400 leading-tight gap-4">
+                <div className="flex flex-col gap-1">
+                  <div>新闻联播 / 人民日报 / 新华网 / 腾讯新闻 / 环球网 / 澎湃新闻</div>
+                  <div>
+                    共 {dailyResult.news?.length || 0} 条国内外精选新闻
+                    {dailyResult.api_updated ? ` / 更新于 ${dailyResult.api_updated}` : ''}
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 text-right shrink-0">
+                  <div>@ToolHub</div>
+                  <div>React 界面 / TailwindCSS 样式</div>
+                </div>
+              </div>
+            </div>
+
+            {/* 右列: 信息面板 (仅在宽屏 ≥lg 显示) */}
+            <div className="hidden lg:flex flex-col gap-6 min-w-0 p-6 border border-border bg-card/40 gsap-reveal">
+              <span className="font-mono text-[0.6875rem] uppercase tracking-[0.2em] text-muted-foreground">
+                [ 60S NEWS / 数据信息 ]
+              </span>
+
+              {/* 更新元数据卡 */}
+              <div className="grid grid-cols-2 gap-x-6 gap-y-6">
+                <div className="min-w-0 border-t border-border pt-4">
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">
+                    更新时间
+                  </span>
+                  <span className="mt-2 block min-w-0 font-mono text-xl font-bold tracking-tight text-foreground break-words">
+                    {dailyResult.api_updated_at ||
+                      (typeof dailyResult.api_updated === 'string'
+                        ? dailyResult.api_updated
+                        : dailyResult.api_updated
+                          ? '已更新'
+                          : '已是最新')}
+                  </span>
+                </div>
+
+                <div className="min-w-0 border-t border-border pt-4">
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">
+                    新闻条数
+                  </span>
+                  <span className="mt-2 block min-w-0 font-mono text-xl font-bold tracking-tight text-foreground break-words">
+                    {dailyResult.news?.length || 0}
+                    <span className="text-xs text-muted-foreground font-normal ml-1">条</span>
+                  </span>
+                </div>
+
+                <div className="min-w-0 border-t border-border pt-4">
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">
+                    日期
+                  </span>
+                  <span className="mt-2 block min-w-0 font-mono text-xl font-bold tracking-tight text-foreground break-words">
+                    {dailyResult.date || queryDate}
+                  </span>
+                </div>
+
+                <div className="min-w-0 border-t border-border pt-4">
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">
+                    星期 / 农历
+                  </span>
+                  <span className="mt-2 block min-w-0 font-mono text-xl font-bold tracking-tight text-foreground break-words">
+                    {dailyResult.day_of_week || '—'}
+                    {dailyResult.lunar_date && (
+                      <span className="block text-xs text-muted-foreground font-normal mt-0.5">
+                        农历{dailyResult.lunar_date.replace(/^农历/, '')}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              {/* 来源媒体列表 */}
+              <div className="border-t border-border pt-4">
+                <span className="font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">
+                  来源媒体
+                </span>
+                <p className="mt-2 font-mono text-xs text-muted-foreground leading-relaxed">
+                  新闻联播 / 人民日报 / 新华网 / 腾讯新闻 / 环球网 / 澎湃新闻
+                </p>
+              </div>
+
+              {/* 操作按钮: 查看原文 */}
+              {dailyResult.link && (
+                <div className="border-t border-border pt-4">
+                  <a
+                    href={dailyResult.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-11 items-center justify-center gap-2 border border-border bg-background px-6 font-mono text-xs font-bold uppercase tracking-widest text-foreground hover:border-primary hover:text-primary transition-all active:scale-95"
+                  >
+                    <span>查看原文</span>
+                    <ArrowUpRight className="h-4 w-4" />
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>
