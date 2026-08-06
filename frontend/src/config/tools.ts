@@ -3,6 +3,8 @@ import {
   FileArrowUp,
   FileMagnifyingGlass,
   Key,
+  Palette,
+  QrCode,
   TextT,
   TreeStructure,
 } from '@phosphor-icons/react';
@@ -21,6 +23,8 @@ export interface ToolDefinition {
 // Lazy loaded components for automatic code splitting
 const PwdGenerator = React.lazy(() => import('../pages/tools/pwd-generator/index'));
 const StringAnalyzer = React.lazy(() => import('../pages/tools/string-analyzer/index'));
+const ColorPicker = React.lazy(() => import('../pages/tools/color-picker/index'));
+const QrcodeGenerator = React.lazy(() => import('../pages/tools/qrcode/index'));
 const AssetComparison = React.lazy(() => import('../pages/tools/asset-comparison/index'));
 const AttendanceOrganizer = React.lazy(
   () => import('../pages/tools/attendance-organizer/index')
@@ -43,6 +47,22 @@ export const toolsConfig: ToolDefinition[] = [
     path: '/tools/string-analyzer',
     description: '检查字符串属性并执行 Base64 编码解码周期。',
     component: StringAnalyzer
+  },
+  {
+    id: 'color-picker',
+    name: '颜色工具',
+    icon: Palette,
+    path: '/tools/color-picker',
+    description: '颜色格式转换与配色方案生成。',
+    component: ColorPicker
+  },
+  {
+    id: 'qrcode',
+    name: '二维码生成',
+    icon: QrCode,
+    path: '/tools/qrcode',
+    description: '将文本生成可下载的二维码图片。',
+    component: QrcodeGenerator
   },
   {
     id: 'asset-comparison',
