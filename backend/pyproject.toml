@@ -30,6 +30,9 @@ dependencies = [
     "websockets>=17.0.1",
     "portalocker>=4.1.0",
     "tzdata>=2026.3",
+    "brotli>=1.2.0",
+    "qrcode[pil]>=8.2",
+    "lunar-python>=1.4.8",
 ]
 
 [project.optional-dependencies]

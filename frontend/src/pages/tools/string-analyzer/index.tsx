@@ -52,18 +52,18 @@ const StringAnalyzer: React.FC = () => {
       }
 
     } catch (err: any) {
-      setError(err.response?.data?.detail?.toUpperCase() || '系统发生错误');
+      setError(err.response?.data?.detail || '系统发生错误');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div ref={containerRef} className="flex w-full flex-col pb-20">
+    <div ref={containerRef} className="flex w-full min-w-0 flex-col pb-20 min-[80rem]:-mx-44 min-[80rem]:w-auto">
       <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-16 xl:gap-24 relative z-10">
         
         {/* 左侧输入与操作 */}
-        <div className="gsap-reveal flex flex-col">
+        <div className="gsap-reveal flex flex-col self-start lg:sticky lg:top-28">
           <div className="relative group mb-12">
             <textarea
               value={input}
@@ -85,22 +85,64 @@ const StringAnalyzer: React.FC = () => {
             )}
           </div>
 
-          <div className="flex flex-col gap-4">
-            <p className="mb-2 font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">执行指令</p>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-x-12 gap-y-12">
             {[
-              { id: 'analyze', label: '分析数据' },
-              { id: 'encode_base64', label: 'BASE64 编码' },
-              { id: 'decode_base64', label: 'BASE64 解码' },
-            ].map((act) => (
-              <button
-                key={act.id}
-                onClick={() => handleAction(act.id)}
-                disabled={loading}
-                className="text-2xl md:text-4xl font-bold uppercase tracking-tighter hover:text-primary transition-colors text-left group flex items-center gap-4 disabled:opacity-50"
-              >
-                <span className="w-5 shrink-0 text-primary opacity-40 transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.85,0,0.15,1)] group-hover:translate-x-1 group-hover:opacity-100 group-focus-visible:translate-x-1 group-focus-visible:opacity-100">→</span>
-                {act.label}
-              </button>
+              {
+                label: '基础指令',
+                actions: [
+                  { id: 'analyze', label: '分析数据' },
+                  { id: 'encode_base64', label: 'BASE64 编码' },
+                  { id: 'decode_base64', label: 'BASE64 解码' },
+                ],
+                size: 'text-2xl md:text-4xl',
+              },
+              {
+                label: '哈希 (HASH)',
+                actions: [
+                  { id: 'hash_md5', label: 'MD5' },
+                  { id: 'hash_sha1', label: 'SHA1' },
+                  { id: 'hash_sha256', label: 'SHA256' },
+                  { id: 'hash_sha512', label: 'SHA512' },
+                ],
+                size: 'text-lg md:text-2xl',
+              },
+              {
+                label: 'URL 编码 (URL)',
+                actions: [
+                  { id: 'url_encode', label: 'URL 编码' },
+                  { id: 'url_decode', label: 'URL 解码' },
+                ],
+                size: 'text-lg md:text-2xl',
+              },
+              {
+                label: '压缩 (COMPRESS)',
+                actions: [
+                  { id: 'gzip_encode', label: 'GZIP 编码' },
+                  { id: 'gzip_decode', label: 'GZIP 解码' },
+                  { id: 'deflate_encode', label: 'DEFLATE 编码' },
+                  { id: 'deflate_decode', label: 'DEFLATE 解码' },
+                  { id: 'brotli_encode', label: 'BROTLI 编码' },
+                  { id: 'brotli_decode', label: 'BROTLI 解码' },
+                ],
+                size: 'text-lg md:text-2xl',
+              },
+            ].map((group) => (
+              <div key={group.label} className="flex flex-col gap-3">
+                <p className="mb-1 font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">
+                  {group.label}
+                </p>
+                {group.actions.map((act) => (
+                  <button
+                    key={act.id}
+                    onClick={() => handleAction(act.id)}
+                    disabled={loading}
+                    className={`${group.size} font-bold uppercase tracking-tighter hover:text-primary transition-colors text-left group flex items-center gap-4 disabled:opacity-50`}
+                  >
+                    <span className="w-5 shrink-0 text-primary opacity-40 transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.85,0,0.15,1)] group-hover:translate-x-1 group-hover:opacity-100 group-focus-visible:translate-x-1 group-focus-visible:opacity-100">→</span>
+                    {act.label}
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
         </div>
@@ -115,7 +157,7 @@ const StringAnalyzer: React.FC = () => {
                 处理中...
               </div>
             ) : result ? (
-              <div className="result-box text-xl md:text-2xl font-mono text-foreground break-all leading-relaxed selection:bg-primary selection:text-primary-foreground">
+              <div className="result-box max-h-[70vh] overflow-y-auto difference-scroll pr-2 text-xl md:text-2xl font-mono text-foreground break-all leading-relaxed selection:bg-primary selection:text-primary-foreground">
                 {result.action === 'analyze' ? (
                   <div className="flex flex-col gap-8">
                     <div>
