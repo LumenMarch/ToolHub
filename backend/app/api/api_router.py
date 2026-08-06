@@ -10,7 +10,9 @@ from app.api.endpoints import (
     atlas_merge,
     attendance,
     auth,
+    calendar_tools,
     color_tools,
+    health_tools,
     notifications,
     qrcode_tools,
     realtime,
@@ -46,6 +48,12 @@ api_router.include_router(
 )
 api_router.include_router(
     qrcode_tools.router, prefix="/tools/qrcode", tags=["qrcode_tools"]
+)
+api_router.include_router(
+    health_tools.router, prefix="/tools/health", tags=["health_tools"]
+)
+api_router.include_router(
+    calendar_tools.router, prefix="/tools/calendar", tags=["calendar_tools"]
 )
 api_router.include_router(
     asset_comparison.router, prefix="/tools/asset", tags=["asset_comparison"]

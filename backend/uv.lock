@@ -43,6 +43,7 @@ dependencies = [
     { name = "fastexcel" },
     { name = "fpdf" },
     { name = "loguru" },
+    { name = "lunar-python" },
     { name = "numpy" },
     { name = "openpyxl" },
     { name = "passlib" },
@@ -86,6 +87,7 @@ requires-dist = [
     { name = "fastexcel", specifier = ">=0.20.2" },
     { name = "fpdf", specifier = ">=1.7.2" },
     { name = "loguru", specifier = ">=0.7.3" },
+    { name = "lunar-python", specifier = ">=1.4.8" },
     { name = "numpy", specifier = "<2.2.0" },
     { name = "openpyxl", specifier = "<3.1.5" },
     { name = "passlib", specifier = ">=1.7.4" },
@@ -458,6 +460,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/3a/05/a1dae3dffd1116099
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/29/0348de65b8cc732daa3e33e67806420b2ae89bdce2b04af740289c5c6c8c/loguru-0.7.3-py3-none-any.whl", hash = "sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c", size = 61595, upload-time = "2024-12-06T11:20:54.538Z" },
 ]
+
+[[package]]
+name = "lunar-python"
+version = "1.4.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/45/5154c95ae7feaab7ca508e71c3288692c09952dfe33b03b7c2f18a32e2cd/lunar_python-1.4.8.tar.gz", hash = "sha256:3aa11cc73c25e70ddf0ba5bdac7398c03acc9491a3aa512a91c9642973b669d6", size = 105862, upload-time = "2025-11-05T12:31:53.353Z" }
 
 [[package]]
 name = "numpy"
