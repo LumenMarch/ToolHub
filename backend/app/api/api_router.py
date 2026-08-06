@@ -10,7 +10,9 @@ from app.api.endpoints import (
     atlas_merge,
     attendance,
     auth,
+    color_tools,
     notifications,
+    qrcode_tools,
     realtime,
     sixty_seconds,
     string_tools,
@@ -38,6 +40,12 @@ api_router.include_router(
 # To add a new tool, import its router and include it here
 api_router.include_router(
     string_tools.router, prefix="/tools/string", tags=["string_tools"]
+)
+api_router.include_router(
+    color_tools.router, prefix="/tools/color", tags=["color_tools"]
+)
+api_router.include_router(
+    qrcode_tools.router, prefix="/tools/qrcode", tags=["qrcode_tools"]
 )
 api_router.include_router(
     asset_comparison.router, prefix="/tools/asset", tags=["asset_comparison"]
