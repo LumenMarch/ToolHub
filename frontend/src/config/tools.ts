@@ -1,8 +1,11 @@
 import React from 'react';
 import {
+  CalendarBlank,
   FileArrowUp,
   FileMagnifyingGlass,
+  Heartbeat,
   Key,
+  Newspaper,
   Palette,
   QrCode,
   TextT,
@@ -31,6 +34,10 @@ const AttendanceOrganizer = React.lazy(
 );
 const AtlasMerge = React.lazy(() => import('../pages/tools/atlas-merge/index'));
 
+const Health = React.lazy(() => import('../pages/tools/health/index'));
+const Calendar = React.lazy(() => import('../pages/tools/calendar/index'));
+const SixtySeconds = React.lazy(() => import('../pages/tools/sixty-seconds/index'));
+
 export const toolsConfig: ToolDefinition[] = [
   {
     id: 'pwd-generator',
@@ -38,7 +45,7 @@ export const toolsConfig: ToolDefinition[] = [
     icon: Key,
     path: '/tools/pwd-generator',
     description: '在本地生成具有确定性参数的高熵密钥。',
-    component: PwdGenerator
+    component: PwdGenerator,
   },
   {
     id: 'string-analyzer',
@@ -46,7 +53,7 @@ export const toolsConfig: ToolDefinition[] = [
     icon: TextT,
     path: '/tools/string-analyzer',
     description: '检查字符串属性并执行 Base64 编码解码周期。',
-    component: StringAnalyzer
+    component: StringAnalyzer,
   },
   {
     id: 'color-picker',
@@ -54,7 +61,7 @@ export const toolsConfig: ToolDefinition[] = [
     icon: Palette,
     path: '/tools/color-picker',
     description: '颜色格式转换与配色方案生成。',
-    component: ColorPicker
+    component: ColorPicker,
   },
   {
     id: 'qrcode',
@@ -62,7 +69,7 @@ export const toolsConfig: ToolDefinition[] = [
     icon: QrCode,
     path: '/tools/qrcode',
     description: '将文本生成可下载的二维码图片。',
-    component: QrcodeGenerator
+    component: QrcodeGenerator,
   },
   {
     id: 'asset-comparison',
@@ -70,7 +77,7 @@ export const toolsConfig: ToolDefinition[] = [
     icon: FileMagnifyingGlass,
     path: '/tools/asset-comparison',
     description: '对比并核实财务数据与部门及保管人账目明细。',
-    component: AssetComparison
+    component: AssetComparison,
   },
   {
     id: 'attendance-organizer',
@@ -78,7 +85,7 @@ export const toolsConfig: ToolDefinition[] = [
     icon: FileArrowUp,
     path: '/tools/attendance-organizer',
     description: '整理通行记录并标记离岗、用餐、超时及数据异常。',
-    component: AttendanceOrganizer
+    component: AttendanceOrganizer,
   },
   {
     id: 'atlas-merge',
@@ -86,6 +93,30 @@ export const toolsConfig: ToolDefinition[] = [
     icon: TreeStructure,
     path: '/tools/atlas-merge',
     description: '合并 unit-archive 测试日志为统一 CSV 结果。',
-    component: AtlasMerge
-  }
+    component: AtlasMerge,
+  },
+  {
+    id: 'health',
+    name: '健康指标',
+    icon: Heartbeat,
+    path: '/tools/health',
+    description: '计算 BMI、基础代谢与推荐热量。',
+    component: Health,
+  },
+  {
+    id: 'calendar',
+    name: '日历',
+    icon: CalendarBlank,
+    path: '/tools/calendar',
+    description: '农历黄历、节气宜忌与摸鱼倒计时。',
+    component: Calendar,
+  },
+  {
+    id: 'sixty-seconds',
+    name: '60s 每日新闻',
+    icon: Newspaper,
+    path: '/tools/sixty-seconds',
+    description: '每天 60 秒读懂世界。',
+    component: SixtySeconds,
+  },
 ];
