@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { FileArrowUp, X } from '@phosphor-icons/react';
 import { cn } from '../lib/cn';
+import { collectDroppedFiles } from '../lib/dragFiles';
 
 interface FileDropZoneProps {
   /** 输入框 id，用于 label/labelledby 关联 */
@@ -34,6 +35,10 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+/**
+ * 递归读取目录条目:readEntries 每次只返回一部分条目,
+ * 必须循环调用直到返回空数组才算读完(Chromium 行为)。
+ */
 const FileDropZone: React.FC<FileDropZoneProps> = ({
   accept,
   description,
@@ -50,17 +55,36 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+  const deliverFiles = (files: File[]) => {
+    if (multiple && onSelectMultiple) {
+      onSelectMultiple(files);
+    } else if (files.length > 0) {
+      onSelect(files[0]);
+    }
+  };
+
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
     if (disabled) return;
 
-    const files = event.dataTransfer.files;
-    if (multiple && onSelectMultiple) {
-      onSelectMultiple(Array.from(files));
-    } else if (files.length > 0) {
-      onSelect(files[0]);
+    const dataTransfer = event.dataTransfer;
+    // 优先走 items 条目:拖入文件夹时 files 为空,必须递归遍历目录条目;
+    // 纯文件拖放同样走条目,顺序与 files 一致,行为透明。
+    const entries: FileSystemEntry[] = [];
+    for (let index = 0; index < dataTransfer.items.length; index++) {
+      const entry = dataTransfer.items[index]?.webkitGetAsEntry?.();
+      if (entry) entries.push(entry);
     }
+    if (entries.length > 0) {
+      const collected = await collectDroppedFiles(entries);
+      if (collected.length > 0) {
+        deliverFiles(collected);
+        return;
+      }
+    }
+    // 兜底:无条目或条目收集为空时退回 files。
+    deliverFiles(Array.from(dataTransfer.files));
   };
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {

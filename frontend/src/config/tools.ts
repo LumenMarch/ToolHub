@@ -2,6 +2,7 @@ import React from 'react';
 import {
   CalendarBlank,
   FileArrowUp,
+  FileImage,
   FileMagnifyingGlass,
   Heartbeat,
   Key,
@@ -33,6 +34,7 @@ const AttendanceOrganizer = React.lazy(
   () => import('../pages/tools/attendance-organizer/index')
 );
 const AtlasMerge = React.lazy(() => import('../pages/tools/atlas-merge/index'));
+const ImageToPdf = React.lazy(() => import('../pages/tools/image-to-pdf/index'));
 
 const Health = React.lazy(() => import('../pages/tools/health/index'));
 const Calendar = React.lazy(() => import('../pages/tools/calendar/index'));
@@ -118,5 +120,13 @@ export const toolsConfig: ToolDefinition[] = [
     path: '/tools/sixty-seconds',
     description: '每天 60 秒读懂世界。',
     component: SixtySeconds,
+  },
+  {
+    id: 'image-to-pdf',
+    name: '图片转 PDF',
+    icon: FileImage,
+    path: '/tools/image-to-pdf',
+    description: '将单张或多张图片按顺序合并为单个 PDF 文件。',
+    component: ImageToPdf,
   },
 ];
