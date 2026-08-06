@@ -94,3 +94,15 @@ def test_qrcode_invalid_size_400(admin_client):
             headers=auth_header(token),
         )
         assert resp.status_code == 400, (size, resp.text)
+
+
+def test_qrcode_oversized_content_400(admin_client):
+    """超过二维码容量上限（version 40）的内容返回 400 而非 500。"""
+    client, token = admin_client
+    resp = client.post(
+        QR_URL,
+        json={"text": "A" * 3000, "size": 256, "level": "H"},
+        headers=auth_header(token),
+    )
+    assert resp.status_code == 400, resp.text
+    assert "内容过长" in resp.json()["detail"]

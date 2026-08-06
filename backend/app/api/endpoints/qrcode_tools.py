@@ -41,4 +41,8 @@ def create_qrcode(
             detail=f"Invalid size, must be between {MIN_SIZE} and {MAX_SIZE}",
         )
 
-    return {"result": generate_qrcode(request.text, size=request.size, level=level)}
+    try:
+        result = generate_qrcode(request.text, size=request.size, level=level)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"result": result}

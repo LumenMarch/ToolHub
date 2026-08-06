@@ -71,6 +71,8 @@ def process_string(
     elif request.action == "gzip_decode":
         try:
             return {"result": gzip_decode(request.text)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid gzip data")
     elif request.action == "deflate_encode":
@@ -78,6 +80,8 @@ def process_string(
     elif request.action == "deflate_decode":
         try:
             return {"result": deflate_decode(request.text)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid deflate data")
     elif request.action == "brotli_encode":
@@ -85,6 +89,8 @@ def process_string(
     elif request.action == "brotli_decode":
         try:
             return {"result": brotli_decode(request.text)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid brotli data")
     else:

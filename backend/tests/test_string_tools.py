@@ -1,5 +1,10 @@
 """string_tools 端点测试：hash / url / gzip / deflate / brotli 等 action 的往返与边界。"""
 
+import gzip
+import zlib
+
+import brotli
+
 from tests.conftest import auth_header
 
 TOOLS_URL = "/api/v1/tools/string/process"
@@ -122,6 +127,27 @@ def test_decode_actions_reject_invalid_hex(admin_client):
             headers=_headers(token),
         )
         assert resp.status_code == 400, (action, resp.text)
+
+
+def test_decode_actions_reject_high_expansion(admin_client):
+    """高膨胀压缩数据（解压炸弹）被 16MB 输出上限拦截，返回 400 而非撑爆内存。"""
+    client, token = admin_client
+    # 32MB 重复字节，远超 16MB 解压上限；压缩后 hex 远小于 1MB 输入上限
+    big = b"a" * (32 * 1024 * 1024)
+    cases = {
+        "gzip_decode": gzip.compress(big).hex(),
+        "deflate_decode": zlib.compress(big).hex(),
+        "brotli_decode": brotli.compress(big).hex(),
+    }
+    for action, hex_text in cases.items():
+        assert len(hex_text) < 1024 * 1024, action
+        resp = client.post(
+            TOOLS_URL,
+            json={"text": hex_text, "action": action},
+            headers=_headers(token),
+        )
+        assert resp.status_code == 400, (action, resp.text)
+        assert resp.json()["detail"] == "解压结果超过大小限制", (action, resp.text)
 
 
 def test_empty_text_400(admin_client):

@@ -15,6 +15,7 @@ from qrcode.constants import (
     ERROR_CORRECT_M,
     ERROR_CORRECT_Q,
 )
+from qrcode.exceptions import DataOverflowError
 
 # level 取值 → qrcode 纠错级别映射
 _LEVEL_MAP = {
@@ -40,12 +41,18 @@ def generate_qrcode(text: str, size: int = 256, level: str = "M") -> dict:
 
     # 生成二维码图像（box_size=1、border=4 为基础网格），再放大到目标尺寸。
     # 使用最近邻插值，避免模块边缘模糊影响扫码。
-    img = qrcode.make(
-        text,
-        error_correction=error_correction,
-        box_size=1,
-        border=4,
-    )
+    try:
+        img = qrcode.make(
+            text,
+            error_correction=error_correction,
+            box_size=1,
+            border=4,
+        )
+    except (DataOverflowError, ValueError):
+        # 内容超过 version 40 容量：显式版本拟合失败抛 DataOverflowError；
+        # 自动拟合时 version setter 的 check_version(41) 抛 ValueError。
+        # 两种都表示内容过长，转 ValueError 由端点转 400（服务层不依赖 fastapi）。
+        raise ValueError("内容过长，超出二维码容量上限") from None
     img = img.resize((size, size), Image.Resampling.NEAREST)
 
     buffer = io.BytesIO()
