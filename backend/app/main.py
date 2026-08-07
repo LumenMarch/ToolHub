@@ -1,5 +1,6 @@
 import asyncio
-from contextlib import suppress
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -25,9 +26,27 @@ ensure_schema_compat()
 # 写入默认权限与角色（幂等 — 已有数据时跳过）
 run_seed()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    # startup 顺序（与原注册顺序一致）
+    await bind_realtime_hub_loop()
+    await start_task_artifact_cleanup()
+    await bootstrap_initial_admin()
+    await start_unapproved_user_cleanup()
+    await recover_asset_comparison_jobs()
+    yield
+    # shutdown 顺序（与原注册顺序一致）
+    await shutdown_asset_comparison_jobs()
+    await shutdown_realtime_redis()
+    await shutdown_task_artifact_cleanup()
+    await shutdown_unapproved_user_cleanup()
+
+
 app = FastAPI(
     title="ToolHub API",
     openapi_url="/api/v1/openapi.json",
+    lifespan=lifespan,
 )
 
 # Configure CORS
@@ -70,7 +89,7 @@ app.include_router(api_router, prefix="/api/v1")
 #  必须以模块属性形式访问，且其 containing_dir 是 bundle 的父目录，因此数据路径
 #  用 __file__ 的 parents[1] 定位，而不是 containing_dir。）
 try:
-    __compiled__  # noqa: B018 - Nuitka 注入的伪模块，用于检测 frozen 运行
+    __compiled__  # type: ignore # noqa: B018 - Nuitka 注入的伪模块，用于检测 frozen 运行
     _NUITKA_FROZEN = True
 except NameError:
     _NUITKA_FROZEN = False
@@ -131,6 +150,8 @@ def cleanup_expired_unapproved_users() -> int:
     删除前先吊销会话（递增 token_version + 推送 session.revoked），
     与管理员删除用户的语义一致；随后物理删除。
     """
+    from sqlalchemy import delete
+
     from app.core.config import settings
     from app.crud.crud_user import get_unapproved_users_older_than
     from app.db.session import SessionLocal
@@ -160,16 +181,15 @@ def cleanup_expired_unapproved_users() -> int:
             if current.status not in (USER_STATUS_PENDING, USER_STATUS_REJECTED):
                 continue
             revoke_user_sessions(db, current)
-            deleted = (
-                db.query(User)
-                .filter(
+            deleted = db.execute(
+                delete(User).where(
                     User.id == current.id,
                     User.status.in_([USER_STATUS_PENDING, USER_STATUS_REJECTED]),
-                )
-                .delete(synchronize_session=False)
+                ),
+                execution_options={"synchronize_session": False},
             )
             db.commit()
-            removed += deleted
+            removed += deleted.rowcount
         if removed:
             logger.info(
                 "cleaned {} expired unapproved users (ttl_days={})",
@@ -203,7 +223,7 @@ def cleanup_expired_sessions_and_notifications() -> int:
       ACCESS_TOKEN_EXPIRE_MINUTES —— token 早已过期且无活动的死会话；
     - 通知：read_at 超过 NOTIFICATION_RETENTION_DAYS 天的已读通知。
     """
-    from sqlalchemy import func
+    from sqlalchemy import delete, func
 
     from app.core.config import settings
     from app.crud.crud_notification import delete_expired_notifications
@@ -216,23 +236,21 @@ def cleanup_expired_sessions_and_notifications() -> int:
         revoked_cutoff = now - timedelta(days=settings.SESSION_REVOKED_RETENTION_DAYS)
         token_ttl = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         removed = 0
-        removed += (
-            db.query(UserSession)
-            .filter(
+        removed += db.execute(
+            delete(UserSession).where(
                 UserSession.revoked_at.isnot(None),
                 UserSession.revoked_at < revoked_cutoff,
-            )
-            .delete(synchronize_session=False)
-        )
-        removed += (
-            db.query(UserSession)
-            .filter(
+            ),
+            execution_options={"synchronize_session": False},
+        ).rowcount
+        removed += db.execute(
+            delete(UserSession).where(
                 UserSession.revoked_at.is_(None),
                 func.coalesce(UserSession.last_seen_at, UserSession.created_at)
                 < now - token_ttl,
-            )
-            .delete(synchronize_session=False)
-        )
+            ),
+            execution_options={"synchronize_session": False},
+        ).rowcount
         db.commit()
         removed += delete_expired_notifications(
             db, now - timedelta(days=settings.NOTIFICATION_RETENTION_DAYS)
@@ -244,7 +262,6 @@ def cleanup_expired_sessions_and_notifications() -> int:
         db.close()
 
 
-@app.on_event("startup")
 async def bind_realtime_hub_loop() -> None:
     """绑定实时 hub 到主事件循环，并尝试启用可选 Redis fan-out。"""
     from app.core.config import settings
@@ -258,7 +275,6 @@ async def bind_realtime_hub_loop() -> None:
         )
 
 
-@app.on_event("startup")
 async def start_task_artifact_cleanup() -> None:
     """启动清理任务并定期回收缓存空间。"""
     global artifact_cleanup_task
@@ -270,7 +286,6 @@ async def start_task_artifact_cleanup() -> None:
     )
 
 
-@app.on_event("startup")
 async def bootstrap_initial_admin() -> None:
     """用户表为空时引导创建初始管理员；失败则记录 ERROR 并标记健康检查失败。"""
     global initial_admin_bootstrap_error
@@ -284,7 +299,6 @@ async def bootstrap_initial_admin() -> None:
         logger.info("初始管理员引导完成")
 
 
-@app.on_event("startup")
 async def start_unapproved_user_cleanup() -> None:
     """启动周期清理（先立即执行一次，再按周期调度）。
 
@@ -304,7 +318,6 @@ async def start_unapproved_user_cleanup() -> None:
     )
 
 
-@app.on_event("startup")
 async def recover_asset_comparison_jobs() -> None:
     """恢复资产核对任务状态并清理过期产物。"""
     from app.api.endpoints.asset_comparison import asset_comparison_job_manager
@@ -312,7 +325,6 @@ async def recover_asset_comparison_jobs() -> None:
     asset_comparison_job_manager.recover_interrupted()
 
 
-@app.on_event("shutdown")
 async def shutdown_asset_comparison_jobs() -> None:
     """停止资产核对后台执行器。"""
     from app.api.endpoints.asset_comparison import asset_comparison_job_manager
@@ -320,7 +332,6 @@ async def shutdown_asset_comparison_jobs() -> None:
     asset_comparison_job_manager.shutdown()
 
 
-@app.on_event("shutdown")
 async def shutdown_realtime_redis() -> None:
     """关闭可选 Redis Pub/Sub 订阅。"""
     from app.services.realtime.hub import realtime_hub
@@ -328,7 +339,6 @@ async def shutdown_realtime_redis() -> None:
     await realtime_hub.stop_redis()
 
 
-@app.on_event("shutdown")
 async def shutdown_task_artifact_cleanup() -> None:
     """停止任务产物周期清理。"""
     global artifact_cleanup_task
@@ -341,7 +351,6 @@ async def shutdown_task_artifact_cleanup() -> None:
     artifact_cleanup_task = None
 
 
-@app.on_event("shutdown")
 async def shutdown_unapproved_user_cleanup() -> None:
     """停止待审批用户周期清理。"""
     global unapproved_user_cleanup_task
