@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.notification import Notification
@@ -54,7 +55,9 @@ def create_notifications(
 
 
 def get_notification_by_id(db: Session, notification_id: int) -> Notification | None:
-    return db.query(Notification).filter(Notification.id == notification_id).first()
+    return db.scalars(
+        select(Notification).where(Notification.id == notification_id)
+    ).first()
 
 
 def get_notifications(
@@ -65,24 +68,24 @@ def get_notifications(
     unread_only: bool = False,
 ) -> tuple[list[Notification], int]:
     """当前用户通知列表（创建时间倒序），返回 (items, total)。"""
-    query = db.query(Notification).filter(Notification.user_id == user_id)
+    query = select(Notification).where(Notification.user_id == user_id)
     if unread_only:
-        query = query.filter(Notification.read_at.is_(None))
-    total = query.count()
-    items = (
-        query.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
-    )
+        query = query.where(Notification.read_at.is_(None))
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    items = db.scalars(
+        query.order_by(Notification.created_at.desc()).offset(skip).limit(limit)
+    ).all()
     return items, total
 
 
 def get_unread_notification_count(db: Session, user_id: int) -> int:
-    return (
-        db.query(Notification)
-        .filter(
+    return db.scalar(
+        select(func.count())
+        .select_from(Notification)
+        .where(
             Notification.user_id == user_id,
             Notification.read_at.is_(None),
         )
-        .count()
     )
 
 
@@ -98,27 +101,27 @@ def mark_notification_read(db: Session, notification: Notification) -> Notificat
 
 def mark_all_notifications_read(db: Session, user_id: int) -> int:
     """标记当前用户全部通知已读，返回受影响行数。"""
-    result = (
-        db.query(Notification)
-        .filter(
+    result = db.execute(
+        update(Notification)
+        .where(
             Notification.user_id == user_id,
             Notification.read_at.is_(None),
         )
-        .update({"read_at": datetime.utcnow()}, synchronize_session=False)
+        .values({"read_at": datetime.utcnow()}),
+        execution_options={"synchronize_session": False},
     )
     db.commit()
-    return result
+    return result.rowcount
 
 
 def delete_expired_notifications(db: Session, cutoff: datetime) -> int:
     """删除 read_at 早于 cutoff 的已读通知，返回受影响行数。"""
-    result = (
-        db.query(Notification)
-        .filter(
+    result = db.execute(
+        delete(Notification).where(
             Notification.read_at.isnot(None),
             Notification.read_at < cutoff,
-        )
-        .delete(synchronize_session=False)
+        ),
+        execution_options={"synchronize_session": False},
     )
     db.commit()
-    return result
+    return result.rowcount

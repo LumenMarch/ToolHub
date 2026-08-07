@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -45,14 +46,14 @@ def get_overview(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     total_users = count_users(db)
-    active_users_7d = (
-        db.query(User)
-        .filter(User.last_login_at.isnot(None), User.last_login_at >= seven_days_ago)
-        .count()
+    active_users_7d = db.scalar(
+        select(func.count())
+        .select_from(User)
+        .where(User.last_login_at.isnot(None), User.last_login_at >= seven_days_ago)
     )
     from app.models.tool_meta import ToolMeta
 
-    total_tools = db.query(ToolMeta).count()
+    total_tools = db.scalar(select(func.count()).select_from(ToolMeta))
     audit_logs_today = count_logs_since(db, today_start)
 
     return OverviewStats(

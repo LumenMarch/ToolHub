@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash
@@ -14,11 +15,11 @@ from app.schemas.user import UserCreate, UserCreateByAdmin, UserUpdate
 
 
 def get_user_by_username(db: Session, username: str) -> User | None:
-    return db.query(User).filter(User.username == username).first()
+    return db.scalars(select(User).where(User.username == username)).first()
 
 
 def get_user_by_id(db: Session, user_id: int) -> User | None:
-    return db.query(User).filter(User.id == user_id).first()
+    return db.scalars(select(User).where(User.id == user_id)).first()
 
 
 def get_users(
@@ -34,13 +35,15 @@ def get_users(
     online_ids 通过单次批量查询获得（见 crud_session.get_online_user_ids），
     避免每用户 N+1 次会话查询。
     """
-    query = db.query(User)
+    query = select(User)
     if search:
-        query = query.filter(User.username.ilike(f"%{search}%"))
+        query = query.where(User.username.ilike(f"%{search}%"))
     if statuses:
-        query = query.filter(User.status.in_(statuses))
-    total = query.count()
-    items = query.order_by(User.created_at.desc()).offset(skip).limit(limit).all()
+        query = query.where(User.status.in_(statuses))
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    items = db.scalars(
+        query.order_by(User.created_at.desc()).offset(skip).limit(limit)
+    ).all()
     online_ids: set[int] = set()
     if items:
         from app.crud.crud_session import get_online_user_ids
@@ -50,7 +53,7 @@ def get_users(
 
 
 def count_users(db: Session) -> int:
-    return db.query(User).count()
+    return db.scalar(select(func.count()).select_from(User))
 
 
 def create_user(db: Session, user_in: UserCreate) -> User:
@@ -86,15 +89,14 @@ def create_user_by_admin(db: Session, user_in: UserCreateByAdmin) -> User:
 
 def get_unapproved_users_older_than(db: Session, cutoff: datetime) -> list[User]:
     """查询创建时间早于 cutoff 且仍未审批（pending/rejected）的用户。"""
-    return (
-        db.query(User)
-        .filter(
+    return db.scalars(
+        select(User)
+        .where(
             User.status.in_([USER_STATUS_PENDING, USER_STATUS_REJECTED]),
             User.created_at < cutoff,
         )
         .order_by(User.id)
-        .all()
-    )
+    ).all()
 
 
 def update_user(db: Session, user: User, user_in: UserUpdate) -> User:

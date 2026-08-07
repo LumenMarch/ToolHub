@@ -1,3 +1,4 @@
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.tool_meta import ToolMeta
@@ -5,16 +6,16 @@ from app.schemas.tool_meta import ToolMetaBulkItem, ToolMetaUpdate
 
 
 def get_all_metas(db: Session) -> list[ToolMeta]:
-    return db.query(ToolMeta).all()
+    return db.scalars(select(ToolMeta)).all()
 
 
 def get_metas_map(db: Session) -> dict[str, ToolMeta]:
     """返回 {tool_id: ToolMeta} 字典，便于前端 merge。"""
-    return {m.tool_id: m for m in db.query(ToolMeta).all()}
+    return {m.tool_id: m for m in db.scalars(select(ToolMeta)).all()}
 
 
 def get_meta_by_tool_id(db: Session, tool_id: str) -> ToolMeta | None:
-    return db.query(ToolMeta).filter(ToolMeta.tool_id == tool_id).first()
+    return db.scalars(select(ToolMeta).where(ToolMeta.tool_id == tool_id)).first()
 
 
 def is_tool_enabled(db: Session, tool_id: str) -> bool:

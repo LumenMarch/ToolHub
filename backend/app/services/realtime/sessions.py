@@ -5,6 +5,7 @@ REST 仍是真相源；此处只递增 token_version / 标记会话吊销并 pub
 
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.crud.crud_session import (
@@ -78,7 +79,7 @@ def notify_role_permissions_updated(db: Session, role_id: int) -> None:
     """角色权限变更后，通知持有该角色的全部在线用户刷新权限。"""
     from app.models.role import Role
 
-    role = db.query(Role).filter(Role.id == role_id).first()
+    role = db.scalars(select(Role).where(Role.id == role_id)).first()
     if role is None:
         return
     # selectin 已加载 users；逐用户定向推送
