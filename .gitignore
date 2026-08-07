@@ -9,9 +9,8 @@ env/
 .python-version
 
 # Database
-*.db
+*.db*
 *.sqlite3
-toolhub.db
 # Ruff cache
 .ruff_cache/
 
