@@ -12,6 +12,7 @@ from time import perf_counter
 from typing import Any
 
 from loguru import logger
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -163,11 +164,9 @@ class AssetComparisonJobManager:
         }.get(status, "资产核对任务已结束")
         payload: dict[str, Any] = {"job_id": job_id, "status": status}
         with SessionLocal() as db:
-            job = (
-                db.query(AssetComparisonJob)
-                .filter(AssetComparisonJob.id == job_id)
-                .first()
-            )
+            job = db.scalars(
+                select(AssetComparisonJob).where(AssetComparisonJob.id == job_id)
+            ).first()
             if job is None:
                 return
             # 任务名：取输入快照 files 字典首项的文件名（如有），便于用户区分任务。
@@ -207,14 +206,12 @@ class AssetComparisonJobManager:
         create_started_at = perf_counter()
         self.cleanup()
         with self._lock, SessionLocal() as db:
-            existing = (
-                db.query(AssetComparisonJob)
-                .filter(
+            existing = db.scalars(
+                select(AssetComparisonJob).where(
                     AssetComparisonJob.user_id == user_id,
                     AssetComparisonJob.client_request_id == client_request_id,
                 )
-                .first()
-            )
+            ).first()
             if existing is not None:
                 existing = self._get_owned_job(db, user_id, existing.id)
                 return self._serialize(existing), True
@@ -644,9 +641,8 @@ class AssetComparisonJobManager:
         requeue_job_ids = []
         failed_job_ids = []
         with self._lock, SessionLocal() as db:
-            jobs = (
-                db.query(AssetComparisonJob)
-                .filter(
+            jobs = db.scalars(
+                select(AssetComparisonJob).where(
                     AssetComparisonJob.status.in_(
                         [
                             "queued",
@@ -658,8 +654,7 @@ class AssetComparisonJobManager:
                         ]
                     )
                 )
-                .all()
-            )
+            ).all()
             for job in jobs:
                 if job.status == "base_ready":
                     if not self._has_comparison_snapshot(job):
@@ -731,14 +726,12 @@ class AssetComparisonJobManager:
         # 提交后再推送，避免持锁 publish；收集 (job_id, user_id, status)
         expired_notifies: list[tuple[str, int, str]] = []
         with self._lock, SessionLocal() as db:
-            active_expired = (
-                db.query(AssetComparisonJob)
-                .filter(
+            active_expired = db.scalars(
+                select(AssetComparisonJob).where(
                     AssetComparisonJob.expires_at <= now,
                     AssetComparisonJob.status.in_(JOB_ACTIVE_STATUSES),
                 )
-                .all()
-            )
+            ).all()
             for job in active_expired:
                 job.expires_at = now + timedelta(
                     hours=settings.ASSET_COMPARISON_JOB_TTL_HOURS
@@ -751,15 +744,13 @@ class AssetComparisonJobManager:
                     metadata={"client_request_id": job.client_request_id},
                 )
 
-            expired = (
-                db.query(AssetComparisonJob)
-                .filter(
+            expired = db.scalars(
+                select(AssetComparisonJob).where(
                     AssetComparisonJob.expires_at <= now,
                     AssetComparisonJob.status.notin_(JOB_ACTIVE_STATUSES),
                     AssetComparisonJob.status != "expired",
                 )
-                .all()
-            )
+            ).all()
             for job in expired:
                 artifacts = self._load_artifacts(job)
                 self._mark_expired_state(job, artifacts)
@@ -767,12 +758,11 @@ class AssetComparisonJobManager:
                 expired_job_files.append((job.user_id, job.id))
                 expired_notifies.append((job.id, job.user_id, job.status))
 
-            terminal_jobs = (
-                db.query(AssetComparisonJob)
-                .filter(AssetComparisonJob.status.in_(RETAINED_JOB_STATUSES))
+            terminal_jobs = db.scalars(
+                select(AssetComparisonJob)
+                .where(AssetComparisonJob.status.in_(RETAINED_JOB_STATUSES))
                 .order_by(AssetComparisonJob.updated_at.desc())
-                .all()
-            )
+            ).all()
             for job in terminal_jobs[settings.ASSET_COMPARISON_MAX_STORED_JOBS :]:
                 self._delete_job_files(job.user_id, job.id)
                 db.delete(job)
@@ -1609,12 +1599,11 @@ class AssetComparisonJobManager:
 
     def _cleanup_storage_limit(self) -> None:
         with self._lock, SessionLocal() as db:
-            jobs = (
-                db.query(AssetComparisonJob)
-                .filter(AssetComparisonJob.status.in_(RETAINED_JOB_STATUSES))
+            jobs = db.scalars(
+                select(AssetComparisonJob)
+                .where(AssetComparisonJob.status.in_(RETAINED_JOB_STATUSES))
                 .order_by(AssetComparisonJob.updated_at.asc())
-                .all()
-            )
+            ).all()
             sizes = {}
             for job in jobs:
                 sizes[job.id] = self._artifact_store.task_size(
