@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
@@ -43,26 +44,30 @@ def get_logs(
     date_to: datetime | None = None,
 ) -> tuple[list[AuditLog], int]:
     """返回 (日志列表, 总条数)。"""
-    query = db.query(AuditLog)
+    query = select(AuditLog)
     if user_id is not None:
-        query = query.filter(AuditLog.user_id == user_id)
+        query = query.where(AuditLog.user_id == user_id)
     if username is not None:
-        query = query.filter(AuditLog.username.ilike(f"%{username}%"))
+        query = query.where(AuditLog.username.ilike(f"%{username}%"))
     if action is not None:
-        query = query.filter(AuditLog.action == action)
+        query = query.where(AuditLog.action == action)
     if action_prefix is not None:
-        query = query.filter(AuditLog.action.like(f"{action_prefix}%"))
+        query = query.where(AuditLog.action.like(f"{action_prefix}%"))
     if date_from is not None:
-        query = query.filter(AuditLog.created_at >= date_from)
+        query = query.where(AuditLog.created_at >= date_from)
     if date_to is not None:
-        query = query.filter(AuditLog.created_at <= date_to)
-    total = query.count()
-    items = query.order_by(AuditLog.created_at.desc()).offset(skip).limit(limit).all()
+        query = query.where(AuditLog.created_at <= date_to)
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    items = db.scalars(
+        query.order_by(AuditLog.created_at.desc()).offset(skip).limit(limit)
+    ).all()
     return items, total
 
 
 def count_logs_since(db: Session, since: datetime) -> int:
-    return db.query(AuditLog).filter(AuditLog.created_at >= since).count()
+    return db.scalar(
+        select(func.count()).select_from(AuditLog).where(AuditLog.created_at >= since)
+    )
 
 
 def count_tool_calls_by_action(db: Session) -> list[tuple[str, int]]:
@@ -70,15 +75,12 @@ def count_tool_calls_by_action(db: Session) -> list[tuple[str, int]]:
 
     返回 [(action, count), ...]，按 count 降序。
     """
-    from sqlalchemy import func
-
-    return (
-        db.query(AuditLog.action, func.count(AuditLog.id).label("cnt"))
-        .filter(AuditLog.action.like("tool.%"))
+    return db.execute(
+        select(AuditLog.action, func.count(AuditLog.id).label("cnt"))
+        .where(AuditLog.action.like("tool.%"))
         .group_by(AuditLog.action)
         .order_by(func.count(AuditLog.id).desc())
-        .all()
-    )
+    ).all()
 
 
 def count_daily_active_users(
@@ -88,17 +90,14 @@ def count_daily_active_users(
 
     返回 [(day, count), ...]，day 为 UTC 日期 00:00:00。
     """
-    from sqlalchemy import func
-
     day = func.date(AuditLog.created_at)
-    return (
-        db.query(day, func.count(func.distinct(AuditLog.user_id)))
-        .filter(
+    return db.execute(
+        select(day, func.count(func.distinct(AuditLog.user_id)))
+        .where(
             AuditLog.user_id.isnot(None),
             AuditLog.created_at >= date_from,
             AuditLog.created_at < date_to,
         )
         .group_by(day)
         .order_by(day)
-        .all()
-    )
+    ).all()

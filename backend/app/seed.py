@@ -4,6 +4,7 @@
 """
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
@@ -65,7 +66,7 @@ def run_seed() -> None:
     """如果权限表为空则写入初始数据。同一事务保证权限和角色同时写入或同时回滚。"""
     db = SessionLocal()
     try:
-        if db.query(Permission).first() is not None:
+        if db.scalars(select(Permission)).first() is not None:
             return
         _seed_all(db)
     finally:
