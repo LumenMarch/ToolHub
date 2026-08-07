@@ -203,13 +203,11 @@ const ImageToPdf: React.FC = () => {
     };
   }, []);
 
-  /** 统一的状态更新入口:同步维护 itemsRef 镜像(纯函数更新,StrictMode 安全)。 */
+  /** 统一的状态更新入口:updater 是纯函数(只读 ref 计算 next),ref 写入发生在函数体而非 updater 回调内。 */
   const updateItems = (updater: (prev: ImageItem[]) => ImageItem[]) => {
-    setItems((prev) => {
-      const next = updater(prev);
-      itemsRef.current = next;
-      return next;
-    });
+    const next = updater(itemsRef.current);
+    itemsRef.current = next;
+    setItems(next);
   };
 
   const handleSelectMultiple = (files: File[]) => {

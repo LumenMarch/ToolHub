@@ -47,9 +47,8 @@ export const collectDroppedFiles = async (
       sawDirectory = true;
       const reader = (entry as FileSystemDirectoryEntry).createReader();
       const children = await readAllDirectoryEntries(reader);
-      for (const child of children) {
-        await readEntry(child);
-      }
+      // 子条目递归相互独立,并行展开;目录场景由末尾 sort 兜底顺序。
+      await Promise.all(children.map((child) => readEntry(child)));
     }
   };
 
