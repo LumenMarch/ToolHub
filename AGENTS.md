@@ -263,6 +263,11 @@ git fetch origin main
 git switch -c <type>/<short-description> origin/main
 ```
 
+Before switching, review what the fetch brought in: list the new upstream commits with
+`git log --oneline HEAD..origin/main` and confirm none of them touches files in your
+change set. If a new upstream commit overlaps your working-tree changes, rebase those
+changes onto `origin/main` before creating the branch.
+
 Before marking a pull request ready or merging it, synchronize it with `main`:
 
 ```bash
