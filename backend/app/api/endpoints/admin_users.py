@@ -181,7 +181,7 @@ def update_user_endpoint(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    # 自保护 — 不能封禁自己或修改自己的角色
+    # 自保护 — 不能封禁自己、修改自己的角色或直接工具权限
     if admin.id == user.id:
         if user_in.is_active is False:
             raise HTTPException(
@@ -192,6 +192,12 @@ def update_user_endpoint(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot change your own roles",
+            )
+        # 防止 user:write 持有者绕过前端约束，自行授予任意工具权限
+        if user_in.tool_permission_ids is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot change your own tool permissions",
             )
 
     # 层级保护 — 不能修改比自己权限更高的用户（拥有自己不具备的角色）

@@ -204,6 +204,35 @@ def test_patch_tool_permission_ids_set_clear_none(admin_client, db):
     assert alice_item["direct_tool_permissions"] == []
 
 
+# ---------- 自保护 ----------
+
+
+def test_patch_self_tool_permission_ids_rejected(admin_client, db):
+    """自保护：管理员不能修改自己的直接工具权限（防止绕过前端约束自行授权）。"""
+    client, admin_token = admin_client
+    root_id = db.query(User).filter(User.username == "root").one().id
+    qrcode_id = _perm_id(db, "tool:qrcode:use")
+
+    resp = client.patch(
+        f"/api/v1/admin/users/{root_id}",
+        json={"tool_permission_ids": [qrcode_id]},
+        headers=auth_header(admin_token),
+    )
+    assert resp.status_code == 400
+    assert "Cannot change your own tool permissions" in resp.json()["detail"]
+
+    # 回归：修改他人直接权限不受影响
+    alice_id = register(client, "alice").json()["id"]
+    _approve(client, admin_token, alice_id)
+    ok = client.patch(
+        f"/api/v1/admin/users/{alice_id}",
+        json={"tool_permission_ids": [qrcode_id]},
+        headers=auth_header(admin_token),
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["direct_tool_permissions"] == ["tool:qrcode:use"]
+
+
 # ---------- 推送不递增 token_version ----------
 
 
