@@ -349,6 +349,60 @@ def test_approve_rejects_non_tool_permission_id(admin_client, db):
     assert alice.direct_permissions == []
 
 
+# ---------- 管理员创建用户带直接权限 ----------
+
+
+def test_create_user_with_tool_permission_ids(admin_client, db):
+    """管理员创建用户带 tool_permission_ids：直接权限落库，/users/me 与列表响应可见。"""
+    client, admin_token = admin_client
+    qrcode_id = _perm_id(db, "tool:qrcode:use")
+
+    resp = client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "bob",
+            "password": "bob-123456",
+            "tool_permission_ids": [qrcode_id],
+        },
+        headers=auth_header(admin_token),
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["direct_tool_permissions"] == ["tool:qrcode:use"]
+
+    token = login(client, "bob", "bob-123456").json()["access_token"]
+    me = client.get("/api/v1/users/me", headers=auth_header(token))
+    assert me.status_code == 200
+    body = me.json()
+    assert body["direct_tool_permissions"] == ["tool:qrcode:use"]
+    assert "tool:qrcode:use" in body["permissions"]
+
+    # 管理员列表响应同样带 direct_tool_permissions
+    listing = client.get("/api/v1/admin/users", headers=auth_header(admin_token)).json()
+    bob_item = next(u for u in listing["items"] if u["username"] == "bob")
+    assert bob_item["direct_tool_permissions"] == ["tool:qrcode:use"]
+
+
+def test_create_user_rejects_non_tool_permission_id(admin_client, db):
+    """创建校验先于提交：非工具权限 400，用户未创建（无部分写入）。"""
+    client, admin_token = admin_client
+    user_write_id = _perm_id(db, "user:write")
+
+    resp = client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "bob",
+            "password": "bob-123456",
+            "tool_permission_ids": [user_write_id],
+        },
+        headers=auth_header(admin_token),
+    )
+    assert resp.status_code == 400
+    assert "不是工具使用权限" in resp.json()["detail"]
+
+    # 未部分提交：用户不存在
+    assert db.query(User).filter(User.username == "bob").first() is None
+
+
 # ---------- 删除用户与关联数据清理 ----------
 
 

@@ -132,6 +132,8 @@ export interface UserCreateInput {
   username: string;
   password: string;
   role_ids?: number[];
+  /** 直接工具权限：[] = 清空；null = 不发送；不传 = 不发送（后端 None 语义） */
+  toolPermissionIds?: number[] | null;
 }
 
 export interface ToolMetaUpdateInput {
@@ -181,10 +183,19 @@ export function useAdminApi() {
   );
 
   const createUser = useCallback(
-    (input: UserCreateInput) =>
-      api
-        .post<AdminUser>('/admin/users', input)
-        .then((r) => toAdminUser(r.data)),
+    (input: UserCreateInput) => {
+      // toolPermissionIds 为前端 camelCase，请求体按后端契约映射为 tool_permission_ids；
+      // 未传（undefined）则不携带该字段，等价于后端 None（不设置直接权限）。
+      const { toolPermissionIds, ...rest } = input;
+      return api
+        .post<AdminUser>('/admin/users', {
+          ...rest,
+          ...(toolPermissionIds !== undefined
+            ? { tool_permission_ids: toolPermissionIds }
+            : {}),
+        })
+        .then((r) => toAdminUser(r.data));
+    },
     [],
   );
 

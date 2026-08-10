@@ -73,7 +73,16 @@ def create_user(db: Session, user_in: UserCreate) -> User:
 
 
 def create_user_by_admin(db: Session, user_in: UserCreateByAdmin) -> User:
-    """管理员创建用户，可指定初始角色；管理员显式创建即视为已审批。"""
+    """管理员创建用户，可指定初始角色与直接工具权限；管理员显式创建即视为已审批。
+
+    直接工具权限（仅 tool:*:use）在任何写入之前先校验，失败抛 ValueError
+    （由端点转 400），避免"角色已提交但接口报错"的部分提交。
+    """
+    direct_permissions: list[Permission] | None = None
+    if user_in.tool_permission_ids is not None:
+        direct_permissions = validate_direct_tool_permissions(
+            db, user_in.tool_permission_ids
+        )
     hashed_password = get_password_hash(user_in.password)
     db_user = User(
         username=user_in.username,
@@ -83,6 +92,8 @@ def create_user_by_admin(db: Session, user_in: UserCreateByAdmin) -> User:
     if user_in.role_ids:
         roles = get_roles_by_ids(db, user_in.role_ids)
         db_user.roles = roles
+    if direct_permissions is not None:
+        db_user.direct_permissions = direct_permissions
     db.add(db_user)
     db.commit()
     db.refresh(db_user)

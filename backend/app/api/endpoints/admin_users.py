@@ -147,7 +147,13 @@ def create_user_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already registered",
         )
-    user = create_user_by_admin(db, user_in)
+    # 直接工具权限在 crud 写入前先校验（仅 tool:*:use），失败转 400，防部分提交
+    try:
+        user = create_user_by_admin(db, user_in)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     log_action(
         db,
         request=request,
@@ -158,6 +164,7 @@ def create_user_endpoint(
         detail={
             "username": user.username,
             "role_ids": user_in.role_ids,
+            "tool_permission_ids": user_in.tool_permission_ids,
         },
     )
     return _user_to_response(user, db)

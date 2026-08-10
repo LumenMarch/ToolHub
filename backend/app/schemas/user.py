@@ -16,6 +16,9 @@ class UserCreateByAdmin(UserBase):
 
     password: str
     role_ids: list[int] = []
+    # 创建时一并设置的用户直接工具权限 ID（覆盖式，仅 tool:*:use）；
+    # None = 不设置直接权限
+    tool_permission_ids: list[int] | None = None
 
 
 class UserUpdate(BaseModel):

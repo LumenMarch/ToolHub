@@ -615,8 +615,11 @@ export function UsersActionDialog({
         })
         toast.success(`已更新用户 ${currentRow.username}`)
       } else {
-        // 新建：后端创建契约不含 tool_permission_ids（仅 PATCH 支持），工具区仅供预览，保存后在编辑中调整；
-        // 'all' 模式自动补入"工具使用者"角色 id，保持"新建用户默认=工具使用者"的既有体验
+        // 新建：按工具模式发送 tool_permission_ids（'all' = 全部工具权限 id，'custom' = 勾选集合），
+        // 与后端创建契约对齐，自定义工具权限选择不再被静默丢弃；
+        // 权限列表加载失败时不发送（undefined = 后端不设置直接权限），避免误传空数组清空。
+        // 'all' 模式仍自动补入"工具使用者"角色 id，保持"新建用户默认=工具使用者"的既有体验
+        // （角色授予全部工具 + 直接权限全量并存不冲突，语义一致）
         const toolUserRole = allRoles.find((role) => role.name === '工具使用者')
         const roleIds =
           toolMode === 'all' && toolUserRole && !values.roleIds.includes(toolUserRole.id)
@@ -626,6 +629,12 @@ export function UsersActionDialog({
           username: values.username.trim(),
           password: values.password.trim(),
           role_ids: roleIds,
+          toolPermissionIds:
+            permissionsQuery.isError
+              ? undefined
+              : toolMode === 'all'
+                ? allToolPermIds
+                : toolIds,
         }
         await api.createUser(input)
         toast.success(`已创建用户 ${input.username}`)
