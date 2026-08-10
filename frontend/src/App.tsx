@@ -3,6 +3,7 @@ import { Suspense, lazy } from 'react';
 import { Toaster } from 'sonner';
 import { AuthProvider } from './components/AuthProvider';
 import { ThemeProvider } from './components/ThemeProvider';
+import { useTheme } from './context/ThemeContext';
 import ProtectedRoute from './components/guards/ProtectedRoute';
 import AdminRoute from './components/guards/AdminRoute';
 import ToolGuard from './components/guards/ToolGuard';
@@ -34,12 +35,24 @@ const AdminTools = lazy(() => import('./pages/admin/Tools'));
 const AdminRoles = lazy(() => import('./pages/admin/Roles'));
 const PendingApproval = lazy(() => import('./pages/PendingApproval'));
 
+function ThemedToaster() {
+  const { resolvedTheme } = useTheme();
+
+  return (
+    <Toaster
+      theme={resolvedTheme}
+      position="bottom-right"
+      toastOptions={{ className: 'rounded-none border-border font-mono' }}
+    />
+  );
+}
+
 function App() {
   return (
-    <ThemeProvider defaultTheme="system" storageKey="toolhub-theme">
+    <ThemeProvider>
       <BrowserRouter>
         <AuthProvider>
-          <Toaster position="bottom-right" toastOptions={{ className: 'rounded-none border-border font-mono' }} />
+          <ThemedToaster />
           <Routes>
             <Route path="/login" element={<Login />} />
 

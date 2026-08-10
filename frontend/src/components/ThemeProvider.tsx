@@ -1,6 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Theme } from '../context/ThemeContext';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import type { ResolvedTheme, Theme } from '../context/ThemeContext';
 import { ThemeProviderContext } from '../context/ThemeContext';
+import {
+  applyTheme,
+  getSystemTheme,
+  isTheme,
+  readStoredTheme,
+  resolveTheme,
+  subscribeToSystemTheme,
+  THEME_STORAGE_KEY,
+  writeStoredTheme,
+} from '../lib/theme';
 
 type ThemeProviderProps = {
   children: React.ReactNode;
@@ -11,41 +28,46 @@ type ThemeProviderProps = {
 export function ThemeProvider({
   children,
   defaultTheme = 'system',
-  storageKey = 'vite-ui-theme',
+  storageKey = THEME_STORAGE_KEY,
 }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem(storageKey) as Theme) || defaultTheme
+    () => readStoredTheme(storageKey, defaultTheme),
   );
+  const systemTheme = useSyncExternalStore<ResolvedTheme>(
+    subscribeToSystemTheme,
+    getSystemTheme,
+    () => 'light',
+  );
+  const resolvedTheme = resolveTheme(theme, systemTheme);
+
+  useLayoutEffect(() => {
+    applyTheme(resolvedTheme);
+  }, [resolvedTheme]);
 
   useEffect(() => {
-    const root = window.document.documentElement;
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== storageKey) {
+        return;
+      }
 
-    root.classList.remove('light', 'dark');
+      setTheme(isTheme(event.newValue) ? event.newValue : defaultTheme);
+    };
 
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
-        .matches
-        ? 'dark'
-        : 'light';
-
-      root.classList.add(systemTheme);
-      return;
-    }
-
-    root.classList.add(theme);
-  }, [theme]);
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [defaultTheme, storageKey]);
 
   const updateTheme = useCallback(
     (nextTheme: Theme) => {
-      localStorage.setItem(storageKey, nextTheme);
+      writeStoredTheme(storageKey, nextTheme);
       setTheme(nextTheme);
     },
     [storageKey],
   );
 
   const value = useMemo(
-    () => ({ theme, setTheme: updateTheme }),
-    [theme, updateTheme],
+    () => ({ theme, resolvedTheme, setTheme: updateTheme }),
+    [resolvedTheme, theme, updateTheme],
   );
 
   return (
