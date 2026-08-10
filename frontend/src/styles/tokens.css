@@ -16,13 +16,15 @@
 @import "shadcn/tailwind.css";
 /* ---break---
  */
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
+  color-scheme: light;
+
   /* ===== Kinetic Brutalism 设计令牌 ===== */
   --color-paper: #ffffff;
   --color-ink: #09090b;
-  --color-brand: #3b82f6;
+  --color-brand: #2563eb;
   --color-brand-ink: #ffffff;
   --color-surface: transparent;
   --color-rule: #e4e4e7;
@@ -63,13 +65,15 @@
 }
 
 html.dark {
+  color-scheme: dark;
+
   --color-paper: #050505;
   --color-ink: #f4f4f5;
   --color-brand: #d4ff00;
   --color-brand-ink: #000000;
   --color-rule: #27272a;
   --color-muted-surface: #18181b;
-  --color-muted-ink: #767680;
+  --color-muted-ink: #8f8f99;
   --status-success-surface: #122819;
   --status-success-ink: #bbf7d0;
   --status-danger-surface: #351517;
