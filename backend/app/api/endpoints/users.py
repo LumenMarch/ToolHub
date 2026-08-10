@@ -5,6 +5,7 @@ from app.api import deps
 from app.core.auth import get_current_user
 from app.crud.crud_role import get_user_permissions
 from app.crud.crud_session import get_user_sessions
+from app.crud.crud_user import get_user_direct_tool_permissions
 from app.models.user import User
 from app.schemas.user import UserResponse
 from app.schemas.user_session import UserSessionResponse
@@ -32,6 +33,7 @@ def read_users_me(
         "last_login_at": current_user.last_login_at,
         "roles": [role.name for role in current_user.roles],
         "permissions": sorted(get_user_permissions(db, current_user)),
+        "direct_tool_permissions": get_user_direct_tool_permissions(db, current_user),
     }
 
 

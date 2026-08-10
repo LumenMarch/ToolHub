@@ -70,16 +70,22 @@ def count_logs_since(db: Session, since: datetime) -> int:
     )
 
 
-def count_tool_calls_by_action(db: Session) -> list[tuple[str, int]]:
-    """聚合各工具调用次数（action like 'tool.%'）。
+def count_tool_calls_by_action(
+    db: Session, since: datetime | None = None
+) -> list[tuple[str, int]]:
+    """聚合各工具调用次数（action like 'tool.%'，排除 tool.meta.* 管理操作）。
 
     返回 [(action, count), ...]，按 count 降序。
+    since 非 None 时只统计 created_at >= since 的审计日志；None 表示全量。
     """
+    query = select(AuditLog.action, func.count(AuditLog.id).label("cnt")).where(
+        AuditLog.action.like("tool.%"),
+        ~AuditLog.action.like("tool.meta.%"),
+    )
+    if since is not None:
+        query = query.where(AuditLog.created_at >= since)
     return db.execute(
-        select(AuditLog.action, func.count(AuditLog.id).label("cnt"))
-        .where(AuditLog.action.like("tool.%"))
-        .group_by(AuditLog.action)
-        .order_by(func.count(AuditLog.id).desc())
+        query.group_by(AuditLog.action).order_by(func.count(AuditLog.id).desc())
     ).all()
 
 

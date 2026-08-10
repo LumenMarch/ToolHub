@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.crud.crud_role import get_role_by_name
 from app.main import cleanup_expired_unapproved_users
 from app.models.user import User
+from app.seed import TOOL_PERMISSIONS
 from app.services.realtime.hub import realtime_hub
 from tests.conftest import auth_header, login, register
 
@@ -130,7 +131,7 @@ def test_approve_assigns_default_tool_role(admin_client, db):
     assert body["status"] == "approved"
     assert body["roles"] == ["工具使用者"]
 
-    # 审批后登录成功，权限含 tool:use
+    # 审批后登录成功，权限为全部 11 条 tool:<id>:use（无粗粒度 tool:use）
     login_resp = login(client, "alice")
     assert login_resp.status_code == 200
     me = client.get(
@@ -138,7 +139,10 @@ def test_approve_assigns_default_tool_role(admin_client, db):
         headers=auth_header(login_resp.json()["access_token"]),
     )
     assert me.json()["status"] == "approved"
-    assert "tool:use" in me.json()["permissions"]
+    permissions = me.json()["permissions"]
+    for codename, _ in TOOL_PERMISSIONS:
+        assert codename in permissions
+    assert "tool:use" not in permissions
 
     # 审计日志
     logs = client.get(
@@ -162,6 +166,23 @@ def test_approve_with_explicit_role_ids(admin_client, db):
     assert resp.status_code == 200, resp.text
     assert resp.json()["roles"] == ["超级管理员"]
     assert resp.json()["status"] == "approved"
+
+
+def test_approve_with_empty_role_ids_assigns_no_roles(admin_client, db):
+    """role_ids 显式传空数组：不分配任何角色（区别于未提供时的默认"工具使用者"）。"""
+    client, token = admin_client
+    alice_id = register(client, "alice").json()["id"]
+
+    resp = client.post(
+        f"/api/v1/admin/users/{alice_id}/approve",
+        json={"role_ids": []},
+        headers=auth_header(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "approved"
+    assert body["roles"] == []
+    assert body["permissions"] == []
 
 
 def test_approve_requires_user_write_permission(client):

@@ -58,11 +58,18 @@ def set_role_permissions(db: Session, role: Role, permission_ids: list[int]) -> 
 
 
 def get_user_permissions(db: Session, user: User) -> set[str]:
-    """返回用户所有角色的权限 codename 并集。"""
+    """返回用户全部权限 codename 并集：角色权限 ∪ 用户直接持有的工具权限。
+
+    用户直接权限由 set_user_direct_permissions 维护（仅 tool:*:use），
+    因此所有 require_permission / require_tool_permission 守卫在
+    不做改动的情况下即可感知直接权限。
+    """
     permissions: set[str] = set()
     for role in user.roles:
         for perm in role.permissions:
             permissions.add(perm.codename)
+    for perm in user.direct_permissions:
+        permissions.add(perm.codename)
     return permissions
 
 

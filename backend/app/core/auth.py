@@ -165,3 +165,83 @@ def require_tool_enabled(tool_id: str) -> _ToolEnabledChecker:
             ...
     """
     return _ToolEnabledChecker(tool_id)
+
+
+class _ToolPermissionChecker:
+    """FastAPI Dependency: 校验当前用户持有 tool:<id>:use 权限且工具已启用。
+
+    组合 _PermissionChecker 与 _ToolEnabledChecker 的两层校验，等价于旧的
+    「tool:use 粗粒度权限 + 工具启用开关」双守卫；先校验权限再校验启用开关，
+    两类失败返回不同的 403 文案便于排查。
+    """
+
+    def __init__(self, tool_id: str) -> None:
+        self.tool_id = tool_id
+        self.required = f"tool:{tool_id}:use"
+
+    def __call__(
+        self,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(deps.get_db),
+    ) -> User:
+        permissions = get_user_permissions(db, current_user)
+        if self.required not in permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"需要 {self.required} 权限",
+            )
+        from app.crud.crud_tool_meta import is_tool_enabled
+
+        if not is_tool_enabled(db, self.tool_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"工具 {self.tool_id} 已被禁用",
+            )
+        return current_user
+
+
+def require_tool_permission(tool_id: str) -> _ToolPermissionChecker:
+    """要求当前用户持有 tool:<id>:use 权限且工具已启用，否则返回 403。
+
+    用法:
+        @router.post("")
+        def create_qrcode(
+            current_user: User = Depends(require_tool_permission("qrcode")),
+        ):
+            ...
+    """
+    return _ToolPermissionChecker(tool_id)
+
+
+class _AnyToolPermissionChecker:
+    """FastAPI Dependency: 校验当前用户持有至少一条 tool:<id>:use 权限。
+
+    供 upload（tus）与 GET /tools-meta 等跨工具基础设施使用：
+    只要能用任一工具即放行，不绑定单一工具。
+    """
+
+    def __call__(
+        self,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(deps.get_db),
+    ) -> User:
+        permissions = get_user_permissions(db, current_user)
+        if not any(p.startswith("tool:") for p in permissions):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="需要任一工具使用权限",
+            )
+        return current_user
+
+
+def require_any_tool_permission() -> _AnyToolPermissionChecker:
+    """要求当前用户持有至少一条 tool:<id>:use 权限，否则返回 403。
+
+    用法:
+        @router.post("/tus")
+        async def tus_create(
+            current_user: User = Depends(require_any_tool_permission()),
+        ):
+            ...
+    """
+    return _AnyToolPermissionChecker()

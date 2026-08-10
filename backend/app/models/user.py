@@ -1,10 +1,35 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, Integer, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+)
 from sqlalchemy.orm import relationship
 
 from app.db.base_class import Base
 from app.models.role import user_roles
+
+# 用户 ↔ 权限（多对多）— 用户直接持有的工具权限（tool:*:use）。
+# 与角色权限是并集关系；仅允许工具权限，管理权限仍只走角色。
+user_permissions = Table(
+    "user_permissions",
+    Base.metadata,
+    Column(
+        "user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    ),
+    Column(
+        "permission_id",
+        Integer,
+        ForeignKey("permissions.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
 
 # 用户审批状态取值（与前端契约一致，勿随意改动字符串值）
 USER_STATUS_PENDING = "pending"
@@ -44,6 +69,14 @@ class User(Base):
         secondary=user_roles,
         lazy="selectin",
         back_populates="users",
+    )
+
+    # 用户直接持有的权限（仅 tool:*:use，由 CRUD 层校验）；
+    # 有效权限 = 角色权限 ∪ 直接权限（并集）
+    direct_permissions = relationship(
+        "Permission",
+        secondary=user_permissions,
+        lazy="selectin",
     )
 
     @property

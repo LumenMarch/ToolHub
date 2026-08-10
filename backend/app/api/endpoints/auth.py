@@ -128,6 +128,7 @@ def _set_session_cookie(response: Response, access_token: str) -> None:
 def _user_to_response(user, db: Session) -> dict:
     from app.crud.crud_role import get_user_permissions
     from app.crud.crud_session import is_user_online
+    from app.crud.crud_user import get_user_direct_tool_permissions
 
     return {
         "id": user.id,
@@ -141,6 +142,7 @@ def _user_to_response(user, db: Session) -> dict:
         "last_login_at": user.last_login_at,
         "roles": [role.name for role in user.roles],
         "permissions": sorted(get_user_permissions(db, user)),
+        "direct_tool_permissions": get_user_direct_tool_permissions(db, user),
     }
 
 

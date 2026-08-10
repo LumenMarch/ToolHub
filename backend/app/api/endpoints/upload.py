@@ -11,7 +11,7 @@ import base64
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from app.core.auth import require_permission
+from app.core.auth import require_any_tool_permission
 from app.models.user import User
 from app.services.task_artifacts import ContentDigest
 from app.services.upload.store import (
@@ -100,7 +100,7 @@ async def tus_options() -> Response:
 @router.post("/tus")
 async def tus_create(
     request: Request,
-    current_user: User = Depends(require_permission("tool:use")),
+    current_user: User = Depends(require_any_tool_permission()),
 ) -> Response:
     """创建 tus 上传（creation 扩展）。
 
@@ -168,7 +168,7 @@ async def tus_create(
 @router.head("/tus/{upload_id}")
 async def tus_head(
     upload_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
+    current_user: User = Depends(require_any_tool_permission()),
 ) -> Response:
     """查询上传进度。"""
     try:
@@ -194,7 +194,7 @@ async def tus_head(
 async def tus_patch(
     upload_id: str,
     request: Request,
-    current_user: User = Depends(require_permission("tool:use")),
+    current_user: User = Depends(require_any_tool_permission()),
 ) -> Response:
     """写入上传分片。
 
@@ -260,7 +260,7 @@ async def tus_patch(
 @router.delete("/tus/{upload_id}")
 async def tus_delete(
     upload_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
+    current_user: User = Depends(require_any_tool_permission()),
 ) -> Response:
     """取消上传（termination 扩展）。"""
     try:
@@ -279,7 +279,7 @@ async def tus_delete(
 @router.post("/cache/resolve")
 async def resolve_upload_cache(
     req: UploadCacheResolveRequest,
-    current_user: User = Depends(require_permission("tool:use")),
+    current_user: User = Depends(require_any_tool_permission()),
 ) -> dict:
     """用用户级内容摘要解析缓存，命中时返回新的上传句柄。"""
     digest = ContentDigest(md5=req.md5, sha256=req.sha256, size=req.size)
@@ -308,7 +308,7 @@ async def resolve_upload_cache(
 @router.get("/{upload_id}/info")
 async def get_upload_info(
     upload_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
+    current_user: User = Depends(require_any_tool_permission()),
 ) -> dict:
     """获取上传信息（非 tus 便利端点）。"""
     try:

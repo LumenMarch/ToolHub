@@ -1,10 +1,13 @@
-"""health 工具端点：健康评估。Requires authentication + tool:use。"""
+"""health 工具端点：健康评估。Requires authentication + tool:health:use。"""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from app.core.auth import require_permission, require_tool_enabled
+from app.api import deps
+from app.core.auth import require_tool_permission
 from app.models.user import User
+from app.services.audit import log_action
 from app.services.health_tools.service import calculate_health
 
 router = APIRouter()
@@ -23,43 +26,51 @@ class HealthRequest(BaseModel):
 
 @router.post("/calculate")
 def calculate(
-    request: HealthRequest,
-    current_user: User = Depends(require_permission("tool:use")),
-    __: None = Depends(require_tool_enabled("health")),
+    request: Request,
+    req: HealthRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("health")),
 ):
     """计算健康评估报告（BMI、代谢、体脂、三围等）。Requires authentication."""
     if (
-        request.height is None
-        or request.weight is None
-        or request.gender is None
-        or request.age is None
+        req.height is None
+        or req.weight is None
+        or req.gender is None
+        or req.age is None
     ):
         raise HTTPException(
             status_code=400,
             detail="参数 height, weight, gender, age 不能为空",
         )
 
-    if request.gender not in VALID_GENDERS:
+    if req.gender not in VALID_GENDERS:
         raise HTTPException(
             status_code=400,
             detail='参数 gender 必须是 "male" 或 "female"',
         )
 
     if (
-        request.height < 50
-        or request.height > 300
-        or request.weight < 10
-        or request.weight > 300
-        or request.age < 1
-        or request.age > 150
+        req.height < 50
+        or req.height > 300
+        or req.weight < 10
+        or req.weight > 300
+        or req.age < 1
+        or req.age > 150
     ):
         raise HTTPException(
             status_code=400,
             detail="参数超出合理范围：身高 (50-300cm)，体重 (10-300kg)，年龄 (1-150岁)",
         )
 
-    return {
-        "result": calculate_health(
-            request.height, request.weight, request.gender, request.age
-        )
-    }
+    result = calculate_health(req.height, req.weight, req.gender, req.age)
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.health.calculate",
+        target_type="tool",
+        target_id="health",
+        # 摘要记录性别与年龄，不落身高体重等敏感指标
+        detail={"gender": req.gender, "age": req.age},
+    )
+    return {"result": result}

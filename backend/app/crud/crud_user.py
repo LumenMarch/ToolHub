@@ -1,10 +1,12 @@
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash
 from app.crud.crud_role import get_roles_by_ids
+from app.models.audit_log import AuditLog
+from app.models.permission import Permission
 from app.models.user import (
     USER_STATUS_APPROVED,
     USER_STATUS_PENDING,
@@ -114,6 +116,15 @@ def update_user(db: Session, user: User, user_in: UserUpdate) -> User:
 
 
 def delete_user(db: Session, user: User) -> None:
+    """删除用户。
+
+    审计日志按设计保留（AuditLog 冗余 username 字段，保证删号后日志仍可读）：
+    先把引用该用户的 audit_logs.user_id 置空——audit_logs 外键未声明
+    ON DELETE CASCADE，直接删 user 会触发 SQLite 外键约束错误（500）。
+    其余引用表（user_roles / user_permissions / user_sessions / notifications）
+    均声明了 ON DELETE CASCADE，由数据库级联清理。
+    """
+    db.execute(update(AuditLog).where(AuditLog.user_id == user.id).values(user_id=None))
     db.delete(user)
     db.commit()
 
@@ -121,3 +132,49 @@ def delete_user(db: Session, user: User) -> None:
 def update_last_login(db: Session, user: User) -> None:
     user.last_login_at = datetime.utcnow()
     db.commit()
+
+
+def validate_direct_tool_permissions(
+    db: Session, permission_ids: list[int]
+) -> list[Permission]:
+    """校验并解析用户直接工具权限 ID，返回 Permission 列表。
+
+    - 去重（与 approve 的 role_ids 处理一致）；
+    - 权限必须存在（防止无效 ID 被静默丢弃）；
+    - 仅接受 tool:*:use 权限——管理权限（user:read 等）只走角色，
+      防止绕过层级保护直接提权。
+    校验失败抛 ValueError（由端点转为 400）。
+    供端点在持久化之前预校验，避免校验失败造成部分提交。
+    """
+    unique_ids = list(dict.fromkeys(permission_ids))
+    permissions = db.scalars(
+        select(Permission).where(Permission.id.in_(unique_ids))
+    ).all()
+    found = {p.id: p for p in permissions}
+    if len(found) != len(unique_ids):
+        raise ValueError("包含不存在的权限 ID")
+    for pid in unique_ids:
+        perm = found[pid]
+        if not perm.codename.startswith("tool:"):
+            raise ValueError(f"权限 {perm.codename} 不是工具使用权限")
+    return permissions
+
+
+def set_user_direct_permissions(
+    db: Session, user: User, permission_ids: list[int]
+) -> User:
+    """覆盖式设置用户直接持有的工具权限（仅接受 tool:*:use）。
+
+    permission_ids=[] 表示清空全部直接工具权限；
+    校验失败抛 ValueError，且不做任何写入。
+    """
+    permissions = validate_direct_tool_permissions(db, permission_ids)
+    user.direct_permissions = permissions
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def get_user_direct_tool_permissions(db: Session, user: User) -> list[str]:
+    """返回用户直接持有的工具权限 codename，按 codename 排序。"""
+    return sorted(p.codename for p in user.direct_permissions)

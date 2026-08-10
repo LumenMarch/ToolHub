@@ -66,11 +66,19 @@ def get_overview(
 
 @router.get("/tools", response_model=list[ToolCallStat])
 def get_tool_calls(
+    days: int | None = None,
     db: Session = Depends(deps.get_db),
     _: User = Depends(require_permission("stats:read")),
 ):
-    """各工具调用次数排行。"""
-    rows = count_tool_calls_by_action(db)
+    """各工具调用次数排行。
+
+    days 缺省或 <= 0 时返回全量统计；days > 0 时只统计最近 N 天的调用
+    （since = now(UTC) - timedelta(days=N)）。
+    """
+    since = None
+    if days is not None and days > 0:
+        since = datetime.now(UTC) - timedelta(days=days)
+    rows = count_tool_calls_by_action(db, since=since)
     return [ToolCallStat(action=action, count=count) for action, count in rows]
 
 
