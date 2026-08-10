@@ -17,6 +17,8 @@ export interface AdminUser {
   online?: boolean;
   roles: string[];
   permissions: string[];
+  /** 直接持有的工具权限 codename（映射后端 direct_tool_permissions；列表/详情接口返回） */
+  directToolPermissions: string[];
   created_at: string;
   last_login_at: string | null;
 }
@@ -24,6 +26,13 @@ export interface AdminUser {
 export interface AdminUserList {
   items: AdminUser[];
   total: number;
+}
+
+/** 后端用户响应 → 前端 AdminUser：snake_case 的 direct_tool_permissions 映射为 camelCase。
+ *  后端并行开发中，字段缺失时按空数组处理，保证 UI 层始终拿到该字段。 */
+function toAdminUser(user: AdminUser): AdminUser {
+  const raw = user as AdminUser & { direct_tool_permissions?: string[] };
+  return { ...user, directToolPermissions: raw.direct_tool_permissions ?? [] };
 }
 
 export interface AuditLog {
@@ -115,12 +124,16 @@ export interface UserUpdateInput {
   role_ids?: number[];
   is_active?: boolean;
   password?: string;
+  /** 直接工具权限：[] = 清空；null = 不修改；不传 = 不发送（后端 null 语义） */
+  toolPermissionIds?: number[] | null;
 }
 
 export interface UserCreateInput {
   username: string;
   password: string;
   role_ids?: number[];
+  /** 直接工具权限：[] = 清空；null = 不发送；不传 = 不发送（后端 None 语义） */
+  toolPermissionIds?: number[] | null;
 }
 
 export interface ToolMetaUpdateInput {
@@ -162,19 +175,44 @@ export function useAdminApi() {
               : undefined,
           },
         })
-        .then((r) => r.data),
+        .then((r) => ({
+          ...r.data,
+          items: r.data.items.map(toAdminUser),
+        })),
     [],
   );
 
   const createUser = useCallback(
-    (input: UserCreateInput) =>
-      api.post<AdminUser>('/admin/users', input).then((r) => r.data),
+    (input: UserCreateInput) => {
+      // toolPermissionIds 为前端 camelCase，请求体按后端契约映射为 tool_permission_ids；
+      // 未传（undefined）则不携带该字段，等价于后端 None（不设置直接权限）。
+      const { toolPermissionIds, ...rest } = input;
+      return api
+        .post<AdminUser>('/admin/users', {
+          ...rest,
+          ...(toolPermissionIds !== undefined
+            ? { tool_permission_ids: toolPermissionIds }
+            : {}),
+        })
+        .then((r) => toAdminUser(r.data));
+    },
     [],
   );
 
   const updateUser = useCallback(
-    (userId: number, input: UserUpdateInput) =>
-      api.patch<AdminUser>(`/admin/users/${userId}`, input).then((r) => r.data),
+    (userId: number, input: UserUpdateInput) => {
+      // toolPermissionIds 为前端 camelCase，请求体按后端契约映射为 tool_permission_ids；
+      // 未传（undefined）则不携带该字段，等价于后端 null（不修改）。
+      const { toolPermissionIds, ...rest } = input;
+      return api
+        .patch<AdminUser>(`/admin/users/${userId}`, {
+          ...rest,
+          ...(toolPermissionIds !== undefined
+            ? { tool_permission_ids: toolPermissionIds }
+            : {}),
+        })
+        .then((r) => toAdminUser(r.data));
+    },
     [],
   );
 
@@ -184,15 +222,18 @@ export function useAdminApi() {
     [],
   );
 
-  // 审批流：批准（可指定角色，空则服务端默认"工具使用者"）/ 拒绝
+  // 审批流：批准（可指定角色与直接工具权限，空则服务端默认"工具使用者"）/ 拒绝
   // 说明：rejected → approved 的恢复复用 approve 端点，后端无 /restore。
   const approveUser = useCallback(
-    (userId: number, roleIds?: number[]) =>
+    (userId: number, roleIds?: number[], toolPermissionIds?: number[] | null) =>
       api
         .post<AdminUser>(`/admin/users/${userId}/approve`, {
           role_ids: roleIds,
+          ...(toolPermissionIds !== undefined
+            ? { tool_permission_ids: toolPermissionIds }
+            : {}),
         })
-        .then((r) => r.data),
+        .then((r) => toAdminUser(r.data)),
     [],
   );
 
@@ -203,7 +244,7 @@ export function useAdminApi() {
           `/admin/users/${userId}/reject`,
           reason ? { reason } : undefined,
         )
-        .then((r) => r.data),
+        .then((r) => toAdminUser(r.data)),
     [],
   );
 
@@ -299,8 +340,14 @@ export function useAdminApi() {
     [],
   );
 
+  // days 缺省 = 全量（不传参）；days > 0 = 最近 N 天。
   const getToolCalls = useCallback(
-    () => api.get<ToolCallStat[]>('/admin/stats/tools').then((r) => r.data),
+    (days?: number) =>
+      api
+        .get<ToolCallStat[]>('/admin/stats/tools', {
+          params: days !== undefined ? { days } : undefined,
+        })
+        .then((r) => r.data),
     [],
   );
 
@@ -361,6 +408,14 @@ export function useAdminApi() {
     [],
   );
 
+  const getUserDetail = useCallback(
+    (userId: number) =>
+      api
+        .get<AdminUser>(`/admin/users/${userId}`)
+        .then((r) => toAdminUser(r.data)),
+    [],
+  );
+
   const getUserRoles = useCallback(
     (userId: number) =>
       api.get<Role[]>(`/admin/users/${userId}/roles`).then((r) => r.data),
@@ -408,6 +463,7 @@ export function useAdminApi() {
       updateRolePermissions,
       getUserRoles,
       updateUserRoles,
+      getUserDetail,
     }),
     [
       listUsers,
@@ -439,6 +495,7 @@ export function useAdminApi() {
       updateRolePermissions,
       getUserRoles,
       updateUserRoles,
+      getUserDetail,
     ],
   );
 }

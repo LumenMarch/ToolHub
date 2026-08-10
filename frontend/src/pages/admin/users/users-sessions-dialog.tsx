@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { MonitorUp } from 'lucide-react'
@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import PermissionGuard from '@/components/guards/PermissionGuard'
 import { useAdminApi, type UserSession } from '../hooks/use-admin-api'
+import { parseServerDate } from '../../../lib/format-time'
 import { type User } from './schema'
 
 /** 设备摘要：从 UA 提取浏览器 + 系统，无法识别时截断原文。 */
@@ -41,11 +42,10 @@ function summarizeUserAgent(ua: string | null) {
   return ua.length > 24 ? `${ua.slice(0, 24)}…` : ua
 }
 
-/** 会话时间展示（沿用全站 server-wall-time 约定）。 */
+/** 会话时间展示（后端无时区 UTC，parseServerDate 补 Z 解析后按本地时区格式化）。 */
 function formatSessionDate(value: string | null) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '—'
+  const date = parseServerDate(value)
+  if (!date) return '—'
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -57,11 +57,28 @@ function formatSessionDate(value: string | null) {
 
 /** 后端时间戳为无时区 UTC：补 Z 解析为真实时刻，供在线窗口比较（避免按本地时间误读产生偏移）。 */
 function parseSessionTime(value: string | null) {
-  if (!value) return Number.NaN
-  const hasTimezone = /(Z|[+-]\d{2}:?\d{2})$/i.test(value)
-  return new Date(hasTimezone ? value : `${value}Z`).getTime()
+  return parseServerDate(value)?.getTime() ?? Number.NaN
 }
 
+/** 判断会话是否处于在线状态（未吊销且 5 分钟内活跃）。 */
+function isSessionOnline(session: UserSession): boolean {
+  const revoked = session.revoked_at !== null
+  const lastActiveMs = parseSessionTime(
+    session.last_seen_at ?? session.created_at,
+  )
+  return (
+    !revoked &&
+    !Number.isNaN(lastActiveMs) &&
+    Date.now() - lastActiveMs < 5 * 60 * 1000
+  )
+}
+
+/** 获取会话状态排序优先级：在线(0) > 离线(1) > 已吊销(2)。 */
+function getSessionStatusRank(session: UserSession): number {
+  if (session.revoked_at !== null) return 2
+  if (isSessionOnline(session)) return 0
+  return 1
+}
 /** 会话管理弹窗：查看用户登录会话列表，可强制下线未吊销会话。 */
 export function UsersSessionsDialog({
   currentRow,
@@ -95,7 +112,27 @@ export function UsersSessionsDialog({
     onError: () => toast.error('强制下线失败'),
   })
 
-  const sessions = sessionsQuery.data ?? []
+  // 直接引用 query 数据（不在此处 ?? []，避免每次渲染产生新引用导致 useMemo 依赖变化）
+  const sessions = sessionsQuery.data
+
+  /** 会话列表按状态优先级排序（在线 → 离线 → 已吊销），同状态组内按 created_at 倒序。 */
+  const sortedSessions = useMemo(() => {
+    return (sessions ?? []).toSorted((a, b) => {
+      const rankA = getSessionStatusRank(a)
+      const rankB = getSessionStatusRank(b)
+      if (rankA !== rankB) {
+        return rankA - rankB
+      }
+      const timeA = parseSessionTime(a.created_at)
+      const timeB = parseSessionTime(b.created_at)
+      const isNanA = Number.isNaN(timeA)
+      const isNanB = Number.isNaN(timeB)
+      if (isNanA && isNanB) return 0
+      if (isNanA) return 1
+      if (isNanB) return -1
+      return timeB - timeA
+    })
+  }, [sessions])
 
   return (
     <>
@@ -122,21 +159,14 @@ export function UsersSessionsDialog({
               <p className='py-8 text-center text-[11px] font-mono uppercase tracking-widest text-destructive'>
                 会话列表加载失败
               </p>
-            ) : sessions.length === 0 ? (
+            ) : sortedSessions.length === 0 ? (
               <p className='py-8 text-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
                 [ 暂无会话 ]
               </p>
             ) : (
-              sessions.map((session) => {
+              sortedSessions.map((session) => {
                 const revoked = session.revoked_at !== null
-                // 在线判定与后端契约一致：未吊销且最近活跃（last_seen 兜底 created）在 5 分钟内
-                const lastActiveMs = parseSessionTime(
-                  session.last_seen_at ?? session.created_at,
-                )
-                const online =
-                  !revoked &&
-                  !Number.isNaN(lastActiveMs) &&
-                  Date.now() - lastActiveMs < 5 * 60 * 1000
+                const online = isSessionOnline(session)
                 const statusText = revoked ? '已下线' : online ? '在线' : '离线'
                 const statusClass = revoked
                   ? 'border border-status-danger-foreground/30 bg-status-danger-surface px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-status-danger-foreground'

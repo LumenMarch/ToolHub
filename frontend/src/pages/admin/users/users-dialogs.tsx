@@ -43,7 +43,7 @@ export function UsersDialogs() {
       {currentRow && (
         <>
           <UsersApproveDialog
-            key={`user-approve-${currentRow.id}`}
+            key={`user-approve-${currentRow.id}-${open === 'approve' ? 'open' : 'closed'}`}
             currentRow={currentRow}
             open={open === 'approve'}
             onOpenChange={(next) => handleOpenChange('approve', next)}
@@ -57,7 +57,7 @@ export function UsersDialogs() {
           />
 
           <UsersActionDialog
-            key={`user-edit-${currentRow.id}`}
+            key={`user-edit-${currentRow.id}-${open === 'edit' ? 'open' : 'closed'}`}
             currentRow={currentRow}
             open={open === 'edit'}
             onOpenChange={(next) => handleOpenChange('edit', next)}

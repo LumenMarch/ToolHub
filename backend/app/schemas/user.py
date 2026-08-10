@@ -16,6 +16,9 @@ class UserCreateByAdmin(UserBase):
 
     password: str
     role_ids: list[int] = []
+    # 创建时一并设置的用户直接工具权限 ID（覆盖式，仅 tool:*:use）；
+    # None = 不设置直接权限
+    tool_permission_ids: list[int] | None = None
 
 
 class UserUpdate(BaseModel):
@@ -24,6 +27,9 @@ class UserUpdate(BaseModel):
     role_ids: list[int] | None = None
     is_active: bool | None = None
     password: str | None = None
+    # 用户直接持有的工具权限 ID（覆盖式）；None = 不修改，
+    # [] = 清空全部直接工具权限。仅接受 tool:*:use 权限。
+    tool_permission_ids: list[int] | None = None
 
 
 class UserResponse(UserBase):
@@ -43,6 +49,9 @@ class UserResponse(UserBase):
     last_login_at: datetime | None
     roles: list[str] = []
     permissions: list[str] = []
+    # 用户直接持有的工具权限 codename（不含角色授予的），按 codename 排序；
+    # 前端据此初始化"自定义工具权限"勾选区
+    direct_tool_permissions: list[str] = []
 
     @field_validator("roles", mode="before")
     @classmethod
@@ -60,6 +69,19 @@ class UserResponse(UserBase):
             return []
         if isinstance(v, list):
             return v  # type: ignore[return-value]
+        return []
+
+    @field_validator("direct_tool_permissions", mode="before")
+    @classmethod
+    def _direct_tool_permissions_default(cls, v: object) -> list[str]:
+        """ORM 传 Permission 对象列表时转为 codename；缺失时为空列表。"""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [
+                getattr(p, "codename", str(p))
+                for p in v  # type: ignore[arg-type]
+            ]
         return []
 
 

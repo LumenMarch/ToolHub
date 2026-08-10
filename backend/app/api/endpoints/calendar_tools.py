@@ -1,12 +1,15 @@
-"""calendar 工具端点：日历（农历黄历 + 摸鱼日历）。Requires authentication + tool:use。"""
+"""calendar 工具端点：日历（农历黄历 + 摸鱼日历）。Requires authentication + tool:calendar:use。"""
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from app.core.auth import require_permission, require_tool_enabled
+from app.api import deps
+from app.core.auth import require_tool_permission
 from app.models.user import User
+from app.services.audit import log_action
 from app.services.calendar_tools.service import build_calendar_info
 
 router = APIRouter()
@@ -35,10 +38,21 @@ def _parse_date(date_str: str | None) -> tuple[int, int, int, int, int, int]:
 
 @router.post("/info")
 def calendar_info(
-    request: CalendarRequest,
-    current_user: User = Depends(require_permission("tool:use")),
-    __: None = Depends(require_tool_enabled("calendar")),
+    request: Request,
+    req: CalendarRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("calendar")),
 ):
     """查询指定日期（或今天）的完整日历信息（农历黄历 + 摸鱼日历）。Requires authentication."""
-    year, month, day, hour, minute, second = _parse_date(request.date)
-    return {"result": build_calendar_info(year, month, day, hour, minute, second)}
+    year, month, day, hour, minute, second = _parse_date(req.date)
+    result = build_calendar_info(year, month, day, hour, minute, second)
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.calendar.info",
+        target_type="tool",
+        target_id="calendar",
+        detail={"date": req.date},
+    )
+    return {"result": result}

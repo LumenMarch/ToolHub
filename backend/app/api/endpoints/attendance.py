@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.auth import require_permission, require_tool_enabled
+from app.core.auth import require_tool_permission
 from app.models.user import User
 from app.schemas.attendance import (
     AttendanceAnalyzeResponse,
@@ -107,8 +107,7 @@ def process_attendance(
     request: Request,
     req: AttendanceUploadRequest,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(require_permission("tool:use")),
-    __: None = Depends(require_tool_enabled("attendance-organizer")),
+    current_user: User = Depends(require_tool_permission("attendance-organizer")),
 ) -> Response:
     start_time = perf_counter()
     logger.info("考勤整理 process 开始")
@@ -151,8 +150,7 @@ def analyze_attendance(
     request: Request,
     req: AttendanceUploadRequest,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(require_permission("tool:use")),
-    __: None = Depends(require_tool_enabled("attendance-organizer")),
+    current_user: User = Depends(require_tool_permission("attendance-organizer")),
 ) -> AttendanceAnalyzeResponse:
     start_time = perf_counter()
     logger.info("考勤整理 analyze 开始")
@@ -227,7 +225,9 @@ def analyze_attendance(
 @router.get("/results/{result_id}/download")
 def download_attendance_result(
     result_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
+    request: Request,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("attendance-organizer")),
 ) -> Response:
     try:
         cached_result = attendance_result_cache.get(result_id, current_user.id)
@@ -239,6 +239,15 @@ def download_attendance_result(
     except AttendanceResultNotFoundError as exc:
         raise HTTPException(status_code=404, detail="分析结果不存在") from exc
 
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.attendance.download",
+        target_type="tool",
+        target_id="attendance",
+        detail={"result_id": result_id},
+    )
     return _build_download_file_response(
         cached_result.content_path,
         cached_result.filename,
@@ -248,7 +257,18 @@ def download_attendance_result(
 @router.delete("/results/{result_id}", status_code=204)
 def delete_attendance_result(
     result_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
+    request: Request,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("attendance-organizer")),
 ) -> Response:
     attendance_result_cache.delete(result_id, current_user.id)
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.attendance.delete_result",
+        target_type="tool",
+        target_id="attendance",
+        detail={"result_id": result_id},
+    )
     return Response(status_code=204)

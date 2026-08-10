@@ -16,9 +16,13 @@ from app.crud.crud_user import (
     delete_user,
     get_user_by_id,
     get_user_by_username,
+    get_user_direct_tool_permissions,
     get_users,
+    set_user_direct_permissions,
     update_user,
+    validate_direct_tool_permissions,
 )
+from app.models.permission import Permission
 from app.models.user import (
     USER_STATUS_APPROVED,
     USER_STATUS_PENDING,
@@ -46,9 +50,13 @@ class UserListResponse(BaseModel):
 
 
 class UserApproveRequest(BaseModel):
-    """审批通过请求体；role_ids 为空时服务端分配默认"工具使用者"角色。"""
+    """审批通过请求体；role_ids 未提供（None）时服务端分配默认"工具使用者"角色，
+    显式传空数组 [] 则不分配任何角色。"""
 
     role_ids: list[int] | None = None
+    # 审批时一并设置的用户直接工具权限 ID（覆盖式，仅 tool:*:use）；
+    # None = 不设置直接权限
+    tool_permission_ids: list[int] | None = None
 
 
 class UserRejectRequest(BaseModel):
@@ -139,7 +147,13 @@ def create_user_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already registered",
         )
-    user = create_user_by_admin(db, user_in)
+    # 直接工具权限在 crud 写入前先校验（仅 tool:*:use），失败转 400，防部分提交
+    try:
+        user = create_user_by_admin(db, user_in)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     log_action(
         db,
         request=request,
@@ -150,6 +164,7 @@ def create_user_endpoint(
         detail={
             "username": user.username,
             "role_ids": user_in.role_ids,
+            "tool_permission_ids": user_in.tool_permission_ids,
         },
     )
     return _user_to_response(user, db)
@@ -173,7 +188,7 @@ def update_user_endpoint(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    # 自保护 — 不能封禁自己或修改自己的角色
+    # 自保护 — 不能封禁自己、修改自己的角色或直接工具权限
     if admin.id == user.id:
         if user_in.is_active is False:
             raise HTTPException(
@@ -185,16 +200,37 @@ def update_user_endpoint(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot change your own roles",
             )
+        # 防止 user:write 持有者绕过前端约束，自行授予任意工具权限
+        if user_in.tool_permission_ids is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot change your own tool permissions",
+            )
 
     # 层级保护 — 不能修改比自己权限更高的用户（拥有自己不具备的角色）
     _ensure_can_manage(admin, user)
 
     # 记录变更意图（update 前），用于安全相关吊销与权限推送
     roles_changed = user_in.role_ids is not None
+    tool_perms_changed = user_in.tool_permission_ids is not None
     password_changed = user_in.password is not None
     deactivated = user_in.is_active is False
 
+    # 直接工具权限：在任何写入之前先校验（仅 tool:*:use），
+    # 校验失败返回 400，避免"角色已提交但接口报错"的部分提交
+    if tool_perms_changed:
+        try:
+            validate_direct_tool_permissions(db, user_in.tool_permission_ids)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
     updated = update_user(db, user, user_in)
+
+    # 覆盖式设置直接工具权限（校验已通过，此处不会失败）
+    if tool_perms_changed:
+        updated = set_user_direct_permissions(db, updated, user_in.tool_permission_ids)
     log_action(
         db,
         request=request,
@@ -209,8 +245,8 @@ def update_user_endpoint(
     # 停用 / 重置密码：递增 token_version，踢掉全部旧会话
     if deactivated or password_changed:
         updated = revoke_user_sessions(db, updated)
-    elif roles_changed:
-        # 仅角色变更：推权限刷新，不强制重新登录
+    elif roles_changed or tool_perms_changed:
+        # 仅角色 / 直接权限变更：推权限刷新，不强制重新登录
         notify_permissions_updated(int(updated.id))
 
     return _user_to_response(updated, db)
@@ -226,7 +262,8 @@ def approve_user_endpoint(
 ):
     """审批通过：pending → approved，也用于恢复 rejected 用户（re-approve）。
 
-    role_ids 为空时服务端分配"工具使用者"角色（查不到该角色则 400）。
+    role_ids 未提供（None）时服务端分配"工具使用者"角色（查不到该角色则 400）；
+    显式传空数组 [] 则不分配任何角色（通常配合 tool_permission_ids 使用）。
     审计 action=user.approve；定向推送 user.status.updated。
     """
     user = get_user_by_id(db, user_id)
@@ -241,9 +278,31 @@ def approve_user_endpoint(
         )
     _ensure_can_manage(admin, user)
 
+    # 直接工具权限：先校验（仅 tool:*:use），再与角色/状态同一事务提交，
+    # 避免"审批已生效但接口报 400"的假象（与通知写库同一考量）
+    direct_perms: list[Permission] | None = None
+    if approve_in is not None and approve_in.tool_permission_ids is not None:
+        try:
+            direct_perms = validate_direct_tool_permissions(
+                db, approve_in.tool_permission_ids
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
     role_ids = (approve_in or UserApproveRequest()).role_ids
-    if role_ids:
-        # 去重后校验角色存在性，防止无效 ID 被 get_roles_by_ids 静默丢弃
+    if role_ids is None:
+        # role_ids 未提供：默认分配"工具使用者"（低权角色），不受提权校验限制
+        tool_role = get_role_by_name(db, "工具使用者")
+        if tool_role is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='未找到默认角色"工具使用者"，请检查权限种子数据',
+            )
+        roles = [tool_role]
+    elif role_ids:
+        # 非空：去重后校验角色存在性，防止无效 ID 被 get_roles_by_ids 静默丢弃
         unique_ids = list(dict.fromkeys(role_ids))
         roles = get_roles_by_ids(db, unique_ids)
         if len(roles) != len(unique_ids):
@@ -261,17 +320,13 @@ def approve_user_endpoint(
                 detail="不能授予高于自身权限的角色",
             )
     else:
-        # 默认分配"工具使用者"（低权角色），不受提权校验限制
-        tool_role = get_role_by_name(db, "工具使用者")
-        if tool_role is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail='未找到默认角色"工具使用者"，请检查权限种子数据',
-            )
-        roles = [tool_role]
+        # 显式空数组：不分配任何角色（通常配合 tool_permission_ids 使用，由管理员自行负责）
+        roles = []
     previous_status = user.status
     user.roles = roles
     user.status = USER_STATUS_APPROVED
+    if direct_perms is not None:
+        user.direct_permissions = direct_perms
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -290,6 +345,9 @@ def approve_user_endpoint(
         },
     )
     notify_user_status_updated(int(user.id), USER_STATUS_APPROVED)
+    if direct_perms is not None:
+        # 审批时设置了直接工具权限：补推权限刷新（不递增 token_version）
+        notify_permissions_updated(int(user.id))
     # 通知中心落库：审批结果通知当事用户（写失败不影响审批结果）
     _safe_create_notification(
         db,
@@ -487,4 +545,5 @@ def _user_to_response(
         "last_login_at": user.last_login_at,
         "roles": [role.name for role in user.roles],
         "permissions": sorted(get_user_permissions(db, user)),
+        "direct_tool_permissions": get_user_direct_tool_permissions(db, user),
     }

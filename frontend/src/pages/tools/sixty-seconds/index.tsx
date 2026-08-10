@@ -12,6 +12,7 @@ import axios from 'axios';
 import api from '../../../api/axios';
 import { gsap } from 'gsap';
 import { LoadingSignal } from '../../../components/LoadingSignal';
+import { formatDateTime } from '../../../lib/format-time';
 
 interface NewsItem {
   title: string;
@@ -361,7 +362,9 @@ const SixtySecondsTool: React.FC = () => {
                   <div>新闻联播 / 人民日报 / 新华网 / 腾讯新闻 / 环球网 / 澎湃新闻</div>
                   <div>
                     共 {dailyResult.news?.length || 0} 条国内外精选新闻
-                    {dailyResult.api_updated ? ` / 更新于 ${dailyResult.api_updated}` : ''}
+                    {dailyResult.api_updated
+                      ? ` / 更新于 ${formatDateTime(dailyResult.api_updated_at) || dailyResult.api_updated}`
+                      : ''}
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1 text-right shrink-0">
@@ -384,7 +387,7 @@ const SixtySecondsTool: React.FC = () => {
                     更新时间
                   </span>
                   <span className="mt-2 block min-w-0 font-mono text-xl font-bold tracking-tight text-foreground break-words">
-                    {dailyResult.api_updated_at ||
+                    {formatDateTime(dailyResult.api_updated_at) ||
                       (typeof dailyResult.api_updated === 'string'
                         ? dailyResult.api_updated
                         : dailyResult.api_updated

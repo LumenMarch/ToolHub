@@ -21,7 +21,7 @@ from time import perf_counter
 import polars as pl
 import xlsxwriter
 from dateutil.relativedelta import relativedelta
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from loguru import logger
 from openpyxl import Workbook, load_workbook
@@ -29,8 +29,10 @@ from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field
 from PyPDF2 import PdfMerger
+from sqlalchemy.orm import Session
 
-from app.core.auth import require_permission, require_tool_enabled
+from app.api import deps
+from app.core.auth import require_tool_permission
 from app.core.config import settings
 from app.models.user import User
 from app.schemas.asset_comparison import (
@@ -61,6 +63,7 @@ from app.services.asset_comparison.job_manager import (
 from app.services.asset_comparison.Notes_Notes import Notes_Notes
 from app.services.asset_comparison.Notes_SFC import Notes_SFC
 from app.services.asset_comparison.SFC_SFC import SFC_SFC
+from app.services.audit import log_action
 from app.services.excel_safety import (
     XLSXWRITER_SAFE_OPTIONS,
     safe_openpyxl_value,
@@ -123,8 +126,7 @@ class ComparisonRequest(BaseModel):
 @router.get("/resolve-folder")
 async def resolve_folder(
     name: str = "",
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     """前端选文件夹后只能拿到文件夹名，用 find 搜索定位绝对路径"""
     import subprocess
@@ -249,9 +251,10 @@ class ScanByIdsRequest(BaseModel):
 
 @router.post("/scan")
 async def scan_uploaded_files_by_ids(
+    request: Request,
     req: ScanByIdsRequest,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     """使用 upload_id 获取已上传文件，扫描匹配后返回路径。"""
     store = UploadStore()
@@ -346,6 +349,20 @@ async def scan_uploaded_files_by_ids(
     for entry in matched_log:
         logger.info(f"[scan]   {entry}")
 
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.asset.scan",
+        target_type="tool",
+        target_id="asset-comparison",
+        # 摘要记录上传数量与匹配数量，不落文件名（可能含敏感业务数据）
+        detail={
+            "scan_id": scan_id,
+            "upload_count": len(upload_ids),
+            "matched_count": matched_count,
+        },
+    )
     return {
         "status": "success",
         "data": result,
@@ -361,8 +378,7 @@ async def scan_uploaded_files_by_ids(
 @router.get("/auto-paths")
 async def get_auto_paths(
     folder: str = "",
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     current_date = datetime.now()
     this_month_str = current_date.strftime("%Y%m")
@@ -1198,9 +1214,10 @@ def _raise_job_http_error(exc: Exception):
 
 @router.post("/jobs", status_code=202)
 def create_asset_comparison_job(
+    request: Request,
     req: AssetComparisonJobCreate,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     payload = req.model_dump()
     client_request_id = payload.pop("clientRequestId")
@@ -1212,6 +1229,16 @@ def create_asset_comparison_job(
         )
     except Exception as exc:
         _raise_job_http_error(exc)
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.asset.compare",
+        target_type="tool",
+        target_id="asset-comparison",
+        # 摘要记录输入文件数量，不落文件路径（可能含敏感业务数据）
+        detail={"job_id": job["jobId"], "reused": reused, "input_count": len(payload)},
+    )
     return {
         **job,
         "reused": reused,
@@ -1222,8 +1249,7 @@ def create_asset_comparison_job(
 @router.get("/jobs/{job_id}")
 def get_asset_comparison_job(
     job_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     try:
         return asset_comparison_job_manager.get_job(
@@ -1242,8 +1268,7 @@ def get_asset_comparison_differences(
     query: str = Query("", max_length=120),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     try:
         return asset_comparison_job_manager.get_difference_details(
@@ -1263,8 +1288,7 @@ def get_asset_comparison_differences(
 def update_asset_comparison_annotations(
     job_id: str,
     req: AssetComparisonAnnotationsUpdate,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     try:
         return asset_comparison_job_manager.update_annotations(
@@ -1280,25 +1304,35 @@ def update_asset_comparison_annotations(
 
 @router.post("/jobs/{job_id}/finalize", status_code=202)
 def finalize_asset_comparison_job(
+    request: Request,
     job_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     try:
-        return asset_comparison_job_manager.finalize(
+        result = asset_comparison_job_manager.finalize(
             user_id=current_user.id,
             job_id=job_id,
         )
     except Exception as exc:
         _raise_job_http_error(exc)
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.asset.finalize",
+        target_type="tool",
+        target_id="asset-comparison",
+        detail={"job_id": job_id},
+    )
+    return result
 
 
 @router.post("/jobs/{job_id}/artifacts/{artifact_key}/retry", status_code=202)
 def retry_asset_comparison_artifact(
     job_id: str,
     artifact_key: str,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     try:
         return asset_comparison_job_manager.retry(
@@ -1312,10 +1346,11 @@ def retry_asset_comparison_artifact(
 
 @router.get("/jobs/{job_id}/artifacts/{artifact_key}")
 def download_asset_comparison_artifact(
+    request: Request,
     job_id: str,
     artifact_key: str,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     try:
         path, filename, content_type = asset_comparison_job_manager.open_artifact(
@@ -1323,20 +1358,28 @@ def download_asset_comparison_artifact(
             job_id=job_id,
             artifact_key=artifact_key,
         )
-        return FileResponse(
-            path=path,
-            media_type=content_type,
-            filename=filename,
-        )
     except Exception as exc:
         _raise_job_http_error(exc)
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.asset.download",
+        target_type="tool",
+        target_id="asset-comparison",
+        detail={"job_id": job_id, "artifact_key": artifact_key},
+    )
+    return FileResponse(
+        path=path,
+        media_type=content_type,
+        filename=filename,
+    )
 
 
 @router.delete("/jobs/{job_id}")
 def cancel_asset_comparison_job(
     job_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     try:
         return asset_comparison_job_manager.cancel(
@@ -1350,8 +1393,7 @@ def cancel_asset_comparison_job(
 @router.delete("/jobs/{job_id}/purge")
 def purge_asset_comparison_job(
     job_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
-    _: None = Depends(require_tool_enabled("asset-comparison")),
+    current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
     try:
         asset_comparison_job_manager.purge(

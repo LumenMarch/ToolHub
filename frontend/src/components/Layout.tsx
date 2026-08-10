@@ -7,6 +7,7 @@ import { NotificationBell } from './NotificationBell';
 import { gsap } from 'gsap';
 import { cn } from '../lib/cn';
 import { useVisibleTools } from '../hooks/useToolsMeta';
+import { ADMIN_PERMISSIONS } from '../hooks/use-permission';
 import { LoadingSignal } from './LoadingSignal';
 
 const Layout: React.FC = () => {
@@ -114,7 +115,8 @@ const Layout: React.FC = () => {
           <span className="hidden text-[0.8125rem] font-mono tracking-widest uppercase opacity-50 lg:block">
             [ 用户: {user?.username} ]
           </span>
-          {user && user.permissions.some((p) => p !== 'tool:use') && (
+          {user &&
+            user.permissions.some((p) => ADMIN_PERMISSIONS.includes(p)) && (
             <Link
               to="/admin"
               className="group relative inline-flex min-h-11 items-center overflow-hidden whitespace-nowrap px-1 text-[0.8125rem] font-mono uppercase tracking-widest transition-colors hover:text-primary active:translate-y-px"

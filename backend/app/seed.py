@@ -11,6 +11,25 @@ from app.db.session import SessionLocal
 from app.models.permission import Permission
 from app.models.role import Role
 
+# 每个工具一条 tool:<id>:use（id 与前端 tools.ts 的 toolsConfig 完全一致）：
+# 细粒度授权后，工具使用权限不再由粗粒度的 tool:use 控制。
+# 该列表同时供存量库迁移脚本（migrate_per_tool_permissions）复用。
+TOOL_PERMISSIONS = [
+    ("tool:pwd-generator:use", "使用密钥生成器工具"),
+    ("tool:string-analyzer:use", "使用字符处理器工具"),
+    ("tool:color-picker:use", "使用颜色工具"),
+    ("tool:qrcode:use", "使用二维码生成工具"),
+    ("tool:asset-comparison:use", "使用资产核对工具"),
+    ("tool:attendance-organizer:use", "使用出勤资料整理工具"),
+    ("tool:atlas-merge:use", "使用AtlasLog Merge工具"),
+    ("tool:health:use", "使用健康指标工具"),
+    ("tool:calendar:use", "使用日历工具"),
+    ("tool:sixty-seconds:use", "使用60s每日新闻工具"),
+    ("tool:image-to-pdf:use", "使用图片转PDF工具"),
+]
+
+TOOL_PERMISSION_CODENAMES = [codename for codename, _ in TOOL_PERMISSIONS]
+
 PERMISSIONS = [
     ("user:read", "查看用户列表与详情"),
     ("user:write", "创建/修改/删除用户，分配角色"),
@@ -18,9 +37,9 @@ PERMISSIONS = [
     ("tool_meta:read", "查看工具元数据"),
     ("tool_meta:write", "修改工具元数据（启用/禁用/排序）"),
     ("stats:read", "查看统计面板"),
-    ("tool:use", "使用工具"),
     ("role:read", "查看角色与权限定义"),
     ("role:write", "创建/编辑/删除角色，分配权限"),
+    *TOOL_PERMISSIONS,
 ]
 
 # 角色名 → 权限 codename 列表
@@ -32,15 +51,15 @@ ROLES = {
         "tool_meta:read",
         "tool_meta:write",
         "stats:read",
-        "tool:use",
         "role:read",
         "role:write",
+        *TOOL_PERMISSION_CODENAMES,
     ],
     "用户管理员": ["user:read", "user:write", "role:read"],
     "审计员": ["audit:read"],
     "工具管理员": ["tool_meta:read", "tool_meta:write"],
     "统计查看者": ["stats:read"],
-    "工具使用者": ["tool:use"],
+    "工具使用者": TOOL_PERMISSION_CODENAMES,
 }
 
 
@@ -69,6 +88,61 @@ def run_seed() -> None:
         if db.scalars(select(Permission)).first() is not None:
             return
         _seed_all(db)
+    finally:
+        db.close()
+
+
+def migrate_per_tool_permissions() -> None:
+    """存量库数据迁移：粗粒度 tool:use → 11 条 tool:<id>:use（幂等，可重复执行）。
+
+    run_seed 仅在 permissions 表为空时播种，存量库（permissions 非空）不会自动
+    获得新 codename，因此启动时额外执行本函数：
+    1. 补齐缺失的 tool:<id>:use 权限（含"表内无任何工具权限"的边角情况）；
+    2. 把**任何**持有 tool:use 的角色替换为全部 11 条工具权限——语义等价：
+       以前能用所有工具，迁移后也能用所有工具（覆盖自定义角色）；
+    3. 删除 permissions 表中无角色引用的残留 tool:use 记录。
+    重复执行无副作用（已迁移的库所有步骤均为 no-op）。
+    """
+    db = SessionLocal()
+    try:
+        perms = db.scalars(select(Permission)).all()
+        perm_map = {p.codename: p for p in perms}
+
+        # 1) 补齐缺失的 11 条新 codename
+        for codename, description in TOOL_PERMISSIONS:
+            if codename not in perm_map:
+                perm = Permission(codename=codename, description=description)
+                db.add(perm)
+                perm_map[codename] = perm
+
+        # 2) 替换所有持有 tool:use 的角色（含自定义角色）
+        roles = db.scalars(select(Role)).all()
+        replaced = False
+        for role in roles:
+            codenames = [p.codename for p in role.permissions]
+            if "tool:use" not in codenames:
+                continue
+            role.permissions = [perm_map[c] for c in codenames if c != "tool:use"] + [
+                perm_map[c] for c in TOOL_PERMISSION_CODENAMES
+            ]
+            replaced = True
+
+        # 3) 清理无角色引用的残留 tool:use 记录
+        old = perm_map.get("tool:use")
+        if old is not None:
+            referencing = any(
+                any(p.codename == "tool:use" for p in role.permissions)
+                for role in roles
+            )
+            if not referencing:
+                db.delete(old)
+
+        db.commit()
+        if replaced or old is not None:
+            logger.info(
+                "per-tool permission migration applied: tool:use → {} 条 tool:<id>:use",
+                len(TOOL_PERMISSIONS),
+            )
     finally:
         db.close()
 

@@ -1,6 +1,7 @@
 import React, { useContext } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { AuthContext } from '../../context/AuthContext';
+import { ADMIN_PERMISSIONS } from '../../hooks/use-permission';
 import RouteLoadingState from './RouteLoadingState';
 
 const AdminRoute: React.FC = () => {
@@ -19,9 +20,9 @@ const AdminRoute: React.FC = () => {
     return <Navigate to="/pending" replace />;
   }
 
-  // 有任意管理相关权限即可进入控制台
+  // 持有任一管理权限（白名单）即可进入控制台
   const hasAdminAccess = user.permissions.some((p) =>
-    p !== 'tool:use',
+    ADMIN_PERMISSIONS.includes(p),
   );
 
   if (!hasAdminAccess) {

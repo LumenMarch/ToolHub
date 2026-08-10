@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PencilSimple,
   Plus,
@@ -357,12 +357,50 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
   const [selectedPermIds, setSelectedPermIds] = useState<number[]>(
     () => target.permissions.map((permission) => permission.id),
   );
+  // 工具权限模式：'all' = 工具使用者（全部工具），'custom' = 自定义逐个勾选；初始为自定义
+  const [toolMode, setToolMode] = useState<'all' | 'custom'>('custom');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     api.listPermissions().then(setAllPermissions).catch(() => {});
   }, [api]);
+
+  // 全部 tool: 前缀权限的 id，供「工具使用者」模式的全选与初始状态判断使用
+  const allToolPermIds = useMemo(
+    () =>
+      allPermissions.flatMap((perm) =>
+        perm.codename.startsWith('tool:') ? [perm.id] : [],
+      ),
+    [allPermissions],
+  );
+
+  // 首次加载权限列表完成后同步一次模式：若当前角色已持有全部 tool: 权限，说明它是
+  // 「工具使用者」状态，自动切到 'all' 以如实反映；否则保持 'custom'。
+  // 用 ref 保证只同步这一次，后续（用户勾选/切换后）不再覆盖用户的模式选择。
+  const hasSyncedToolMode = useRef(false);
+  const selectedPermIdSet = useMemo(
+    () => new Set(selectedPermIds),
+    [selectedPermIds],
+  );
+  useEffect(() => {
+    if (hasSyncedToolMode.current || allPermissions.length === 0) return;
+    hasSyncedToolMode.current = true;
+    const holdsAllTools =
+      allToolPermIds.length > 0 &&
+      allToolPermIds.every((id) => selectedPermIdSet.has(id));
+    setToolMode(holdsAllTools ? 'all' : 'custom');
+  }, [allPermissions, allToolPermIds, selectedPermIdSet]);
+
+  // 切换工具权限模式：'all' 时并入全部工具权限 id（管理权限保持不动）；'custom' 时不动已选集合
+  const switchToolMode = (mode: 'all' | 'custom') => {
+    setToolMode(mode);
+    if (mode === 'all') {
+      setSelectedPermIds((prev) =>
+        Array.from(new Set([...prev, ...allToolPermIds])),
+      );
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -385,6 +423,22 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
   };
 
   const selectedPermissionIdSet = new Set(selectedPermIds);
+
+  // 按 tool: 前缀把权限分为「工具权限 / 管理权限」两组，组内按 codename 排序
+  const permissionGroups = useMemo(() => {
+    const byCodename = (a: Permission, b: Permission) =>
+      a.codename.localeCompare(b.codename);
+    const toolPermissions = allPermissions
+      .filter((perm) => perm.codename.startsWith('tool:'))
+      .sort(byCodename);
+    const adminPermissions = allPermissions
+      .filter((perm) => !perm.codename.startsWith('tool:'))
+      .sort(byCodename);
+    return [
+      { title: '工具权限', items: toolPermissions },
+      { title: '管理权限', items: adminPermissions },
+    ];
+  }, [allPermissions]);
 
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
@@ -420,23 +474,69 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
             <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground mb-2">
               权限 ({selectedPermIds.length}/{allPermissions.length})
             </p>
-            <div className="space-y-1.5 max-h-56 overflow-y-auto">
-              {allPermissions.map((perm) => (
-                <label
-                  key={perm.id}
-                  className="flex items-center gap-2 cursor-pointer text-sm"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedPermissionIdSet.has(perm.id)}
-                    onChange={() => togglePermission(perm.id)}
-                    className="w-4 h-4 accent-[var(--color-brand)]"
-                  />
-                  <code className="text-[11px] font-mono text-muted-foreground w-24 shrink-0">
-                    {perm.codename}
-                  </code>
-                  <span className="text-sm">{perm.description}</span>
-                </label>
+            <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
+              {permissionGroups.map((group) => (
+                <div key={group.title} className="space-y-1.5">
+                  <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/70">
+                    {group.title} ({group.items.length})
+                  </p>
+                  {/* 工具权限组：二选一模式——工具使用者（全部工具）/ 自定义逐个勾选 */}
+                  {group.title === '工具权限' && (
+                    <div className="pt-0.5 pb-1 space-y-1">
+                      <label className="flex items-center gap-2 cursor-pointer text-sm">
+                        <input
+                          type="radio"
+                          name="tool-permission-mode"
+                          checked={toolMode === 'all'}
+                          onChange={() => switchToolMode('all')}
+                          className="w-4 h-4 accent-[var(--color-brand)]"
+                        />
+                        <span className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+                          工具使用者（全部工具）
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-sm">
+                        <input
+                          type="radio"
+                          name="tool-permission-mode"
+                          checked={toolMode === 'custom'}
+                          onChange={() => switchToolMode('custom')}
+                          className="w-4 h-4 accent-[var(--color-brand)]"
+                        />
+                        <span className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
+                          自定义工具权限
+                        </span>
+                      </label>
+                    </div>
+                  )}
+                  {group.items.map((perm) => {
+                    // 「工具使用者」模式下工具权限复选框整体禁用，只能由 radio 统一授予/收回
+                    const disabled =
+                      group.title === '工具权限' && toolMode === 'all';
+                    return (
+                      <label
+                        key={perm.id}
+                        className={`flex items-center gap-2 text-sm ${
+                          disabled
+                            ? 'cursor-not-allowed opacity-60'
+                            : 'cursor-pointer'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedPermissionIdSet.has(perm.id)}
+                          onChange={() => togglePermission(perm.id)}
+                          disabled={disabled}
+                          className="w-4 h-4 accent-[var(--color-brand)]"
+                        />
+                        <code className="text-[11px] font-mono text-muted-foreground w-24 shrink-0">
+                          {perm.codename}
+                        </code>
+                        <span className="text-sm">{perm.description}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               ))}
             </div>
           </div>

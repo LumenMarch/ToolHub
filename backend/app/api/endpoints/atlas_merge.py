@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.auth import require_permission, require_tool_enabled
+from app.core.auth import require_tool_permission
 from app.models.user import User
 from app.schemas.atlas_merge import AnalyzeAcceptedResponse, JobResponse
 from app.services.atlas_merge import (
@@ -65,8 +65,7 @@ def _build_download_file_response(file_path: Path, filename: str) -> FileRespons
 def analyze_atlas_merge(
     request: Request,
     req: AtlasMergeAnalyzeRequest,
-    current_user: User = Depends(require_permission("tool:use")),
-    __: None = Depends(require_tool_enabled("atlas-merge")),
+    current_user: User = Depends(require_tool_permission("atlas-merge")),
 ) -> AnalyzeAcceptedResponse:
     """提交合并任务：立即返回 202 + job_id，进度走 GET /jobs/{job_id} 轮询。
 
@@ -94,7 +93,7 @@ def analyze_atlas_merge(
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 def get_atlas_merge_job(
     job_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
+    current_user: User = Depends(require_tool_permission("atlas-merge")),
 ) -> JobResponse:
     """轮询合并任务进度/结果。job 不存在或非本人 → 404。"""
     payload = atlas_merge_jobs.get_serialized(job_id, current_user.id)
@@ -108,7 +107,7 @@ def download_atlas_merge_result(
     result_id: str,
     request: Request,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(require_permission("tool:use")),
+    current_user: User = Depends(require_tool_permission("atlas-merge")),
 ) -> Response:
     try:
         cached_result = atlas_merge_result_cache.get(result_id, current_user.id)
@@ -137,7 +136,18 @@ def download_atlas_merge_result(
 @router.delete("/results/{result_id}", status_code=204)
 def delete_atlas_merge_result(
     result_id: str,
-    current_user: User = Depends(require_permission("tool:use")),
+    request: Request,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("atlas-merge")),
 ) -> Response:
     atlas_merge_result_cache.delete(result_id, current_user.id)
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.atlas_merge.delete",
+        target_type="tool",
+        target_id="atlas-merge",
+        detail={"result_id": result_id},
+    )
     return Response(status_code=204)
