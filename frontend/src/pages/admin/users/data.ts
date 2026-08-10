@@ -1,4 +1,5 @@
 import type { UserStatus } from './schema';
+import { parseServerDate } from '../../../lib/format-time';
 
 /** 状态筛选选项（faceted filter + 服务端 status 参数）。 */
 export const statusOptions: { label: string; value: string }[] = [
@@ -29,11 +30,10 @@ export const callTypes: Record<
   },
 };
 
-/** 日期展示：非法/空值统一显示"从未"，避免 Invalid Date 泄漏。 */
+/** 日期展示：非法/空值统一显示"从未"，避免 Invalid Date 泄漏；后端无时区 UTC，补 Z 解析后按本地时区显示。 */
 export function formatAdminDate(value: string | null) {
-  if (!value) return '从未'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '从未'
+  const date = parseServerDate(value);
+  if (!date) return '从未'
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',

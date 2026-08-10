@@ -22,6 +22,7 @@ import React, {
 import api from '../../../api/axios';
 import { LoadingSignal } from '../../../components/LoadingSignal';
 import { cn } from '../../../lib/cn';
+import { formatTime, parseServerDate } from '../../../lib/format-time';
 import {
   type UploadState,
   useTusUpload,
@@ -570,7 +571,7 @@ const AtlasMerge: React.FC = () => {
       return;
     }
 
-    const expiresIn = new Date(analysis.expires_at).getTime() - Date.now();
+    const expiresIn = (parseServerDate(analysis.expires_at)?.getTime() ?? 0) - Date.now();
     if (expiresIn <= 0) {
       setIsExpired(true);
       return;
@@ -1055,7 +1056,7 @@ const AtlasMerge: React.FC = () => {
                       {analysis.expires_at
                         ? isExpired
                           ? '结果已过期，请重新分析'
-                          : `可下载至 ${new Date(analysis.expires_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
+                          : `可下载至 ${formatTime(analysis.expires_at)}`
                         : '结果在有效期内可重复下载'}
                     </p>
                   </div>

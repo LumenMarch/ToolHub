@@ -26,15 +26,21 @@ export const toolsMetaQueryOptions = queryOptions({
   retry: 1,
 });
 
-function resolveVisibleTools(overrides: ToolMetaOverride[]) {
+function resolveVisibleTools(
+  overrides: ToolMetaOverride[],
+  permissions: string[],
+) {
   const overrideMap = new Map(
     overrides.map((override) => [override.tool_id, override]),
   );
+  const permissionSet = new Set(permissions);
   const visibleTools: Array<ToolDefinition & { sortOrder: number }> = [];
 
   for (const [index, tool] of toolsConfig.entries()) {
     const override = overrideMap.get(tool.id);
     if (override?.enabled === false) continue;
+    // 每工具授权：用户须持有该工具的 tool:<id>:use 权限（纯前端工具同样受此过滤）
+    if (!permissionSet.has(tool.permission)) continue;
 
     visibleTools.push({
       ...tool,
@@ -62,31 +68,37 @@ export function useToolsMetaRealtimeInvalidation() {
 
 export function useVisibleTools() {
   const { user } = useContext(AuthContext);
-  // 后端 GET /tools-meta 要求 tool:use 权限；无权限用户不请求受保护端点，
-  // 工具列表为空（主页显示空态提示）。
-  const hasToolUse = user?.permissions.includes('tool:use') ?? false;
+  const userPermissions = useMemo(
+    () => user?.permissions ?? [],
+    [user?.permissions],
+  );
+  // 后端 GET /tools-meta 要求持有任一工具权限；无工具权限的用户不请求
+  // 受保护端点，工具列表为空（主页显示空态提示）。
+  const hasAnyToolPermission = userPermissions.some(
+    (p) => p.startsWith('tool:') && p.endsWith(':use'),
+  );
 
   const query = useQuery({
     ...toolsMetaQueryOptions,
-    enabled: hasToolUse,
+    enabled: hasAnyToolPermission,
   });
 
   const visibleTools = useMemo(() => {
-    if (!hasToolUse) return [];
+    if (!hasAnyToolPermission) return [];
     if (query.data) {
-      return resolveVisibleTools(query.data);
+      return resolveVisibleTools(query.data, userPermissions);
     }
     if (query.isError) {
-      return resolveVisibleTools([]);
+      return resolveVisibleTools([], userPermissions);
     }
     return [];
-  }, [query.data, query.isError, hasToolUse]);
+  }, [query.data, query.isError, hasAnyToolPermission, userPermissions]);
 
   return {
     visibleTools,
     // 禁用的查询（无权限）不进入 pending，直接渲染空态
-    isPending: hasToolUse ? query.isPending : false,
-    /** 当前用户是否具备 tool:use 权限（用于主页空态文案区分） */
-    hasAccess: hasToolUse,
+    isPending: hasAnyToolPermission ? query.isPending : false,
+    /** 当前用户是否持有任一工具权限（用于主页空态文案区分） */
+    hasAccess: hasAnyToolPermission,
   };
 }

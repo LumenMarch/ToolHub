@@ -17,6 +17,8 @@ import type { IconProps } from '@phosphor-icons/react';
 // Tool Definition Interface
 export interface ToolDefinition {
   id: string;
+  /** 该工具对应的权限 codename（tool:<id>:use），权限数据唯一来源 */
+  permission: string;
   name: string;
   icon: React.ForwardRefExoticComponent<IconProps & React.RefAttributes<SVGSVGElement>>;
   path: string;
@@ -43,6 +45,7 @@ const SixtySeconds = React.lazy(() => import('../pages/tools/sixty-seconds/index
 export const toolsConfig: ToolDefinition[] = [
   {
     id: 'pwd-generator',
+    permission: 'tool:pwd-generator:use',
     name: '密钥生成器',
     icon: Key,
     path: '/tools/pwd-generator',
@@ -51,6 +54,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'string-analyzer',
+    permission: 'tool:string-analyzer:use',
     name: '字符处理器',
     icon: TextT,
     path: '/tools/string-analyzer',
@@ -59,6 +63,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'color-picker',
+    permission: 'tool:color-picker:use',
     name: '颜色工具',
     icon: Palette,
     path: '/tools/color-picker',
@@ -67,6 +72,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'qrcode',
+    permission: 'tool:qrcode:use',
     name: '二维码生成',
     icon: QrCode,
     path: '/tools/qrcode',
@@ -75,6 +81,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'asset-comparison',
+    permission: 'tool:asset-comparison:use',
     name: '资产核对',
     icon: FileMagnifyingGlass,
     path: '/tools/asset-comparison',
@@ -83,6 +90,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'attendance-organizer',
+    permission: 'tool:attendance-organizer:use',
     name: '出勤资料整理',
     icon: FileArrowUp,
     path: '/tools/attendance-organizer',
@@ -91,6 +99,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'atlas-merge',
+    permission: 'tool:atlas-merge:use',
     name: 'AtlasLog Merge',
     icon: TreeStructure,
     path: '/tools/atlas-merge',
@@ -99,6 +108,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'health',
+    permission: 'tool:health:use',
     name: '健康指标',
     icon: Heartbeat,
     path: '/tools/health',
@@ -107,6 +117,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'calendar',
+    permission: 'tool:calendar:use',
     name: '日历',
     icon: CalendarBlank,
     path: '/tools/calendar',
@@ -115,6 +126,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'sixty-seconds',
+    permission: 'tool:sixty-seconds:use',
     name: '60s 每日新闻',
     icon: Newspaper,
     path: '/tools/sixty-seconds',
@@ -123,6 +135,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'image-to-pdf',
+    permission: 'tool:image-to-pdf:use',
     name: '图片转 PDF',
     icon: FileImage,
     path: '/tools/image-to-pdf',

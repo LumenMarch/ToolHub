@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { CaretDown, MagnifyingGlass } from '@phosphor-icons/react';
 import { useAdminApi } from './hooks/use-admin-api';
+import { parseServerDate } from '../../lib/format-time';
 import type { AuditLog } from './hooks/use-admin-api';
 import AdminLoadingState from './components/AdminLoadingState';
 
@@ -17,8 +18,23 @@ const ACTION_INFO: Record<string, { label: string; tone: string }> = {
   'user.create': { label: '创建用户', tone: 'text-primary' },
   'user.update': { label: '修改用户', tone: 'text-primary' },
   'user.delete': { label: '删除用户', tone: 'text-primary' },
+  'tool.string.analyze': { label: '字符分析', tone: 'text-primary' },
+  'tool.color.convert': { label: '颜色转换', tone: 'text-primary' },
+  'tool.color.palette': { label: '配色方案', tone: 'text-primary' },
+  'tool.qrcode.generate': { label: '二维码生成', tone: 'text-primary' },
+  'tool.health.calculate': { label: '健康评估', tone: 'text-primary' },
+  'tool.calendar.info': { label: '日历查询', tone: 'text-primary' },
+  'tool.sixty_seconds.daily': { label: '60s 新闻', tone: 'text-primary' },
+  'tool.sixty_seconds.image': { label: '60s 新闻图片', tone: 'text-primary' },
+  'tool.asset.scan': { label: '资产扫描', tone: 'text-primary' },
+  'tool.asset.compare': { label: '资产比对', tone: 'text-primary' },
+  'tool.asset.finalize': { label: '比对定稿', tone: 'text-primary' },
+  'tool.asset.download': { label: '产物下载', tone: 'text-primary' },
   'tool.attendance.process': { label: '出勤整理', tone: 'text-primary' },
   'tool.attendance.analyze': { label: '出勤分析', tone: 'text-primary' },
+  'tool.attendance.download': { label: '出勤结果下载', tone: 'text-primary' },
+  'tool.attendance.delete_result': { label: '删除出勤结果', tone: 'text-primary' },
+  'tool.atlas_merge.delete': { label: '删除合并结果', tone: 'text-primary' },
   'tool.asset.save': { label: '资产保存', tone: 'text-primary' },
   'tool.asset.export': { label: '资产导出', tone: 'text-primary' },
   'tool.meta.update': { label: '工具配置', tone: 'text-primary' },
@@ -33,7 +49,9 @@ interface AuditDateGroup {
 }
 
 const getAuditDateParts = (value: string) => {
-  const date = new Date(value);
+  // 后端为无时区 UTC，parseServerDate 补 Z 解析后按本地时区取日期/时间。
+  const date = parseServerDate(value);
+  if (!date) return { key: '', day: '', weekday: '', time: '' };
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');

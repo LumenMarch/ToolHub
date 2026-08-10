@@ -23,6 +23,7 @@ import api from '../../../api/axios';
 import { LoadingSignal } from '../../../components/LoadingSignal';
 import { cn } from '../../../lib/cn';
 import FileDropZone from '../../../components/FileDropZone';
+import { formatTime, parseServerDate } from '../../../lib/format-time';
 import {
   type UploadState,
   useTusUpload,
@@ -692,7 +693,7 @@ const AttendanceOrganizer: React.FC = () => {
       return;
     }
 
-    const expiresIn = new Date(analysis.expires_at).getTime() - Date.now();
+    const expiresIn = (parseServerDate(analysis.expires_at)?.getTime() ?? 0) - Date.now();
     if (expiresIn <= 0) {
       setIsExpired(true);
       return;
@@ -978,7 +979,7 @@ const AttendanceOrganizer: React.FC = () => {
                     >
                       {isExpired
                         ? '结果已过期，请重新分析'
-                        : `可下载至 ${new Date(analysis.expires_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`}
+                        : `可下载至 ${formatTime(analysis.expires_at)}`}
                     </p>
                   </div>
 

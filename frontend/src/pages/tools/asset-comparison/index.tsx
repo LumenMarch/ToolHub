@@ -26,6 +26,7 @@ import {
 } from '@phosphor-icons/react';
 import api from '../../../api/axios';
 import { LoadingSignal } from '../../../components/LoadingSignal';
+import { parseServerDate } from '../../../lib/format-time';
 import { useTusUpload } from '../../../hooks/useTusUpload';
 import type {
   AssetComparisonInputs,
@@ -181,8 +182,8 @@ function getFileName(value: string): string {
 }
 
 function formatTaskMonth(value?: string | null): string {
-  const date = value ? new Date(value) : new Date();
-  if (Number.isNaN(date.getTime())) return '当前周期';
+  const date = value ? parseServerDate(value) : new Date();
+  if (!date) return '当前周期';
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric',
     month: 'long',
@@ -191,8 +192,8 @@ function formatTaskMonth(value?: string | null): string {
 
 function formatTimestamp(value?: string | null): string {
   if (!value) return '尚未同步';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '尚未同步';
+  const date = parseServerDate(value);
+  if (!date) return '尚未同步';
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit',
     day: '2-digit',

@@ -13,6 +13,67 @@ import type {
   ToolCallStat,
 } from './hooks/use-admin-api';
 
+/** 日期范围选项：number 为最近 N 天，null 表示全部时间（仅工具调用支持）。 */
+interface RangeOption<T extends number | null> {
+  value: T;
+  label: string;
+}
+
+/** 图表右上角的日期范围按钮组：mono 小号 uppercase，选中态 primary 高亮（对齐 Audit 筛选按钮风格）。 */
+function ChartRangeSelector<T extends number | null>({
+  options,
+  value,
+  onChange,
+}: {
+  options: Array<RangeOption<T>>;
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      {options.map((opt) => {
+        const selected = opt.value === value;
+        return (
+          <button
+            key={String(opt.value)}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(opt.value)}
+            className={
+              selected
+                ? 'border border-primary bg-primary/10 px-2.5 py-1 font-mono text-[11px] uppercase tracking-widest text-primary'
+                : 'border border-border px-2.5 py-1 font-mono text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary'
+            }
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 工具 action slug → 中文名。
+ *  slug 从后端 action 派生：去掉 "tool." 前缀后，去掉最后一个 ".操作段"
+ *  （如 tool.attendance.process → attendance）。
+ *  名称来源：frontend/src/config/tools.ts 的 id/name；slug 与 tools.ts id
+ *  存在连字符/下划线差异时在此显式映射（attendance → attendance-organizer）。
+ *  tool.meta.* 为管理员在后台配置工具的审计动作（backend/app/api/endpoints/admin_tools.py），
+ *  非用户工具调用，单独归类为"工具配置管理"避免混入工具调用。
+ *  不在映射表中的 slug 回退显示 slug 本身，不报错。 */
+const TOOL_SLUG_NAMES: Record<string, string> = {
+  attendance: '出勤资料整理',
+  atlas_merge: 'AtlasLog Merge',
+  meta: '工具配置管理',
+};
+
+/** 图表数据条目：label 为归并后的工具中文名，actions 保留原始 action 列表用于 tooltip。 */
+interface ToolCallChartItem {
+  label: string;
+  value: number;
+  actions: string[];
+}
+
 const AdminDashboard: React.FC = () => {
   const api = useAdminApi();
   const { has } = usePermission();
@@ -21,10 +82,16 @@ const AdminDashboard: React.FC = () => {
   const [overview, setOverview] = useState<OverviewStats | null>(null);
   const [toolCalls, setToolCalls] = useState<ToolCallStat[]>([]);
   const [dailyActive, setDailyActive] = useState<DailyActiveStat[]>([]);
+  // 两个图表各自独立的日期范围（天），互不影响；null = 全部时间。
+  const [activeDays, setActiveDays] = useState(7);
+  const [toolDays, setToolDays] = useState<number | null>(7);
   const [loading, setLoading] = useState(true);
+  const [toolLoading, setToolLoading] = useState(true);
+  const [activeLoading, setActiveLoading] = useState(true);
   const [error, setError] = useState('');
   const containerRef = React.useRef<HTMLDivElement>(null);
 
+  // 概览卡片只加载一次，不随日期范围变化。
   useEffect(() => {
     // 无 stats:read 权限时不请求任何统计接口
     if (!canViewStats) return;
@@ -32,12 +99,11 @@ const AdminDashboard: React.FC = () => {
     let active = true;
     setLoading(true);
     setError('');
-    Promise.all([api.getOverview(), api.getToolCalls(), api.getDailyActiveUsers(7)])
-      .then(([o, t, d]) => {
+    api
+      .getOverview()
+      .then((o) => {
         if (!active) return;
         setOverview(o);
-        setToolCalls(t);
-        setDailyActive(d);
       })
       .catch(() => {
         if (!active) return;
@@ -52,6 +118,58 @@ const AdminDashboard: React.FC = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canViewStats]);
+
+  // 工具调用统计：随 toolDays 变化重新拉取（null = 全部时间，不携带 days 参数）。
+  useEffect(() => {
+    if (!canViewStats) return;
+
+    let active = true;
+    setToolLoading(true);
+    api
+      .getToolCalls(toolDays ?? undefined)
+      .then((t) => {
+        if (!active) return;
+        setToolCalls(t);
+      })
+      .catch(() => {
+        if (!active) return;
+        setError('统计数据加载失败');
+      })
+      .finally(() => {
+        if (!active) return;
+        setToolLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canViewStats, toolDays]);
+
+  // 每日活跃用户：随 activeDays 变化重新拉取。
+  useEffect(() => {
+    if (!canViewStats) return;
+
+    let active = true;
+    setActiveLoading(true);
+    api
+      .getDailyActiveUsers(activeDays)
+      .then((d) => {
+        if (!active) return;
+        setDailyActive(d);
+      })
+      .catch(() => {
+        if (!active) return;
+        setError('统计数据加载失败');
+      })
+      .finally(() => {
+        if (!active) return;
+        setActiveLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canViewStats, activeDays]);
 
   useEffect(() => {
     if (
@@ -80,18 +198,25 @@ const AdminDashboard: React.FC = () => {
     return () => ctx.revert();
   }, [error, loading]);
 
-  const toolCallChartData = toolCalls.reduce<Array<{ label: string; value: number }>>(
-    (items, toolCall) => {
-      if (toolCall.action.startsWith('tool.')) {
-        items.push({
-          label: toolCall.action.replace('tool.', '').replace(/\./g, ' '),
-          value: toolCall.count,
-        });
+  // 工具调用统计：同一工具不同操作（如 analyze/download）按 slug 归并为一个条目，
+  // count 相加，label 显示中文工具名；最终按 count 降序（与后端返回排序一致）。
+  const toolCallChartData = toolCalls
+    .reduce<ToolCallChartItem[]>((items, toolCall) => {
+      if (!toolCall.action.startsWith('tool.')) return items;
+      const parts = toolCall.action.slice('tool.'.length).split('.');
+      // slug = 去掉最后一个 ".操作段"（如 tool.attendance.process → attendance）。
+      const slug = parts.length > 1 ? parts.slice(0, -1).join('.') : parts.join('.');
+      const label = TOOL_SLUG_NAMES[slug] ?? slug;
+      const existing = items.find((item) => item.label === label);
+      if (existing) {
+        existing.value += toolCall.count;
+        existing.actions.push(toolCall.action);
+      } else {
+        items.push({ label, value: toolCall.count, actions: [toolCall.action] });
       }
       return items;
-    },
-    [],
-  );
+    }, [])
+    .sort((a, b) => b.value - a.value);
 
   if (!canViewStats) {
     return (
@@ -157,24 +282,69 @@ const AdminDashboard: React.FC = () => {
             </PermissionGuard>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="space-y-6">
             <PermissionGuard permission="stats:read">
               <div className="admin-chart-block border border-border p-6">
-                <h2 className="text-sm font-bold tracking-tight mb-1">工具调用次数</h2>
-                <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60 mb-6">
-                  TOOL CALLS
-                </p>
-                <BarChart data={toolCallChartData} emptyHint="暂无工具调用记录" />
+                {/* 标题在左、日期范围按钮组在右（右上角） */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-bold tracking-tight mb-1">每日活跃用户</h2>
+                    <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
+                      DAILY ACTIVE USERS · 最近 {activeDays} 天
+                    </p>
+                  </div>
+                  <ChartRangeSelector
+                    options={[
+                      { value: 7, label: '7D' },
+                      { value: 14, label: '14D' },
+                      { value: 30, label: '30D' },
+                    ]}
+                    value={activeDays}
+                    onChange={setActiveDays}
+                  />
+                </div>
+                <div className="mt-6">
+                  {activeLoading ? (
+                    <div className="h-[200px] flex items-center justify-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
+                      加载中...
+                    </div>
+                  ) : (
+                    <TrendChart data={dailyActive} emptyHint="暂无活跃数据" />
+                  )}
+                </div>
               </div>
             </PermissionGuard>
 
             <PermissionGuard permission="stats:read">
               <div className="admin-chart-block border border-border p-6">
-                <h2 className="text-sm font-bold tracking-tight mb-1">每日活跃用户</h2>
-                <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60 mb-6">
-                  DAILY ACTIVE USERS · 最近 7 天
-                </p>
-                <TrendChart data={dailyActive} emptyHint="暂无活跃数据" />
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-bold tracking-tight mb-1">工具调用次数</h2>
+                    <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
+                      TOOL CALLS
+                      {toolDays ? ` · 最近 ${toolDays} 天` : ' · 全部时间'}
+                    </p>
+                  </div>
+                  <ChartRangeSelector
+                    options={[
+                      { value: 7, label: '7D' },
+                      { value: 14, label: '14D' },
+                      { value: 30, label: '30D' },
+                      { value: null, label: 'ALL' },
+                    ]}
+                    value={toolDays}
+                    onChange={setToolDays}
+                  />
+                </div>
+                <div className="mt-6">
+                  {toolLoading ? (
+                    <div className="h-[200px] flex items-center justify-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
+                      加载中...
+                    </div>
+                  ) : (
+                    <BarChart data={toolCallChartData} emptyHint="暂无工具调用记录" />
+                  )}
+                </div>
               </div>
             </PermissionGuard>
           </div>

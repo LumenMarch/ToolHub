@@ -15,17 +15,12 @@ import {
   useUnreadCount,
 } from '@/hooks/use-notifications'
 import type { Notification } from '@/types/notifications'
-
-/** 后端时间戳为无时区 UTC：补 Z 再解析为真实时刻，避免按本地时间误读产生偏移。 */
-function parseServerDate(iso: string) {
-  const hasTimezone = /(Z|[+-]\d{2}:?\d{2})$/i.test(iso)
-  return new Date(hasTimezone ? iso : `${iso}Z`)
-}
+import { parseServerDate } from '@/lib/format-time'
 
 /** 相对时间（中文）：刚刚 / N 分钟前 / N 小时前 / N 天前 / 日期。 */
 function formatRelativeTime(iso: string) {
-  const time = parseServerDate(iso).getTime()
-  if (Number.isNaN(time)) return ''
+  const time = parseServerDate(iso)?.getTime()
+  if (time === undefined || Number.isNaN(time)) return ''
   const minutes = Math.floor((Date.now() - time) / 60_000)
   if (minutes < 1) return '刚刚'
   if (minutes < 60) return `${minutes} 分钟前`
@@ -33,11 +28,11 @@ function formatRelativeTime(iso: string) {
   if (hours < 24) return `${hours} 小时前`
   const days = Math.floor(hours / 24)
   if (days < 7) return `${days} 天前`
-  return parseServerDate(iso).toLocaleDateString('zh-CN', {
+  return parseServerDate(iso)?.toLocaleDateString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  })
+  }) ?? ''
 }
 
 /**

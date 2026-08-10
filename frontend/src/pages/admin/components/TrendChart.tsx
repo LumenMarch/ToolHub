@@ -1,13 +1,28 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 
 interface TrendChartProps {
   data: Array<{ date: string; count: number }>;
   emptyHint?: string;
 }
 
-const CHART_PADDING = { top: 20, right: 20, bottom: 30, left: 30 };
+const CHART_PADDING = { top: 20, right: 20, bottom: 30, left: 36 };
 
 const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据' }) => {
+  const svgRef = useRef<SVGSVGElement>(null);
+  // SVG 宽度跟随容器动态测量（viewBox 宽 = 实际宽度），
+  // 避免固定 viewBox 在宽屏下被缩放/留白、文字随宽度放大。
+  const [width, setWidth] = useState(600);
+
+  useLayoutEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const update = () => setWidth(el.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   if (data.length === 0 || data.every((d) => d.count === 0)) {
     return (
       <div className="h-[200px] flex items-center justify-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
@@ -16,12 +31,18 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
     );
   }
 
-  const width = 600;
   const height = 200;
   const innerWidth = width - CHART_PADDING.left - CHART_PADDING.right;
   const innerHeight = height - CHART_PADDING.top - CHART_PADDING.bottom;
 
-  const maxValue = Math.max(...data.map((d) => d.count), 1);
+  // Y 轴最大值取整到美观刻度（1/2/5 × 10^n 的倍数），保证刻度为整数、可整除，避免小数刻度。
+  const rawMax = Math.max(...data.map((d) => d.count), 1);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawMax)));
+  const niceStep = [1, 2, 5, 10].find((m) => rawMax < m * magnitude * 4) ?? 10;
+  const step = niceStep * magnitude;
+  const maxValue = Math.ceil(rawMax / step) * step;
+  // Y 轴刻度序列（0 到 maxValue，2-4 个刻度区间）。
+  const yTicks = Array.from({ length: maxValue / step + 1 }, (_, i) => i * step);
   const stepX = data.length > 1 ? innerWidth / (data.length - 1) : 0;
 
   // 各点坐标。
@@ -45,24 +66,36 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
   return (
     <div className="w-full overflow-x-auto">
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
         className="w-full h-[200px] min-w-[400px]"
         preserveAspectRatio="xMidYMid meet"
       >
-        {/* 水平网格线 */}
-        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-          const y = CHART_PADDING.top + innerHeight - ratio * innerHeight;
+        {/* Y 轴刻度值 + 水平网格线（低透明度，辅助阅读） */}
+        {yTicks.map((tick) => {
+          const y = CHART_PADDING.top + innerHeight - (tick / maxValue) * innerHeight;
           return (
-            <line
-              key={ratio}
-              x1={CHART_PADDING.left}
-              y1={y}
-              x2={width - CHART_PADDING.right}
-              y2={y}
-              stroke="currentColor"
-              strokeWidth="0.5"
-              className="text-border"
-            />
+            <g key={tick}>
+              <text
+                x={CHART_PADDING.left - 6}
+                y={y}
+                textAnchor="end"
+                dominantBaseline="middle"
+                className="fill-muted-foreground font-mono"
+                style={{ fontSize: '10px' }}
+              >
+                {tick}
+              </text>
+              <line
+                x1={CHART_PADDING.left}
+                y1={y}
+                x2={width - CHART_PADDING.right}
+                y2={y}
+                stroke="currentColor"
+                strokeWidth="0.5"
+                className="text-border opacity-40"
+              />
+            </g>
           );
         })}
 
@@ -82,24 +115,38 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
           strokeLinecap="round"
         />
 
-        {/* 数据点 */}
+        {/* 数据点 + 数值标注（hover 时数值与点位一起高亮） */}
         {points.map((p) => (
-          <g key={p.date}>
+          <g key={p.date} className="group cursor-pointer">
+            <title>{`${p.date}: ${p.count}`}</title>
+            {/* 点位上方数值标注，常显；hover 时变 primary（对齐 BarChart 交互） */}
+            <text
+              x={p.x}
+              y={p.y - 8}
+              textAnchor="middle"
+              className="text-[10px] font-mono fill-muted-foreground opacity-70 transition-[fill,opacity] group-hover:fill-primary group-hover:opacity-100"
+            >
+              {p.count}
+            </text>
+            {/* 数据点本体 */}
+            <circle cx={p.x} cy={p.y} r="2.5" className="fill-primary" />
+            {/* hover 高亮光晕 */}
             <circle
               cx={p.x}
               cy={p.y}
-              r="2.5"
-              className="fill-primary"
+              r="5"
+              className="fill-primary opacity-0 transition-opacity group-hover:opacity-25"
             />
-            <title>{`${p.date}: ${p.count}`}</title>
+            {/* 扩大 hover 命中区域，便于悬停 */}
+            <circle cx={p.x} cy={p.y} r="8" className="fill-transparent" />
           </g>
         ))}
 
-        {/* X 轴日期标签（稀疏显示，避免重叠） */}
+        {/* X 轴日期标签（按可用宽度估算密度，避免重叠） */}
         {points.map((p, i) => {
-          // 数据点多时隔几个显示一个。
-          const skip = data.length > 10 ? 2 : 1;
-          if (i % skip !== 0 && i !== data.length - 1) return null;
+          // 每个标签约需 28px，按内宽折算隔几个显示一个。
+          const labelStep = Math.max(1, Math.ceil((data.length * 28) / innerWidth));
+          if (i % labelStep !== 0 && i !== data.length - 1) return null;
           const dateLabel = p.date.slice(5); // MM-DD
           return (
             <text
