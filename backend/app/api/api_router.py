@@ -10,6 +10,7 @@ from app.api.endpoints import (
     atlas_merge,
     attendance,
     auth,
+    box_plot,
     calendar_tools,
     color_tools,
     health_tools,
@@ -67,6 +68,7 @@ api_router.include_router(
 api_router.include_router(
     sixty_seconds.router, prefix="/tools/sixty-seconds", tags=["sixty_seconds"]
 )
+api_router.include_router(box_plot.router, prefix="/tools/box-plot", tags=["box_plot"])
 
 # 工具元数据（已登录用户可读，主控台用）
 api_router.include_router(tools_meta.router, prefix="/tools-meta", tags=["tools_meta"])
