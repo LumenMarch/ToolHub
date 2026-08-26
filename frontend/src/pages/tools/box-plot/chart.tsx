@@ -224,7 +224,12 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
       chartRef.current = chart;
       const handleResize = () => chart.resize();
       window.addEventListener('resize', handleResize);
+      // 父容器宽度变化（如侧栏折叠）不触发 window resize，需用 ResizeObserver 兜底
+      const container = containerRef.current;
+      const observer = new ResizeObserver(handleResize);
+      observer.observe(container);
       return () => {
+        observer.disconnect();
         window.removeEventListener('resize', handleResize);
         chart.dispose();
         chartRef.current = null;
@@ -296,11 +301,11 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
               return [
                 `<b style="color:${primary}">${escapeHtml(g.name)}</b>`,
                 `样本数 n: ${g.count}`,
-                `MIN: ${formatNumber(whiskerMode === 'tukey' ? g.whiskerLow : g.min)}`,
+                `${whiskerMode === 'tukey' ? 'Whisker low' : 'MIN'}: ${formatNumber(whiskerMode === 'tukey' ? g.whiskerLow : g.min)}`,
                 `Q1: ${formatNumber(g.q1)}`,
                 `中位数: ${formatNumber(g.median)}`,
                 `Q3: ${formatNumber(g.q3)}`,
-                `MAX: ${formatNumber(whiskerMode === 'tukey' ? g.whiskerHigh : g.max)}`,
+                `${whiskerMode === 'tukey' ? 'Whisker high' : 'MAX'}: ${formatNumber(whiskerMode === 'tukey' ? g.whiskerHigh : g.max)}`,
                 `IQR: ${formatNumber(g.iqr)}`,
                 `离群点: ${g.outlierCount}`,
               ].join('<br/>');
@@ -467,7 +472,10 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
                       const g = groups[p.dataIndex];
                       if (!g) return '';
                       const v = whiskerMode === 'tukey' ? g.whiskerLow : g.min;
-                      return `Min ${formatNumber(v)}`;
+                      // Tukey 模式下该点是须线端点而非原始极值，标签必须如实命名
+                      return whiskerMode === 'tukey'
+                        ? `Whisker low ${formatNumber(v)}`
+                        : `Min ${formatNumber(v)}`;
                     },
                     fontSize: 7.5,
                     color: '#6b7280',
@@ -494,7 +502,9 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
                       const g = groups[p.dataIndex];
                       if (!g) return '';
                       const v = whiskerMode === 'tukey' ? g.whiskerHigh : g.max;
-                      return `Max ${formatNumber(v)}`;
+                      return whiskerMode === 'tukey'
+                        ? `Whisker high ${formatNumber(v)}`
+                        : `Max ${formatNumber(v)}`;
                     },
                     fontSize: 7.5,
                     color: '#6b7280',
