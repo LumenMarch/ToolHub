@@ -113,6 +113,9 @@ const BoxPlotTool: React.FC = () => {
   const [error, setError] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // 请求代际计数：换文件/重置/新请求会使旧代际失效，过期响应不得提交状态
+  const columnsGenRef = useRef(0);
+  const analyzeGenRef = useRef(0);
 
   const upload = useTusUpload({
     onSuccess: (uploadId) => {
@@ -121,11 +124,13 @@ const BoxPlotTool: React.FC = () => {
   });
 
   const loadColumns = useCallback(async (uploadId: string) => {
+    const gen = ++columnsGenRef.current;
     try {
       const response = await api.post<Record<string, unknown> & ColumnsResponse>(
         '/tools/box-plot/columns',
         { upload_id: uploadId },
       );
+      if (gen !== columnsGenRef.current) return; // 已被更新的选择/重置取代
       const raw = toCamel(response.data) as unknown as Record<string, unknown>;
       // 嵌套数组需深层转换（columns / previewRows 等仍为 snake_case）
       if (Array.isArray(raw.columns)) {
@@ -148,6 +153,7 @@ const BoxPlotTool: React.FC = () => {
       }
       setPhase('configure');
     } catch (err) {
+      if (gen !== columnsGenRef.current) return;
       // 保留上传文件与 uploadId，停留当前阶段并允许重试解析
       setError(readErrorMessage(err));
     }
@@ -155,6 +161,8 @@ const BoxPlotTool: React.FC = () => {
 
   const handleFileSelect = useCallback(
     async (selected: File) => {
+      columnsGenRef.current += 1; // 使在途的旧列解析响应失效
+      analyzeGenRef.current += 1;
       setFile(selected);
       setError('');
       setColumns(null);
@@ -170,12 +178,16 @@ const BoxPlotTool: React.FC = () => {
   );
 
   const handleCancelUpload = useCallback(() => {
+    columnsGenRef.current += 1; // 取消后丢弃在途解析响应
+    analyzeGenRef.current += 1;
     upload.abort();
     setFile(null);
     setError('');
   }, [upload]);
 
   const handleReset = useCallback(() => {
+    columnsGenRef.current += 1;
+    analyzeGenRef.current += 1;
     upload.reset();
     setFile(null);
     setColumns(null);
@@ -191,6 +203,7 @@ const BoxPlotTool: React.FC = () => {
 
   const doAnalyze = useCallback(async (valueCol: string, groupCol: string) => {
     if (!upload.uploadId || !valueCol) return;
+    const gen = ++analyzeGenRef.current;
     setError('');
     setAnalyzing(true);
     try {
@@ -202,6 +215,7 @@ const BoxPlotTool: React.FC = () => {
           group_col: groupCol === NG_GROUP ? null : groupCol,
         },
       );
+      if (gen !== analyzeGenRef.current) return; // 已有更新的分析请求，丢弃过期响应
       const rawAnalyze = toCamel(response.data) as unknown as Record<string, unknown>;
       if (Array.isArray(rawAnalyze.groups)) {
         rawAnalyze.groups = (rawAnalyze.groups as Record<string, unknown>[]).map((g) => toCamel(g));
@@ -209,13 +223,18 @@ const BoxPlotTool: React.FC = () => {
       const cameled = rawAnalyze as unknown as AnalyzeResponse;
       if (cameled.groups.length === 0) {
         setError('没有可绘制的数据');
+        setAnalysis(null); // 无可绘数据时使旧图失效
         return;
       }
       setAnalysis(cameled);
     } catch (err) {
-      setError(readErrorMessage(err));
+      if (gen === analyzeGenRef.current) {
+        setError(readErrorMessage(err));
+        setAnalysis(null); // 失败时使旧图失效，避免展示与新选择不符的结果
+      }
     } finally {
-      setAnalyzing(false);
+      // 仅最新一代请求有权收尾，避免旧请求提前关闭新请求的加载态
+      if (gen === analyzeGenRef.current) setAnalyzing(false);
     }
   }, [upload.uploadId]);
 
