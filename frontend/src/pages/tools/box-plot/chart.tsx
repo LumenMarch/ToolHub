@@ -111,7 +111,9 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
           a.href = url;
           a.download = `${baseName}.svg`;
           a.click();
-          URL.revokeObjectURL(url);
+          // 部分浏览器异步启动下载，立即 revoke 可能取消下载；
+          // 与 PNG 路径一致延迟释放。
+          setTimeout(() => URL.revokeObjectURL(url), 2000);
           return;
         }
         const url2 = svgChart.getDataURL({ type: 'svg' });

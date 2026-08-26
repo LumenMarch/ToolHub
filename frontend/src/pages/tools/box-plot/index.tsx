@@ -257,6 +257,8 @@ const BoxPlotTool: React.FC = () => {
         } else {
           await chartHandleRef.current.exportPng(baseName);
         }
+      } catch {
+        setError('导出失败，请稍后重试');
       } finally {
         setExporting(false);
       }
