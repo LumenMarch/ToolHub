@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+enable_free_tier: true
+tone_instructions: "Be concise and contributor-friendly. Flag bugs, security issues, and correctness problems. Explain why, not just what to change. Do not comment on formatting or import order."
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  suggested_labels: false
+  suggested_reviewers: false
+
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/build/**"
+    - "!**/coverage/**"
+    - "!**/*.lock"
+    - "!**/*.min.js"
+    - "!**/*.generated.*"
+    - "!**/vendor/**"
+    - "!**/__pycache__/**"
+    - "!**/.pytest_cache/**"
+    - "!**/.ruff_cache/**"
+    - "!**/__snapshots__/**"
+
+  path_instructions:
+    - path: "backend/**/*.{py}"
+      instructions: |
+        Focus on bugs, security, API correctness, and regressions.
+        Ignore formatting and import order.
+    - path: "frontend/**/*.{ts,tsx,js,jsx,vue}"
+      instructions: |
+        Focus on bugs, security, regressions, and public UI/API breakage.
+        Ignore formatting and import order.
+    - path: "**/*.{yml,yaml}"
+      instructions: |
+        Flag secrets, overly broad permissions, and unsafe CI defaults.
+    - path: "**/README.md"
+      instructions: |
+        Check that setup steps still match the code and that commands actually work.
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    ignore_title_keywords:
+      - WIP
+      - DRAFT
+      - "DO NOT MERGE"
+
+  tools:
+    gitleaks:
+      enabled: true
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    ruff:
+      enabled: true
+    eslint:
+      enabled: true
+
+chat:
+  auto_reply: true
+  art: false
+
+knowledge_base:
+  opt_out: false
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CONTRIBUTING.md"
+      - "CLAUDE.md"
+      - "AGENTS.md"
+      - ".github/copilot-instructions.md"
+  learnings:
+    scope: auto
