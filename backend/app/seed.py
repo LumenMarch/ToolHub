@@ -26,6 +26,7 @@ TOOL_PERMISSIONS = [
     ("tool:calendar:use", "使用日历工具"),
     ("tool:sixty-seconds:use", "使用60s每日新闻工具"),
     ("tool:image-to-pdf:use", "使用图片转PDF工具"),
+    ("tool:box-plot:use", "使用箱线图工具"),
 ]
 
 TOOL_PERMISSION_CODENAMES = [codename for codename, _ in TOOL_PERMISSIONS]
@@ -93,29 +94,32 @@ def run_seed() -> None:
 
 
 def migrate_per_tool_permissions() -> None:
-    """存量库数据迁移：粗粒度 tool:use → 11 条 tool:<id>:use（幂等，可重复执行）。
+    """存量库数据迁移：粗粒度 tool:use → tool:<id>:use，并让工具全量角色跟进新工具。
 
     run_seed 仅在 permissions 表为空时播种，存量库（permissions 非空）不会自动
     获得新 codename，因此启动时额外执行本函数：
     1. 补齐缺失的 tool:<id>:use 权限（含"表内无任何工具权限"的边角情况）；
-    2. 把**任何**持有 tool:use 的角色替换为全部 11 条工具权限——语义等价：
+    2. 把**任何**持有 tool:use 的角色替换为全部工具权限——语义等价：
        以前能用所有工具，迁移后也能用所有工具（覆盖自定义角色）；
-    3. 删除 permissions 表中无角色引用的残留 tool:use 记录。
-    重复执行无副作用（已迁移的库所有步骤均为 no-op）。
+    3. 删除 permissions 表中无角色引用的残留 tool:use 记录；
+    4. 工具目录新增后，内置工具角色（ROLES 声明全量工具权限的角色：
+       超级管理员/工具使用者）自动补齐缺失的工具权限（幂等）；
+       自定义角色不受影响，需管理员手动分配。
+    重复执行无副作用（所有步骤均为 no-op）。
     """
     db = SessionLocal()
     try:
         perms = db.scalars(select(Permission)).all()
         perm_map = {p.codename: p for p in perms}
 
-        # 1) 补齐缺失的 11 条新 codename
+        # 1) 补齐缺失的工具权限 codename
         for codename, description in TOOL_PERMISSIONS:
             if codename not in perm_map:
                 perm = Permission(codename=codename, description=description)
                 db.add(perm)
                 perm_map[codename] = perm
 
-        # 2) 替换所有持有 tool:use 的角色（含自定义角色）
+        # 2) 替换所有持有 tool:use 的角色（含自定义角色，语义等价）
         roles = db.scalars(select(Role)).all()
         replaced = False
         for role in roles:
@@ -137,11 +141,30 @@ def migrate_per_tool_permissions() -> None:
             if not referencing:
                 db.delete(old)
 
+        # 4) 内置工具角色跟进：声明全量工具权限的角色（超级管理员/工具使用者）
+        #    自动补齐工具目录新增的权限（幂等）；自定义角色不受影响
+        caught_up = False
+        for role_name, role_codenames in ROLES.items():
+            if not set(TOOL_PERMISSION_CODENAMES) <= set(role_codenames):
+                continue
+            role = next((r for r in roles if r.name == role_name), None)
+            if role is None:
+                continue
+            codenames = {p.codename for p in role.permissions}
+            missing = [c for c in TOOL_PERMISSION_CODENAMES if c not in codenames]
+            if missing:
+                role.permissions = list(role.permissions) + [
+                    perm_map[c] for c in missing
+                ]
+                caught_up = True
+
         db.commit()
-        if replaced or old is not None:
+        if replaced or old is not None or caught_up:
             logger.info(
-                "per-tool permission migration applied: tool:use → {} 条 tool:<id>:use",
+                "per-tool permission migration applied: tool:use → {} 条 tool:<id>:use"
+                "（内置工具角色补齐 {} 条）",
                 len(TOOL_PERMISSIONS),
+                len(TOOL_PERMISSION_CODENAMES),
             )
     finally:
         db.close()

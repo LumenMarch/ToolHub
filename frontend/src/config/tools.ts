@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   CalendarBlank,
+  ChartBarHorizontal,
   FileArrowUp,
   FileImage,
   FileMagnifyingGlass,
@@ -37,6 +38,7 @@ const AttendanceOrganizer = React.lazy(
 );
 const AtlasMerge = React.lazy(() => import('../pages/tools/atlas-merge/index'));
 const ImageToPdf = React.lazy(() => import('../pages/tools/image-to-pdf/index'));
+const BoxPlot = React.lazy(() => import('../pages/tools/box-plot/index'));
 
 const Health = React.lazy(() => import('../pages/tools/health/index'));
 const Calendar = React.lazy(() => import('../pages/tools/calendar/index'));
@@ -141,5 +143,14 @@ export const toolsConfig: ToolDefinition[] = [
     path: '/tools/image-to-pdf',
     description: '将单张或多张图片按顺序合并为单个 PDF 文件。',
     component: ImageToPdf,
+  },
+  {
+    id: 'box-plot',
+    permission: 'tool:box-plot:use',
+    name: '箱线图',
+    icon: ChartBarHorizontal,
+    path: '/tools/box-plot',
+    description: '上传 CSV/Excel 数据，按分组对比五数分布与离群点。',
+    component: BoxPlot,
   },
 ];
