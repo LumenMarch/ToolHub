@@ -84,7 +84,12 @@ def read_tabular(path: Path, original_filename: str = "") -> pl.DataFrame:
     """
     suffix = Path(original_filename).suffix.lower()
     if suffix in {".xlsx", ".xls"}:
-        return pl.read_excel(path)
+        # fastexcel/calamine 的解析异常（实测为 _fastexcel.CalamineError，
+        # 继承 Exception）不能逃逸成 500，统一转译为校验错误 → HTTP 400。
+        try:
+            return pl.read_excel(path)
+        except Exception as exc:
+            raise BoxPlotValidationError("无法解析 Excel 文件") from exc
     if suffix not in {".csv", ".tsv"}:
         raise BoxPlotValidationError(f"不支持的文件类型: {suffix or '(无扩展名)'}")
     return _read_csv(path)
@@ -211,8 +216,8 @@ def compute_groups(
 ) -> tuple[list[GroupStat], int, int]:
     """计算箱线图统计量。
 
-    返回 (每组统计, 有效数值行数, 跳过行数)。数值列中的空值与
-    无法解析为数字的文本均视为无效并计入跳过。
+    返回 (每组统计, 有效数值行数, 跳过行数)。数值列中的空值、无法解析
+    为数字的文本以及 NaN / ±inf 等非有限值均视为无效并计入跳过。
     """
     if value_col not in df.columns:
         raise BoxPlotValidationError(f"数值列 '{value_col}' 不存在")
@@ -222,7 +227,19 @@ def compute_groups(
         if group_col == value_col:
             raise BoxPlotValidationError("数值列与分组列不能相同")
 
-    values = df[value_col].cast(pl.Float64, strict=False)
+    raw = df[value_col].cast(pl.Float64, strict=False)
+    # cast(strict=False) 只把解析失败置空；NaN / ±inf 是合法 float，
+    # 会原样保留，必须在统计前统一转为 null 跳过。
+    values = (
+        pl.DataFrame({"_value": raw})
+        .select(
+            pl.when(pl.col("_value").is_finite())
+            .then(pl.col("_value"))
+            .otherwise(None)
+            .alias("_value")
+        )
+        .to_series()
+    )
     total_rows = df.height
     used_rows = values.len() - values.null_count()
 
@@ -235,21 +252,22 @@ def compute_groups(
     keys = df[group_col].cast(pl.Utf8).fill_null("(无值)")
     frame = pl.DataFrame({"_key": keys, "_value": values})
 
-    key_counts = frame.group_by("_key").len().sort("_key")
+    # 仅对含有效数值的分组计数与迭代：全无效值的分组既不应触发
+    # MAX_GROUPS 上限，也不会出现在响应里。
+    usable = frame.filter(pl.col("_value").is_not_null())
+    if usable.height == 0:
+        raise BoxPlotValidationError(f"数值列 '{value_col}' 不含有效数值")
+
+    key_counts = usable.group_by("_key").len().sort("_key")
     if key_counts.height > MAX_GROUPS:
         raise BoxPlotValidationError(
             f"分组过多（{key_counts.height} 组），上限为 {MAX_GROUPS} 组"
         )
 
-    stats: list[GroupStat] = []
-    for key in key_counts["_key"].to_list():
-        sub = frame.filter(pl.col("_key") == key)
-        stat = _summarize(sub["_value"], str(key))
-        if stat is not None:
-            stats.append(stat)
-    if not stats:
-        raise BoxPlotValidationError(f"数值列 '{value_col}' 不含有效数值")
-
+    stats = [
+        _summarize(usable.filter(pl.col("_key") == key)["_value"], str(key))
+        for key in key_counts["_key"].to_list()
+    ]
     return stats, used_rows, total_rows - used_rows
 
 
