@@ -180,6 +180,7 @@ const BoxPlotTool: React.FC = () => {
   const handleCancelUpload = useCallback(() => {
     columnsGenRef.current += 1; // 取消后丢弃在途解析响应
     analyzeGenRef.current += 1;
+    setAnalyzing(false); // 代际失效后旧请求 finally 不再收尾，需在此清除加载态
     upload.abort();
     setFile(null);
     setError('');
@@ -188,6 +189,7 @@ const BoxPlotTool: React.FC = () => {
   const handleReset = useCallback(() => {
     columnsGenRef.current += 1;
     analyzeGenRef.current += 1;
+    setAnalyzing(false); // 同上：防止分析中重置后"统计计算中…"卡住
     upload.reset();
     setFile(null);
     setColumns(null);
