@@ -353,6 +353,17 @@ const BoxPlotTool: React.FC = () => {
               />
             ) : (
               <div>
+                {upload.status === 'error' && upload.error && (
+                  <div
+                    role="alert"
+                    className="mb-4 flex flex-wrap items-center gap-4 border border-status-danger-foreground/40 bg-status-danger-surface px-5 py-4"
+                  >
+                    <Warning weight="fill" className="size-5 shrink-0 text-status-danger-foreground" />
+                    <p className="font-mono text-xs uppercase tracking-widest text-status-danger-foreground">
+                      [ 上传失败: {upload.error} ]
+                    </p>
+                  </div>
+                )}
                 <p className="mb-4 font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">
                   输出流 (Output Stream)
                 </p>

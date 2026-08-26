@@ -61,6 +61,12 @@ const formatNumber = (value: number): string => {
 const truncateLabel = (label: string): string =>
   label.length > MAX_LABEL_LENGTH ? `${label.slice(0, MAX_LABEL_LENGTH)}…` : label;
 
+/** 转义用户数据中的 HTML 特殊字符：tooltip.formatter 返回值按 HTML 渲染，分组名必须先转义。 */
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (ch) => (
+    ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;'
+  ));
+
 const TICK_COUNT = 6;
 
 /** 生成覆盖 [min,max] 的整数化刻度（步长 1/2/5 × 10^k），返回 ticks 与区间 */
@@ -148,46 +154,63 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
         const img = new Image();
         await new Promise<void>((resolve, reject) => {
           img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.round(width * pixelRatio);
-            canvas.height = Math.round(height * pixelRatio);
-            const ctx = canvas.getContext('2d');
-            if (!ctx) {
-              URL.revokeObjectURL(url);
-              reject(new Error('canvas context'));
-              return;
-            }
-            ctx.fillStyle = '#fff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob(
-              (blob) => {
-                if (!blob) {
-                  URL.revokeObjectURL(url);
-                  reject(new Error('toBlob'));
-                  return;
-                }
-                const pngUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = pngUrl;
-                a.download = `${baseName}.png`;
-                a.click();
-                setTimeout(() => URL.revokeObjectURL(pngUrl), 2000);
+            // 回调在 Promise executor 返回后才运行：任何异常都必须转为 reject，
+            // 否则 Promise 永远 pending，父层 finally 无法复位 exporting。
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = Math.round(width * pixelRatio);
+              canvas.height = Math.round(height * pixelRatio);
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
                 URL.revokeObjectURL(url);
-                resolve();
-              },
-              'image/png',
-            );
+                reject(new Error('canvas context'));
+                return;
+              }
+              ctx.fillStyle = '#fff';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              canvas.toBlob(
+                (blob) => {
+                  try {
+                    if (!blob) {
+                      URL.revokeObjectURL(url);
+                      reject(new Error('toBlob'));
+                      return;
+                    }
+                    const pngUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = pngUrl;
+                    a.download = `${baseName}.png`;
+                    a.click();
+                    setTimeout(() => URL.revokeObjectURL(pngUrl), 2000);
+                    URL.revokeObjectURL(url);
+                    resolve();
+                  } catch (error) {
+                    URL.revokeObjectURL(url);
+                    reject(error instanceof Error ? error : new Error(String(error)));
+                  }
+                },
+                'image/png',
+              );
+            } catch (error) {
+              URL.revokeObjectURL(url);
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
           };
           img.onerror = () => {
-            URL.revokeObjectURL(url);
-            // 兜底用 getDataURL
-            const fallback = svgChart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
-            const a = document.createElement('a');
-            a.href = fallback;
-            a.download = `${baseName}.png`;
-            a.click();
-            resolve();
+            try {
+              URL.revokeObjectURL(url);
+              // 兜底用 getDataURL
+              const fallback = svgChart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
+              const a = document.createElement('a');
+              a.href = fallback;
+              a.download = `${baseName}.png`;
+              a.click();
+              resolve();
+            } catch (error) {
+              URL.revokeObjectURL(url);
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
           };
           img.src = url;
         });
@@ -271,7 +294,7 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
               const g = groups[p.dataIndex];
               if (!g) return '';
               return [
-                `<b style="color:${primary}">${g.name}</b>`,
+                `<b style="color:${primary}">${escapeHtml(g.name)}</b>`,
                 `样本数 n: ${g.count}`,
                 `MIN: ${formatNumber(whiskerMode === 'tukey' ? g.whiskerLow : g.min)}`,
                 `Q1: ${formatNumber(g.q1)}`,
