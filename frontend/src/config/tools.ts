@@ -76,7 +76,7 @@ export const toolsConfig: ToolDefinition[] = [
     name: '日历',
     icon: CalendarBlank,
     path: '/tools/calendar',
-    description: '农历黄历、节气宜忌与摸鱼倒计时。',
+    description: '农历黄历、节气宜忌与假期倒计时。',
     component: Calendar,
   },
   {
