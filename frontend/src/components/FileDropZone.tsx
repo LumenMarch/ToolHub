@@ -26,6 +26,8 @@ interface FileDropZoneProps {
   multiple?: boolean;
   /** 多文件选择回调（与 onSelect 互斥） */
   onSelectMultiple?: (files: File[]) => void;
+  /** 选中文件后文件名的 className（默认大号标题；可传入缩小样式） */
+  fileNameClassName?: string;
 }
 
 /** 格式化文件大小为人类可读格式 */
@@ -47,6 +49,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
   file,
   id,
   label,
+  fileNameClassName,
   multiple = false,
   onClear,
   onSelect,
@@ -150,14 +153,23 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
           <span className="font-mono text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground md:text-sm">
             {label}
           </span>
-          <FileArrowUp
-            weight="bold"
-            className="size-7 shrink-0 text-primary transition-transform group-hover:-translate-y-1"
-          />
+          {hasFile ? null : (
+            <FileArrowUp
+              weight="bold"
+              className="size-7 shrink-0 text-primary transition-transform group-hover:-translate-y-1"
+            />
+          )}
         </div>
 
         <div className="min-w-0">
-          <p className="break-words text-2xl font-bold tracking-tight md:text-3xl">
+          <p
+            className={cn(
+              'break-words tracking-tight',
+              typeof fileNameClassName === 'string' && fileNameClassName.length > 0
+                ? fileNameClassName
+                : 'text-2xl font-bold md:text-3xl',
+            )}
+          >
             {hasFile ? file.name : '拖放或选择文件'}
           </p>
           <p

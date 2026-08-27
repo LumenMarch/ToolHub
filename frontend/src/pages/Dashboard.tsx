@@ -6,8 +6,8 @@ import { useVisibleTools } from '../hooks/useToolsMeta';
 import { LoadingSignal } from '../components/LoadingSignal';
 import type { ToolDefinition } from '../config/tools';
 
-/** 固定显示组：始终可见、不参与折叠（资产核对 / 出勤资料整理 / AtlasLog Merge）。 */
-const PINNED_TOOL_IDS = new Set(['asset-comparison', 'attendance-organizer', 'atlas-merge']);
+/** 固定显示组：始终可见、不参与折叠（资产核对 / 出勤资料整理 / AtlasLog Merge / 测试数据可视化）。 */
+const PINNED_TOOL_IDS = new Set(['asset-comparison', 'attendance-organizer', 'atlas-merge', 'cpk-charts']);
 const OTHERS_STORAGE_KEY = 'toolhub-console-other-collapsed';
 
 const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {

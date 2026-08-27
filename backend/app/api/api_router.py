@@ -12,6 +12,7 @@ from app.api.endpoints import (
     auth,
     box_plot,
     calendar_tools,
+    cpk_charts,
     notifications,
     qrcode_tools,
     realtime,
@@ -52,6 +53,9 @@ api_router.include_router(
 )
 api_router.include_router(
     atlas_merge.router, prefix="/tools/atlas-merge", tags=["atlas_merge"]
+)
+api_router.include_router(
+    cpk_charts.router, prefix="/tools/cpk-charts", tags=["cpk_charts"]
 )
 api_router.include_router(
     sixty_seconds.router, prefix="/tools/sixty-seconds", tags=["sixty_seconds"]

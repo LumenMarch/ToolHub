@@ -72,17 +72,23 @@ function App() {
 
                 {/* 工具路由 — ToolGuard 拦截已禁用的工具 */}
                 <Route element={<ToolGuard />}>
-                  {toolsConfig.map((tool) => (
-                    <Route
-                      key={tool.id}
-                      path={tool.path.replace(/^\//, '')}
-                      element={
-                        <Suspense fallback={<SuspendFallback />}>
-                          <tool.component />
-                        </Suspense>
-                      }
-                    />
-                  ))}
+                  {toolsConfig.map((tool) => {
+                    // cpk-charts 含内部子路由，父路由需通配才能匹配 item/:name 等
+                    const routePath = tool.id === 'cpk-charts'
+                      ? 'tools/cpk-charts/*'
+                      : tool.path.replace(/^\//, '');
+                    return (
+                      <Route
+                        key={tool.id}
+                        path={routePath}
+                        element={
+                          <Suspense fallback={<SuspendFallback />}>
+                            <tool.component />
+                          </Suspense>
+                        }
+                      />
+                    );
+                  })}
                 </Route>
               </Route>
             </Route>

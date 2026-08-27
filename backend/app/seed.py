@@ -20,6 +20,7 @@ TOOL_PERMISSIONS = [
     ("tool:asset-comparison:use", "使用资产核对工具"),
     ("tool:attendance-organizer:use", "使用出勤资料整理工具"),
     ("tool:atlas-merge:use", "使用AtlasLog Merge工具"),
+    ("tool:cpk-charts:use", "使用OPP工具"),
     ("tool:calendar:use", "使用日历工具"),
     ("tool:image-to-pdf:use", "使用图片转PDF工具"),
     ("tool:box-plot:use", "使用箱线图工具"),

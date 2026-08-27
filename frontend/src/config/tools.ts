@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   CalendarBlank,
+  ChartBar,
   ChartBarHorizontal,
   FileArrowUp,
   FileImage,
@@ -29,6 +30,7 @@ const AttendanceOrganizer = React.lazy(
   () => import('../pages/tools/attendance-organizer/index')
 );
 const AtlasMerge = React.lazy(() => import('../pages/tools/atlas-merge/index'));
+const CpkCharts = React.lazy(() => import('../pages/tools/cpk-charts/index'));
 const ImageToPdf = React.lazy(() => import('../pages/tools/image-to-pdf/index'));
 const BoxPlot = React.lazy(() => import('../pages/tools/box-plot/index'));
 const Calendar = React.lazy(() => import('../pages/tools/calendar/index'));
@@ -69,6 +71,15 @@ export const toolsConfig: ToolDefinition[] = [
     path: '/tools/atlas-merge',
     description: '合并 unit-archive 测试日志为统一 CSV 结果。',
     component: AtlasMerge,
+  },
+  {
+    id: 'cpk-charts',
+    permission: 'tool:cpk-charts:use',
+    name: 'OPP',
+    icon: ChartBar,
+    path: '/tools/cpk-charts',
+    description: '导入测试导出 CSV，点选测试项查看 CPK 过程能力直方图。',
+    component: CpkCharts,
   },
   {
     id: 'calendar',
