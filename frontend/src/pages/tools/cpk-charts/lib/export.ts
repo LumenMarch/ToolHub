@@ -392,25 +392,33 @@ export function sanitizeFilename(name: string): string {
 export async function svgToPng(svg: string, width: number = W, height: number = H, scale: number = 2): Promise<Blob> {
   const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const img = new Image();
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve();
-    img.onerror = () => reject(new Error('SVG 解析失败'));
-    img.src = url;
-  });
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(width * scale);
-  canvas.height = Math.round(height * scale);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas 不可用');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.scale(scale, scale);
-  ctx.drawImage(img, 0, 0, width, height);
+  let out: Blob;
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('SVG 解析失败'));
+      img.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 不可用');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0, width, height);
+    out = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG 编码失败'))), 'image/png');
+    });
+  } catch (e) {
+    // 失败路径也必须释放 object URL，避免批量导出时泄漏
+    URL.revokeObjectURL(url);
+    throw e;
+  }
   URL.revokeObjectURL(url);
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG 编码失败'))), 'image/png');
-  });
+  return out;
 }
 
 /** 触发浏览器下载。 */

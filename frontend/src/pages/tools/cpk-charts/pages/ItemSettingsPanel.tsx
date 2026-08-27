@@ -23,7 +23,12 @@ const NumInput: React.FC<{ label: string; manual: number | null; auto: number | 
           if (t === '') onManual(null);
           else {
             const n = Number(t);
-            onManual(Number.isFinite(n) ? n : null);
+            if (Number.isFinite(n)) onManual(n);
+            else {
+              // 无效输入不保留在控件中：回退为自动值，避免“显示手动值、实际用自动值”的错位
+              onManual(null);
+              setDraft(auto !== null ? String(auto) : '');
+            }
           }
         }}
         placeholder={auto !== null ? String(auto) : '—'}

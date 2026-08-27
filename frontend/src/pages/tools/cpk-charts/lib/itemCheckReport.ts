@@ -1,4 +1,5 @@
 // Item Check 报告导出：按勾选 Item 生成三列 .numbers（Item | 数据A图 | 数据B图），表头为文件名
+import type { AxiosResponse } from 'axios';
 import api from '../../../../api/axios';
 import { analyzeColumn, analyzeColumnPair, type ChartSettings } from './stats';
 import { renderCdfSvg, renderHistogramSvg, renderTimeSeriesSvg, svgToPng } from './export';
@@ -115,15 +116,39 @@ export async function exportItemCheckReport(params: ItemCheckExportParams): Prom
     imagesA: params.imagesA,
     imagesB: params.imagesB || params.items.map(() => ''),
   };
-  const resp = await api.post('/tools/cpk-charts/item-check-report', payload, {
-    responseType: 'blob',
-  });
+  let resp: AxiosResponse<Blob>;
+  try {
+    resp = await api.post('/tools/cpk-charts/item-check-report', payload, {
+      responseType: 'blob',
+    });
+  } catch (err) {
+    // responseType: 'blob' 时后端错误详情也在 Blob 里，解析出 detail 供调用方展示
+    const data = (err as { response?: { data?: unknown } })?.response?.data;
+    if (data instanceof Blob) {
+      let detail: string | undefined;
+      try {
+        const parsed = JSON.parse(await data.text()) as { detail?: string };
+        detail = parsed.detail;
+      } catch {
+        /* 非 JSON 错误体：忽略并保留原始错误 */
+      }
+      if (detail) throw new Error(detail);
+    }
+    throw err;
+  }
   const blob: Blob = resp.data;
   const disposition = resp.headers['content-disposition'] as string | undefined;
   let filename = 'Item_Check.numbers';
   if (disposition) {
-    const m = disposition.match(/filename="(.+?)"/) || disposition.match(/filename\*=UTF-8''(.+)/);
-    if (m) filename = decodeURIComponent(m[1]);
+    const m = disposition.match(/filename="(.+?)"/i) || disposition.match(/filename\*\s*=\s*utf-8''([^;]+)/i);
+    if (m) {
+      try {
+        filename = decodeURIComponent(m[1]);
+      } catch {
+        // 无效百分号编码时退回原样，避免中断下载
+        filename = m[1];
+      }
+    }
   }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

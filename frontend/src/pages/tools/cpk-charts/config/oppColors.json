@@ -15,7 +15,7 @@
       "Mapping": [
         { "Name": "LitePoint", "Key": "1", "Color": "NA" },
         { "Name": "National Instruments", "Key": "2", "Color": "NA" },
-        { "Name": "Rhode & Schwarz", "Key": "3", "Color": "NA" },
+        { "Name": "Rohde & Schwarz", "Key": "3", "Color": "NA" },
         { "Name": "Agilent", "Key": "4", "Color": "NA" },
         { "Name": "Radiostar", "Key": "5", "Color": "NA" }
       ]

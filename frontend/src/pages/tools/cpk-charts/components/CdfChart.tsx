@@ -26,7 +26,8 @@ function cdfSeq(values: number[]): Array<{ x: number; y: number }> {
 /** 按 cdfType 转换（对齐 OPP numbersForPlot）：0=CDF 正向、1=CCDF 反向、2=Folded 折叠。 */
 function cdfPointsOf(values: number[], type: 'cdf' | 'ccdf' | 'folded'): Array<{ x: number; y: number }> {
   const base = cdfSeq(values);
-  if (type === 'ccdf') return base.toReversed();
+  // CCDF：互补概率 1-p，保持 X 升序，曲线单调下降
+  if (type === 'ccdf') return base.map(({ x, y }) => ({ x, y: Math.max(0, 1 - y) }));
   if (type === 'folded') {
     const n = base.length;
     if (n <= 1) return base;
@@ -49,11 +50,12 @@ function logYTicks(loc: number): number[] {
   return out;
 }
 
-/** log Y 像素映射：y = log10(p) 线性到 [log10(loc), log10(1)]。 */
+/** log Y 像素映射：y = log10(p) 线性到 [log10(loc), log10(1)]；p 低于 loc 时夹取到 loc，避免 log10(0) 发散。 */
 function yPxLog(p: number, loc: number): number {
+  const clamped = Math.max(p, loc);
   const lo = Math.log10(loc);
   const hi = Math.log10(1);
-  const t = (Math.log10(p) - lo) / (hi - lo);
+  const t = (Math.log10(clamped) - lo) / (hi - lo);
   return Math.round((PLOT_BOTTOM - t * PLOT_H) * 100) / 100;
 }
 

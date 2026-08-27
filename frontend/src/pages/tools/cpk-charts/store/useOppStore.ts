@@ -72,18 +72,30 @@ async function parseFileViaWorker(file: File, onProgress?: (p: number) => void):
       return await new Promise<ParsedDataset>((resolve, reject) => {
         const worker = new Worker(new URL('../workers/csv.worker.ts', import.meta.url), { type: 'module' });
         const id = String(Date.now()) + Math.random().toString(16).slice(2);
-        const timeout = setTimeout(() => {
-          worker.terminate();
-          reject(new Error('Worker 解析超时'));
-        }, 30000);
+        // 无进度心跳超时：每条 progress 重置计时器，避免大文件解析总时长超 30s 被误杀
+        let timeout: ReturnType<typeof setTimeout>;
+        const arm = (): void => {
+          clearTimeout(timeout);
+          timeout = setTimeout(() => {
+            worker.terminate();
+            reject(new Error('Worker 解析超时'));
+          }, 30000);
+        };
+        arm();
         worker.onmessage = (e: MessageEvent) => {
           const data = e.data as { id: string; type: string; progress?: number; dataset?: ParsedDataset; error?: string };
           if (data.id !== id) return;
           if (data.type === 'progress' && typeof data.progress === 'number') {
+            arm();
             onProgress?.(data.progress);
           } else if (data.type === 'done' && data.dataset) {
             clearTimeout(timeout);
             worker.terminate();
+            // 与主线程路径一致：无有效数值列时报错而非静默成功
+            if (data.dataset.columns.length === 0) {
+              reject(new Error('未找到含数值的测试项列'));
+              return;
+            }
             resolve(data.dataset);
           } else if (data.type === 'error') {
             clearTimeout(timeout);
@@ -181,6 +193,10 @@ export const useOppStore = create<OppStore>()(
         try {
           const ds = await parseFileViaWorker(file, (p) => set({ progress: p }));
           set({ datasetB: ds, progress: 1 });
+          // 与 loadFileA 相同的兜底选择：仅加载 B（或 A 已清空）时自动选中首项
+          const { selectedName } = get();
+          const exists = ds.columns.some((c) => c.name === selectedName);
+          if (!selectedName || !exists) set({ selectedName: ds.columns[0]?.name ?? '' });
         } catch (e) {
           set({ error: e instanceof Error ? e.message : 'CSV 解析失败' });
         } finally {
@@ -305,6 +321,8 @@ export function getFiltered(state: OppState): MergeItem[] {
       out = merged.filter((m) => m.name.toLowerCase().includes(low));
     }
   }
+  // 只保留最近一次查询结果：逐字输入时避免缓存随中间状态无限增长
+  if (byQ.size > 0 && !byQ.has(q)) byQ.clear();
   byQ.set(q, out);
   return out;
 }

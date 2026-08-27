@@ -198,7 +198,8 @@ export function parseTestCsv(text: string, fileName?: string): ParsedDataset {
   }
   if (!title) title = fileName || '未命名数据集';
 
-  const headerRow = rows[headerIdx] || [];
+  // findHeaderRow 未命中时回退首行为表头：保证通用 CSV（无 Site/Product 标记）也能解析出列
+  const headerRow = (headerIdx >= 0 ? rows[headerIdx] : rows[0]) || [];
   const unitRow = unitRowIdx >= 0 ? rows[unitRowIdx] : null;
   const upperRow = upperRowIdx >= 0 ? rows[upperRowIdx] : null;
   const lowerRow = lowerRowIdx >= 0 ? rows[lowerRowIdx] : null;

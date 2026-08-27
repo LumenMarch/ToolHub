@@ -251,10 +251,17 @@ def create_item_check_report(
     tmp = tempfile.NamedTemporaryFile(suffix=".numbers", delete=False)
     tmp_path = Path(tmp.name)
     tmp.close()
-    doc.save(str(tmp_path))
+    try:
+        doc.save(str(tmp_path))
+    except Exception:
+        os.unlink(tmp_path)
+        raise
 
-    # 文件名：基于文件 A 名（去除非法字符），与现有 zip 导出一致
-    safe_base = "".join(c if c not in r'\/:*?"<>|' else "_" for c in file_name_a)
+    # 文件名：基于文件 A 名（去除非法字符与控制字符），与现有 zip 导出一致
+    safe_base = "".join(
+        "_" if (c in r'\/:*?"<>|' or ord(c) < 32 or ord(c) == 127) else c
+        for c in file_name_a
+    )
     safe_base = safe_base.strip().rstrip(".")[:120] or "Item_Check"
     # 去掉扩展名
     if "." in safe_base:

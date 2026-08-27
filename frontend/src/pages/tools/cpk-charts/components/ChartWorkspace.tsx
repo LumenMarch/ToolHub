@@ -22,6 +22,8 @@ function corrStatsOf(pair: CorrelationPair | null): { r: number | null; slope: n
   const xs: number[] = [];
   const ys: number[] = [];
   for (let i = 0; i < n0; i += 1) {
+    // 空白单元格按缺失处理：Number('') === 0 会伪造有效样本
+    if (pair.rawX[i].trim() === '' || pair.rawY[i].trim() === '') continue;
     const x = Number(pair.rawX[i]);
     const y = Number(pair.rawY[i]);
     if (Number.isFinite(x) && Number.isFinite(y)) {
@@ -141,7 +143,7 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
             {renderCorrPanel(pairB, statB, '数据 B', 'B')}
           </div>
         ) : (
-          renderCorrPanel(pairA ?? pairB, statA ?? statB, '数据 A', 'S')
+          renderCorrPanel(pairA ?? pairB, statA ?? statB, pairA ? '数据 A' : '数据 B', 'S')
         )
       ) : !datasetA && !datasetB ? (
         <div className="flex h-64 flex-col items-center justify-center border border-dashed border-border p-8 text-center">

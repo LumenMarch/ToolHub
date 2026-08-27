@@ -2,19 +2,28 @@
 // 选项（对齐 OPP theTimeSeriesPlotSymbol / displayLines / theLineWidth）：
 //   Data Ticks：None/O/+/x（0/1/2/3）；Show Lines 复选框；线宽 segmented 0→0 / 1→0.5 / 2→1.0 / 3→2.0
 import React, { useMemo } from 'react';
-import { formatTick, type ChartSettings, type ColumnAnalysis } from '../lib/stats';
+import { formatTick, minMax, type ChartSettings, type ColumnAnalysis } from '../lib/stats';
 import { H, PLOT_BOTTOM, PLOT_H, PLOT_LEFT, PLOT_RIGHT, PLOT_TOP, SPEC_COLOR, W, minorTicks, pow10Interval, ticksFor } from '../lib/layout';
 import PlotLegend from './PlotLegend';
 import StatsLabels from './StatsLabels';
 
 const mapRange = (v: number, lo: number, hi: number, pl: number, ph: number): number => pl + ((v - lo) / (hi - lo)) * (ph - pl);
 
-function yRangeOf(a: ColumnAnalysis | null): [number, number] {
-  if (!a || a.values.length === 0) return [0, 1];
-  let lo = Math.min(...a.values);
-  let hi = Math.max(...a.values);
-  if (a.column.lower !== null) lo = Math.min(lo, a.column.lower);
-  if (a.column.upper !== null) hi = Math.max(hi, a.column.upper);
+/** Y 轴范围：合并主序列、次序列的样本值与需显示的规格限，保证次曲线不越出图框。 */
+function yRangeOf(a: ColumnAnalysis | null, b?: ColumnAnalysis | null): [number, number] {
+  const seriesList: Array<number[]> = [];
+  if (a && a.values.length > 0) seriesList.push(a.values);
+  if (b && b.values.length > 0) seriesList.push(b.values);
+  if (seriesList.length === 0) return [0, 1];
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const arr of seriesList) {
+    const [vLo, vHi] = minMax(arr);
+    if (vLo < lo) lo = vLo;
+    if (vHi > hi) hi = vHi;
+  }
+  if (a?.column.lower != null) lo = Math.min(lo, a.column.lower);
+  if (a?.column.upper != null) hi = Math.max(hi, a.column.upper);
   let m = hi - lo;
   if (!(m > 0)) m = 1;
   return [lo - m * 0.08, hi + m * 0.08];
@@ -38,7 +47,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ analysis, settings, s
   const xLo = 0;
   const xHi = Math.max(1, n - 1);
   const xTicks = useMemo(() => ticksFor(xLo, xHi), [xHi]);
-  const [yLo, yHi] = useMemo(() => yRangeOf(analysis ?? null), [analysis]);
+  const [yLo, yHi] = useMemo(() => yRangeOf(analysis ?? null, secondary ?? null), [analysis, secondary]);
   const yStep = useMemo(() => pow10Interval(yHi - yLo, 10), [yLo, yHi]);
   // OPP：YMin 向下取整到 interval 整数倍；上限 = YMin + ceil(跨度/interval)*interval
   const [yTickLo, yTickHi] = useMemo(() => {
@@ -54,9 +63,9 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ analysis, settings, s
   }, [yTickLo, yTickHi, yStep]);
   const yMinor = useMemo(() => minorTicks(yTickLo, yTickHi, yStep, 3), [yTickLo, yTickHi, yStep]);
   const lineOf = useMemo(() => {
-    const mk = (a: ColumnAnalysis | null) => (a ? a.values.map((v, i) => `${Math.round(mapRange(i, xLo, xHi, PLOT_LEFT, PLOT_RIGHT) * 100) / 100},${Math.round(mapRange(v, yLo, yHi, PLOT_BOTTOM, PLOT_TOP) * 100) / 100}`).join(' ') : '');
+    const mk = (a: ColumnAnalysis | null) => (a ? a.values.map((v, i) => `${Math.round(mapRange(i, xLo, xHi, PLOT_LEFT, PLOT_RIGHT) * 100) / 100},${Math.round(mapRange(v, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP) * 100) / 100}`).join(' ') : '');
     return { main: mk(analysis), sec: mk(secondary ?? null) };
-  }, [analysis, secondary, xHi, yLo, yHi]);
+  }, [analysis, secondary, xHi, yTickLo, yTickHi]);
   const mean = useMemo(() => (analysis && analysis.values.length > 0 ? analysis.values.reduce((s, v) => s + v, 0) / analysis.values.length : NaN), [analysis]);
   const unitSuffix = analysis?.column.unit ? ` (${analysis.column.unit})` : '';
   // OPP：绘图符号尺寸固定 10pt；按数据符号类型渲染
@@ -78,16 +87,16 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ analysis, settings, s
     <svg viewBox={`0 0 ${W} ${H}`} className="font-sans text-foreground" role="img" aria-label="Time Series 时序图" preserveAspectRatio="xMidYMid meet">
       {settings.showTitle && analysis && (<text x={W / 2} y={15} textAnchor="middle" fontSize={11} fontWeight={700} fill="currentColor">{analysis.column.name}{unitSuffix}</text>)}
       {settings.showStats && analysis && (<StatsLabels stat={analysis.stat} />)}
-      {yTicks.map((t) => { const y = Math.round(mapRange(t, yLo, yHi, PLOT_BOTTOM, PLOT_TOP)); return (<g key={t}><line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={y} y2={y} stroke="currentColor" strokeOpacity={0.45} strokeWidth={1} /><text x={PLOT_LEFT - 12} y={y + 3.5} textAnchor="end" fontSize={9} fontWeight={500} fill="currentColor">{formatTick(t)}</text></g>); })}
-      {yMinor.map((v) => { const y = Math.round(mapRange(v, yLo, yHi, PLOT_BOTTOM, PLOT_TOP)); return (<line key={"ym-" + v} x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={y} y2={y} stroke="currentColor" strokeOpacity={0.18} strokeWidth={1} />); })}
+      {yTicks.map((t) => { const y = Math.round(mapRange(t, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)); return (<g key={t}><line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={y} y2={y} stroke="currentColor" strokeOpacity={0.45} strokeWidth={1} /><text x={PLOT_LEFT - 12} y={y + 3.5} textAnchor="end" fontSize={9} fontWeight={500} fill="currentColor">{formatTick(t)}</text></g>); })}
+      {yMinor.map((v) => { const y = Math.round(mapRange(v, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)); return (<line key={"ym-" + v} x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={y} y2={y} stroke="currentColor" strokeOpacity={0.18} strokeWidth={1} />); })}
       <line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={PLOT_TOP} y2={PLOT_TOP} stroke="currentColor" strokeOpacity={0.6} strokeWidth={1} />
-      {settings.tsMean && analysis && analysis.values.length > 0 && !Number.isNaN(mean) && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(mean, yLo, yHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(mean, yLo, yHi, PLOT_BOTTOM, PLOT_TOP)} stroke="currentColor" strokeOpacity={0.55} strokeWidth={1} strokeDasharray="5 4" />)}
-      {analysis && settings.showLimits && analysis.column.upper !== null && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(analysis.column.upper!, yLo, yHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(analysis.column.upper!, yLo, yHi, PLOT_BOTTOM, PLOT_TOP)} stroke={SPEC_COLOR} strokeWidth={2} />)}
-      {analysis && settings.showLimits && analysis.column.lower !== null && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(analysis.column.lower!, yLo, yHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(analysis.column.lower!, yLo, yHi, PLOT_BOTTOM, PLOT_TOP)} stroke={SPEC_COLOR} strokeWidth={2} />)}
+      {settings.tsMean && analysis && analysis.values.length > 0 && !Number.isNaN(mean) && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(mean, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(mean, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} stroke="currentColor" strokeOpacity={0.55} strokeWidth={1} strokeDasharray="5 4" />)}
+      {analysis && settings.showLimits && analysis.column.upper !== null && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(analysis.column.upper!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(analysis.column.upper!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} stroke={SPEC_COLOR} strokeWidth={2} />)}
+      {analysis && settings.showLimits && analysis.column.lower !== null && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(analysis.column.lower!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(analysis.column.lower!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} stroke={SPEC_COLOR} strokeWidth={2} />)}
       {settings.tsLines !== false && lineOf.sec && secondary && (<polyline points={lineOf.sec} fill="none" stroke={secondaryStroke || SPEC_COLOR} strokeWidth={Math.max(0.5, lineWidth * 1.75)} opacity={0.9} />)}
       {settings.tsLines !== false && lineOf.main && analysis && lineWidth > 0 && (<polyline points={lineOf.main} fill="none" stroke={stroke || '#2563eb'} strokeWidth={lineWidth} />)}
       {/* Data Ticks（None/O/+/x），对齐 OPP theTimeSeriesPlotSymbol */}
-      {settings.dataSymbol !== 'none' && analysis && analysis.values.map((v, i) => { const cx = mapRange(i, xLo, xHi, PLOT_LEFT, PLOT_RIGHT); const cy = mapRange(v, yLo, yHi, PLOT_BOTTOM, PLOT_TOP); return symbolEl(cx, cy, stroke || '#2563eb', 2.6); })}
+      {settings.dataSymbol !== 'none' && analysis && analysis.values.map((v, i) => { const cx = mapRange(i, xLo, xHi, PLOT_LEFT, PLOT_RIGHT); const cy = mapRange(v, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP); return symbolEl(cx, cy, stroke || '#2563eb', 2.6); })}
       <line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={PLOT_BOTTOM} y2={PLOT_BOTTOM} stroke="currentColor" strokeWidth={1.75} />
       {xTicks.map((t) => (<g key={t}><line x1={mapRange(t, xLo, xHi, PLOT_LEFT, PLOT_RIGHT)} x2={mapRange(t, xLo, xHi, PLOT_LEFT, PLOT_RIGHT)} y1={PLOT_BOTTOM} y2={PLOT_BOTTOM + 5} stroke="currentColor" strokeWidth={1} /><text x={mapRange(t, xLo, xHi, PLOT_LEFT, PLOT_RIGHT)} y={PLOT_BOTTOM + 16} textAnchor="middle" fontSize={9} fontWeight={500} fill="currentColor">{Math.round(t)}</text></g>))}
       {analysis?.column.unit && (<text x={(PLOT_LEFT + PLOT_RIGHT) / 2} y={PLOT_BOTTOM + 32} textAnchor="middle" fontSize={9.5} fontWeight={500} fill="currentColor">{analysis.column.unit}</text>)}

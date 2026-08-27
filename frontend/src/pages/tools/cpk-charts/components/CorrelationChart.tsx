@@ -1,7 +1,7 @@
 // Correlation 相关性散点图 — 对齐 OPP generateCorrelation（CorePlot 散点 + 可选回归线 + 四限线）
 // X=测试项X，Y=测试项Y；标题显示 "X vs Y (r=...)"；可选 Square 等距轴 / 回归线 / 离群高亮
 import React, { useMemo } from 'react';
-import { formatTick, pearsonCorrelation, type ChartSettings } from '../lib/stats';
+import { formatTick, minMax, pearsonCorrelation, type ChartSettings } from '../lib/stats';
 import { H, PLOT_BOTTOM, PLOT_H, PLOT_LEFT, PLOT_RIGHT, PLOT_TOP, PLOT_W, SPEC_COLOR, W, ticksFor } from '../lib/layout';
 import PlotLegend from './PlotLegend';
 
@@ -20,8 +20,13 @@ const mapXp = (lo: number, hi: number, v: number): number => PLOT_LEFT + ((v - l
 const mapYp = (lo: number, hi: number, v: number): number => PLOT_BOTTOM - ((v - lo) / (hi - lo)) * PLOT_H;
 
 function domainOf(vals: number[], lo: number | null, hi: number | null): [number, number] {
-  let dlo = vals.length ? Math.min(...vals) : 0;
-  let dhi = vals.length ? Math.max(...vals) : 1;
+  let dlo = 0;
+  let dhi = 1;
+  if (vals.length > 0) {
+    const [vLo, vHi] = minMax(vals);
+    dlo = vLo;
+    dhi = vHi;
+  }
   if (lo !== null && Number.isFinite(lo)) dlo = Math.min(dlo, lo);
   if (hi !== null && Number.isFinite(hi)) dhi = Math.max(dhi, hi);
   if (!(dhi > dlo)) { dlo -= 1; dhi += 1; }
@@ -39,6 +44,8 @@ const CorrelationChart: React.FC<CorrelationChartProps> = ({ pair, settings }) =
     const n0 = Math.min(pair.rawX.length, pair.rawY.length);
     const out: Array<{ x: number; y: number }> = [];
     for (let i = 0; i < n0; i += 1) {
+      // 空白单元格按缺失处理：Number('') === 0 会伪造有效样本
+      if (pair.rawX[i].trim() === '' || pair.rawY[i].trim() === '') continue;
       const x = Number(pair.rawX[i]);
       const y = Number(pair.rawY[i]);
       if (Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y });

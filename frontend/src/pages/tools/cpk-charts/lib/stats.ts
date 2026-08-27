@@ -1,6 +1,24 @@
 // CPK 统计引擎：均值 / 标准差 / Cpu / Cpl / Cpk / 直方图分箱
 // 公式与产线测试系统一致：Cpu=(USL-mean)/(3σ)  Cpl=(mean-LSL)/(3σ)  Cpk=min(Cpu,Cpl)
 
+/** 单次遍历求极值：避免对大样本数组使用展开参数导致超出调用栈上限。 */
+export function minMax(values: number[]): [number, number] {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const v of values) {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  return [lo, hi];
+}
+
+/** 由极值构造 stat 的 max/min 字段（空样本时为 0）。 */
+function mmToStat(values: number[], n: number): { max: number; min: number } {
+  if (n === 0) return { max: 0, min: 0 };
+  const [lo, hi] = minMax(values);
+  return { max: hi, min: lo };
+}
+
 export interface TestColumn {
   /** 测试项完整名称（CSV 列名） */
   name: string;
@@ -119,8 +137,7 @@ export function computeBins(
     };
   };
   if (values.length === 0) return empty();
-  let lo = Math.min(...values);
-  let hi = Math.max(...values);
+  let [lo, hi] = minMax(values);
   if (lo === hi) {
     // 常量列：向两侧各扩展 1 个单位
     lo -= 1;
@@ -220,8 +237,7 @@ export function analyzeColumnPair(
     sharedDataDomain = [-0.5, 0.5];
     sharedDomain = [-0.5, 0.5];
   } else {
-    let lo = Math.min(...combinedBinValues);
-    let hi = Math.max(...combinedBinValues);
+    let [lo, hi] = minMax(combinedBinValues);
     if (lo === hi) { lo -= 1; hi += 1; }
     lo = Math.floor(lo) - 1;
     hi = Math.ceil(hi) + 1;
@@ -300,8 +316,7 @@ export function analyzeColumnPair(
       naCount,
       failureCount,
       failureRate: n === 0 ? 0 : (failureCount / n) * 100,
-      max: vN === 0 ? 0 : Math.max(...values),
-      min: vN === 0 ? 0 : Math.min(...values),
+      ...mmToStat(values, vN),
       mean: m,
       stdDev: s,
       cpu,
@@ -381,8 +396,7 @@ export function analyzeColumn(
     naCount,
     failureCount,
     failureRate: n === 0 ? 0 : (failureCount / n) * 100,
-    max: vN === 0 ? 0 : Math.max(...values),
-    min: vN === 0 ? 0 : Math.min(...values),
+    ...mmToStat(values, vN),
     mean: m,
     stdDev: s,
     cpu,
@@ -440,7 +454,6 @@ export function computeCdf(values: number[]): Array<{ x: number; y: number }> {
   return sorted.map((v, i) => ({ x: v, y: ((i + 1) / n) * 100 }));
 }
 
-/**【-ADD-HERE-】**/
 /** 人类可读的测试项简称（去除冗余前缀，用于列表展示）。 */
 export function shortName(name: string): string {
   return name.replace(/^Power /, '').replace(/^DUTInfo /, '').replace(/^Process /, '');

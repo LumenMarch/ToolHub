@@ -83,7 +83,8 @@ const Export: React.FC = () => {
     if (compareMode && datasetB) sources.push({ dataset: datasetB, prefix: 'B' });
     setExporting({ kind: 'all', done: 0, total: names.length });
     try {
-      await exportComparedByName(sources, names, settings, (done) => setExporting({ kind: 'all', done, total: names.length }));
+      // 同名 Item 在双数据源下会产出多个文件：total 以导出器实际值为准，避免 2/1 之类的显示
+      await exportComparedByName(sources, names, settings, (done, total) => setExporting({ kind: 'all', done, total }));
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量导出失败');
     } finally {
