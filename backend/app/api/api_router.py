@@ -12,13 +12,10 @@ from app.api.endpoints import (
     auth,
     box_plot,
     calendar_tools,
-    color_tools,
-    health_tools,
     notifications,
     qrcode_tools,
     realtime,
     sixty_seconds,
-    string_tools,
     tools_meta,
     upload,
     users,
@@ -42,16 +39,7 @@ api_router.include_router(
 # Register Tool endpoints dynamically
 # To add a new tool, import its router and include it here
 api_router.include_router(
-    string_tools.router, prefix="/tools/string", tags=["string_tools"]
-)
-api_router.include_router(
-    color_tools.router, prefix="/tools/color", tags=["color_tools"]
-)
-api_router.include_router(
     qrcode_tools.router, prefix="/tools/qrcode", tags=["qrcode_tools"]
-)
-api_router.include_router(
-    health_tools.router, prefix="/tools/health", tags=["health_tools"]
 )
 api_router.include_router(
     calendar_tools.router, prefix="/tools/calendar", tags=["calendar_tools"]

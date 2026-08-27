@@ -5,31 +5,37 @@
 
 from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import SessionLocal
 from app.models.permission import Permission
 from app.models.role import Role
+from app.models.user import User
 
 # 每个工具一条 tool:<id>:use（id 与前端 tools.ts 的 toolsConfig 完全一致）：
 # 细粒度授权后，工具使用权限不再由粗粒度的 tool:use 控制。
 # 该列表同时供存量库迁移脚本（migrate_per_tool_permissions）复用。
 TOOL_PERMISSIONS = [
-    ("tool:pwd-generator:use", "使用密钥生成器工具"),
-    ("tool:string-analyzer:use", "使用字符处理器工具"),
-    ("tool:color-picker:use", "使用颜色工具"),
     ("tool:qrcode:use", "使用二维码生成工具"),
     ("tool:asset-comparison:use", "使用资产核对工具"),
     ("tool:attendance-organizer:use", "使用出勤资料整理工具"),
     ("tool:atlas-merge:use", "使用AtlasLog Merge工具"),
-    ("tool:health:use", "使用健康指标工具"),
     ("tool:calendar:use", "使用日历工具"),
-    ("tool:sixty-seconds:use", "使用60s每日新闻工具"),
     ("tool:image-to-pdf:use", "使用图片转PDF工具"),
     ("tool:box-plot:use", "使用箱线图工具"),
 ]
 
 TOOL_PERMISSION_CODENAMES = [codename for codename, _ in TOOL_PERMISSIONS]
+
+
+# 已下线工具的存量 tool:<id>:use。仅列明确下线的 id，避免误删手工加的权限。
+RETIRED_TOOL_PERMISSIONS = (
+    "tool:color-picker:use",
+    "tool:pwd-generator:use",
+    "tool:string-analyzer:use",
+    "tool:health:use",
+    "tool:sixty-seconds:use",
+)
 
 PERMISSIONS = [
     ("user:read", "查看用户列表与详情"),
@@ -166,6 +172,57 @@ def migrate_per_tool_permissions() -> None:
                 len(TOOL_PERMISSIONS),
                 len(TOOL_PERMISSION_CODENAMES),
             )
+    finally:
+        db.close()
+
+
+def migrate_retired_tool_permissions() -> None:
+    """清理已下线工具的存量 tool:*:use 权限（幂等）。
+
+    run_seed / migrate_per_tool_permissions 只补齐、不删除。工具下线后，
+    存量库会残留对应权限行及其角色/用户直接授权。启动时按
+    RETIRED_TOOL_PERMISSIONS 白名单逐条摘掉关联并删除权限行；
+    表中无匹配行时为 no-op。同一事务提交，失败整体回滚。
+    """
+    db = SessionLocal()
+    try:
+        retired = db.scalars(
+            select(Permission).where(Permission.codename.in_(RETIRED_TOOL_PERMISSIONS))
+        ).all()
+        if not retired:
+            return
+
+        retired_ids = {perm.id for perm in retired}
+        retired_codenames = [
+            codename
+            for codename in RETIRED_TOOL_PERMISSIONS
+            if any(perm.codename == codename for perm in retired)
+        ]
+
+        roles = db.scalars(select(Role).options(selectinload(Role.permissions))).all()
+        for role in roles:
+            kept = [perm for perm in role.permissions if perm.id not in retired_ids]
+            if len(kept) != len(role.permissions):
+                role.permissions = kept
+
+        users = db.scalars(
+            select(User).options(selectinload(User.direct_permissions))
+        ).all()
+        for user in users:
+            kept = [
+                perm for perm in user.direct_permissions if perm.id not in retired_ids
+            ]
+            if len(kept) != len(user.direct_permissions):
+                user.direct_permissions = kept
+
+        for perm in retired:
+            db.delete(perm)
+
+        db.commit()
+        logger.info("已清理下线工具权限: {}", "、".join(retired_codenames))
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

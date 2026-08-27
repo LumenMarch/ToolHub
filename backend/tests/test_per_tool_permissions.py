@@ -8,6 +8,8 @@
   零工具权限 403；
 - 迁移脚本 migrate_per_tool_permissions：对模拟存量库（旧 seed 建库）幂等、
   自定义角色同样获得全部工具权限、tool:use 记录被清理；
+- 迁移脚本 migrate_retired_tool_permissions：摘掉已下线工具权限及其角色/
+  用户直接授权，现有 TOOL_PERMISSIONS 不被误删，重复执行无副作用；
 - 公开端点（OPTIONS /upload/tus、GET /tools/sixty-seconds/hitokoto）不受影响。
 """
 
@@ -18,13 +20,15 @@ from app.models.role import Role
 from app.models.tool_meta import ToolMeta
 from app.seed import (
     PERMISSIONS,
+    RETIRED_TOOL_PERMISSIONS,
     TOOL_PERMISSION_CODENAMES,
     migrate_per_tool_permissions,
+    migrate_retired_tool_permissions,
 )
 from tests.conftest import auth_header, login, register
 
 QRCODE_URL = "/api/v1/tools/qrcode"
-STRING_URL = "/api/v1/tools/string/process"
+CALENDAR_URL = "/api/v1/tools/calendar/info"
 TOOLS_META_URL = "/api/v1/tools-meta"
 
 
@@ -109,12 +113,12 @@ def test_per_tool_granularity_custom_role(admin_client, db):
     assert ok.status_code == 200, ok.text
 
     denied = client.post(
-        STRING_URL,
-        json={"text": "abc", "action": "hash_md5"},
+        CALENDAR_URL,
+        json={"date": "2026-08-08"},
         headers=auth_header(token),
     )
     assert denied.status_code == 403
-    assert "需要 tool:string-analyzer:use 权限" in denied.json()["detail"]
+    assert "需要 tool:calendar:use 权限" in denied.json()["detail"]
 
 
 # ---------- require_any_tool_permission ----------
@@ -247,6 +251,71 @@ def test_migration_inserts_tool_permissions_when_none_exist(db):
     # 幂等
     migrate_per_tool_permissions()
     assert set(db.scalars(select(Permission.codename)).all()) == codenames
+
+
+def test_retired_permissions_migration_cleans_roles_and_users(db):
+    """存量库残留已下线 tool:*:use：迁移后权限行与角色/用户引用一并清除。
+
+    现有 TOOL_PERMISSIONS 不被误删；再跑一遍仍干净（幂等）。
+    """
+    from app.core.security import get_password_hash
+    from app.models.user import USER_STATUS_APPROVED, User
+
+    retired_rows = []
+    for codename in RETIRED_TOOL_PERMISSIONS:
+        perm = Permission(codename=codename, description=f"已下线 {codename}")
+        db.add(perm)
+        retired_rows.append(perm)
+    db.flush()
+
+    tool_user = db.scalars(select(Role).where(Role.name == "工具使用者")).one()
+    tool_user.permissions = list(tool_user.permissions) + retired_rows
+
+    alice = User(
+        username="alice",
+        hashed_password=get_password_hash("pw-123456"),
+        is_active=True,
+        status=USER_STATUS_APPROVED,
+        direct_permissions=list(retired_rows),
+    )
+    db.add(alice)
+    db.commit()
+
+    live_before = set(TOOL_PERMISSION_CODENAMES)
+    assert live_before <= set(db.scalars(select(Permission.codename)).all())
+
+    migrate_retired_tool_permissions()
+    db.expire_all()
+
+    remaining = set(db.scalars(select(Permission.codename)).all())
+    assert set(RETIRED_TOOL_PERMISSIONS).isdisjoint(remaining)
+    assert live_before <= remaining
+
+    tool_user = db.scalars(select(Role).where(Role.name == "工具使用者")).one()
+    assert set(RETIRED_TOOL_PERMISSIONS).isdisjoint(
+        {p.codename for p in tool_user.permissions}
+    )
+
+    alice = db.scalars(select(User).where(User.username == "alice")).one()
+    assert alice.direct_permissions == []
+
+    migrate_retired_tool_permissions()
+    db.expire_all()
+    assert set(db.scalars(select(Permission.codename)).all()) == remaining
+    assert live_before <= remaining
+
+
+def test_retired_permissions_migration_noop_when_absent(db):
+    """新部署无已下线权限行：迁移为 no-op，现有 TOOL_PERMISSIONS 完整保留。"""
+    codenames_before = set(db.scalars(select(Permission.codename)).all())
+    assert set(RETIRED_TOOL_PERMISSIONS).isdisjoint(codenames_before)
+    assert set(TOOL_PERMISSION_CODENAMES) <= codenames_before
+
+    migrate_retired_tool_permissions()
+    assert set(db.scalars(select(Permission.codename)).all()) == codenames_before
+
+    migrate_retired_tool_permissions()
+    assert set(db.scalars(select(Permission.codename)).all()) == codenames_before
 
 
 # ---------- 公开端点回归 ----------

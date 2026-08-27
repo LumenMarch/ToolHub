@@ -13,7 +13,11 @@ from starlette.formparsers import MultiPartParser
 from app.api.api_router import api_router
 from app.db.base_class import Base
 from app.db.session import engine, ensure_schema_compat
-from app.seed import migrate_per_tool_permissions, run_seed
+from app.seed import (
+    migrate_per_tool_permissions,
+    migrate_retired_tool_permissions,
+    run_seed,
+)
 
 # 增大 Starlette multipart 上传限制（默认 max_part_size 仅 1MB，Excel 文件轻松超标）
 MultiPartParser.max_part_size = 100 * 1024 * 1024  # 单个 part 最大 100MB
@@ -25,8 +29,10 @@ ensure_schema_compat()
 
 # 写入默认权限与角色（幂等 — 已有数据时跳过）
 run_seed()
-# 存量库数据迁移：tool:use → 11 条 tool:<id>:use（幂等，重复执行无副作用）
+# 存量库数据迁移：tool:use → tool:<id>:use（幂等，重复执行无副作用）
 migrate_per_tool_permissions()
+# 清理已下线工具的存量 tool:*:use（幂等，无匹配行时 no-op）
+migrate_retired_tool_permissions()
 
 
 @asynccontextmanager

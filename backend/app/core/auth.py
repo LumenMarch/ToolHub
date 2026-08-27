@@ -158,9 +158,9 @@ def require_tool_enabled(tool_id: str) -> _ToolEnabledChecker:
     """要求指定工具当前处于启用状态，否则返回 403。
 
     用法:
-        @router.post("/process")
-        def process(
-            _: None = Depends(require_tool_enabled("string_tools")),
+        @router.post("/info")
+        def info(
+            _: None = Depends(require_tool_enabled("calendar")),
         ):
             ...
     """
