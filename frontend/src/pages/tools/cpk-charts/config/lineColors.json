@@ -1,0 +1,17 @@
+{
+  "_note": "精确值 via macOS Foundation NSUnarchiver (NSColor) 解档 opp_line_colors.plist；P0 占位已替换，无需 TODO",
+  "OPPType": "LineColors",
+  "colors": ["#0432ff", "#05f900", "#02fdff", "#fffb00", "#ff40ff", "#ff7f00", "#7f1b7f", "#996633", "#000000"],
+  "items": [
+    { "Name": "Color 1", "hex": "#0432ff", "rgba": [0.0168, 0.198, 1.0, 1.0] },
+    { "Name": "Color 2", "hex": "#05f900", "rgba": [0.0188, 0.9771, 0.001, 1.0] },
+    { "Name": "Color 3", "hex": "#02fdff", "rgba": [0.0071, 0.9916, 1.0, 1.0] },
+    { "Name": "Color 4", "hex": "#fffb00", "rgba": [0.9994, 0.9856, 0.0007, 1.0] },
+    { "Name": "Color 5", "hex": "#ff40ff", "rgba": [0.9994, 0.2513, 1.0, 1.0] },
+    { "Name": "Color 6", "hex": "#ff7f00", "rgba": [1.0, 0.5, 0.0, 1.0] },
+    { "Name": "Color 7", "hex": "#7f1b7f", "rgba": [0.4997, 0.1061, 0.5, 1.0] },
+    { "Name": "Color 8", "hex": "#996633", "rgba": [0.6, 0.4, 0.2, 1.0] },
+    { "Name": "Color 9", "hex": "#000000", "rgba": [0.0, 0.0, 0.0, 1.0] }
+  ],
+  "_todo_legacy": "TODO: 若需替换为近似 palette，请用 [\"#1f77b4\",\"#ff7f0e\",\"#2ca02c\",\"#d62728\",\"#9467bd\",\"#8c564b\",\"#e377c2\",\"#7f7f7f\",\"#bcbd22\"]"
+}

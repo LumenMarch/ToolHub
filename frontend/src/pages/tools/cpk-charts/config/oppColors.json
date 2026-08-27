@@ -1,0 +1,59 @@
+{
+  "OPPType": "Colors",
+  "Items": [
+    {
+      "Name": "Module Vendor",
+      "Regex": "Module.*Vendor",
+      "Mapping": [
+        { "Name": "Murata", "Key": "1", "Color": "NA" },
+        { "Name": "USI", "Key": "4", "Color": "NA" }
+      ]
+    },
+    {
+      "Name": "Tester Vendor",
+      "Regex": "Vendor?.*Tester|Tester?.*Vendor",
+      "Mapping": [
+        { "Name": "LitePoint", "Key": "1", "Color": "NA" },
+        { "Name": "National Instruments", "Key": "2", "Color": "NA" },
+        { "Name": "Rhode & Schwarz", "Key": "3", "Color": "NA" },
+        { "Name": "Agilent", "Key": "4", "Color": "NA" },
+        { "Name": "Radiostar", "Key": "5", "Color": "NA" }
+      ]
+    },
+    {
+      "Name": "Fixture Number",
+      "Regex": "fixture.*number|Fixture.*Number",
+      "Mapping": []
+    },
+    {
+      "Name": "Slot Number",
+      "Regex": "slot.*number|Slot.*Number",
+      "Mapping": []
+    },
+    {
+      "Name": "Tester Model",
+      "Regex": "Model",
+      "Mapping": []
+    },
+    {
+      "Name": "Fab ID",
+      "Regex": "FabID",
+      "Mapping": []
+    },
+    {
+      "Name": "Module Information Extra",
+      "Regex": "Extra",
+      "Mapping": []
+    },
+    {
+      "Name": "FWVersion",
+      "Regex": "FirmwareVersion",
+      "Mapping": []
+    },
+    {
+      "Name": "Station-Slot",
+      "Regex": ["Station ID", "Slot Number"],
+      "Mapping": []
+    }
+  ]
+}

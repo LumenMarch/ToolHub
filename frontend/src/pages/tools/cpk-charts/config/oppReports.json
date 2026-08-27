@@ -1,0 +1,10 @@
+{
+  "OPPType": "Reports",
+  "Items": [
+    {
+      "Name": "Example",
+      "Title": "The Example Report",
+      "Regex": ".*"
+    }
+  ]
+}

@@ -75,7 +75,7 @@ export const toolsConfig: ToolDefinition[] = [
   {
     id: 'cpk-charts',
     permission: 'tool:cpk-charts:use',
-    name: '测试数据可视化',
+    name: 'OPP',
     icon: ChartBar,
     path: '/tools/cpk-charts',
     description: '导入测试导出 CSV，点选测试项查看 CPK 过程能力直方图。',
