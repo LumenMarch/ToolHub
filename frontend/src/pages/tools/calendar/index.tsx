@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Moon, MagnifyingGlass, ArrowsClockwise, WarningCircle, Quotes } from '@phosphor-icons/react';
+import { Calendar, Moon, MagnifyingGlass, ArrowsClockwise, WarningCircle } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import api from '../../../api/axios';
@@ -260,7 +260,7 @@ const CalendarTool: React.FC = () => {
     if (isWorkday) {
       return (
         <span className="border border-primary bg-primary/10 px-4 py-1.5 font-mono text-sm font-bold text-primary">
-          [ 工作日 · 努力摸鱼 ]
+          [ 工作日 ]
         </span>
       );
     }
@@ -593,11 +593,11 @@ const CalendarTool: React.FC = () => {
               </div>
             </div>
 
-            {/* 摸鱼进度条 */}
+            {/* 时间进度 */}
             {result.progress && (
               <div className="gsap-reveal flex flex-col gap-6 border-t border-border pt-8">
                 <span className="font-mono text-[0.6875rem] uppercase tracking-[0.2em] text-muted-foreground">
-                  [ TIME PROGRESS / 摸鱼进度条 ]
+                  [ TIME PROGRESS / 时间进度 ]
                 </span>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -646,20 +646,6 @@ const CalendarTool: React.FC = () => {
               </div>
             )}
 
-            {/* 摸鱼金句 */}
-            {result.moyuQuote && (
-              <div className="gsap-reveal border border-border bg-muted/30 p-8 relative flex flex-col gap-4">
-                <div className="flex items-center gap-2">
-                  <Quotes className="h-6 w-6 text-primary" />
-                  <span className="font-mono text-[0.6875rem] uppercase tracking-[0.2em] text-primary font-bold">
-                    [ MOYU QUOTE / 摸鱼金句 ]
-                  </span>
-                </div>
-                <p className="font-mono text-base md:text-lg italic text-foreground leading-relaxed pl-2 break-words">
-                  "{result.moyuQuote}"
-                </p>
-              </div>
-            )}
           </div>
         )}
       </div>

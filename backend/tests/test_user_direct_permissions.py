@@ -22,7 +22,7 @@ from app.services.realtime.hub import realtime_hub
 from tests.conftest import auth_header, login, register
 
 QRCODE_URL = "/api/v1/tools/qrcode"
-STRING_URL = "/api/v1/tools/string/process"
+CALENDAR_URL = "/api/v1/tools/calendar/info"
 
 
 def _perm_id(db, codename: str) -> int:
@@ -101,12 +101,12 @@ def test_direct_permissions_merge_with_role_permissions(admin_client, db):
     assert ok.status_code == 200, ok.text
     # 未授予的其它工具仍 403
     denied = client.post(
-        STRING_URL,
-        json={"text": "abc", "action": "hash_md5"},
+        CALENDAR_URL,
+        json={"date": "2026-08-08"},
         headers=auth_header(token),
     )
     assert denied.status_code == 403
-    assert "需要 tool:string-analyzer:use 权限" in denied.json()["detail"]
+    assert "需要 tool:calendar:use 权限" in denied.json()["detail"]
     # 管理端点：角色权限放行
     audit = client.get("/api/v1/admin/users", headers=auth_header(token))
     assert audit.status_code == 200
@@ -156,17 +156,17 @@ def test_patch_tool_permission_ids_set_clear_none(admin_client, db):
     headers = auth_header(admin_token)
 
     qrcode_id = _perm_id(db, "tool:qrcode:use")
-    health_id = _perm_id(db, "tool:health:use")
+    calendar_id = _perm_id(db, "tool:calendar:use")
 
     # 设置：覆盖为指定集合（响应按 codename 排序）
     resp = client.patch(
         f"/api/v1/admin/users/{alice_id}",
-        json={"tool_permission_ids": [qrcode_id, health_id]},
+        json={"tool_permission_ids": [qrcode_id, calendar_id]},
         headers=headers,
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["direct_tool_permissions"] == [
-        "tool:health:use",
+        "tool:calendar:use",
         "tool:qrcode:use",
     ]
 
@@ -178,7 +178,7 @@ def test_patch_tool_permission_ids_set_clear_none(admin_client, db):
     )
     assert resp.status_code == 200
     assert resp.json()["direct_tool_permissions"] == [
-        "tool:health:use",
+        "tool:calendar:use",
         "tool:qrcode:use",
     ]
 
@@ -296,7 +296,7 @@ def test_approve_with_tool_permission_ids(admin_client, db, monkeypatch):
     assert body["status"] == "approved"
     assert body["direct_tool_permissions"] == ["tool:qrcode:use"]
     # 默认"工具使用者"角色（全部工具）+ 直接权限并集
-    assert {"tool:qrcode:use", "tool:pwd-generator:use"} <= set(body["permissions"])
+    assert {"tool:qrcode:use", "tool:calendar:use"} <= set(body["permissions"])
     assert "user:read" not in body["permissions"]
 
     # 补推权限刷新；既有状态事件不受影响

@@ -5,12 +5,7 @@ import {
   FileArrowUp,
   FileImage,
   FileMagnifyingGlass,
-  Heartbeat,
-  Key,
-  Newspaper,
-  Palette,
   QrCode,
-  TextT,
   TreeStructure,
 } from '@phosphor-icons/react';
 import type { IconProps } from '@phosphor-icons/react';
@@ -28,9 +23,6 @@ export interface ToolDefinition {
 }
 
 // Lazy loaded components for automatic code splitting
-const PwdGenerator = React.lazy(() => import('../pages/tools/pwd-generator/index'));
-const StringAnalyzer = React.lazy(() => import('../pages/tools/string-analyzer/index'));
-const ColorPicker = React.lazy(() => import('../pages/tools/color-picker/index'));
 const QrcodeGenerator = React.lazy(() => import('../pages/tools/qrcode/index'));
 const AssetComparison = React.lazy(() => import('../pages/tools/asset-comparison/index'));
 const AttendanceOrganizer = React.lazy(
@@ -39,39 +31,9 @@ const AttendanceOrganizer = React.lazy(
 const AtlasMerge = React.lazy(() => import('../pages/tools/atlas-merge/index'));
 const ImageToPdf = React.lazy(() => import('../pages/tools/image-to-pdf/index'));
 const BoxPlot = React.lazy(() => import('../pages/tools/box-plot/index'));
-
-const Health = React.lazy(() => import('../pages/tools/health/index'));
 const Calendar = React.lazy(() => import('../pages/tools/calendar/index'));
-const SixtySeconds = React.lazy(() => import('../pages/tools/sixty-seconds/index'));
 
 export const toolsConfig: ToolDefinition[] = [
-  {
-    id: 'pwd-generator',
-    permission: 'tool:pwd-generator:use',
-    name: '密钥生成器',
-    icon: Key,
-    path: '/tools/pwd-generator',
-    description: '在本地生成具有确定性参数的高熵密钥。',
-    component: PwdGenerator,
-  },
-  {
-    id: 'string-analyzer',
-    permission: 'tool:string-analyzer:use',
-    name: '字符处理器',
-    icon: TextT,
-    path: '/tools/string-analyzer',
-    description: '检查字符串属性并执行 Base64 编码解码周期。',
-    component: StringAnalyzer,
-  },
-  {
-    id: 'color-picker',
-    permission: 'tool:color-picker:use',
-    name: '颜色工具',
-    icon: Palette,
-    path: '/tools/color-picker',
-    description: '颜色格式转换与配色方案生成。',
-    component: ColorPicker,
-  },
   {
     id: 'qrcode',
     permission: 'tool:qrcode:use',
@@ -109,31 +71,13 @@ export const toolsConfig: ToolDefinition[] = [
     component: AtlasMerge,
   },
   {
-    id: 'health',
-    permission: 'tool:health:use',
-    name: '健康指标',
-    icon: Heartbeat,
-    path: '/tools/health',
-    description: '计算 BMI、基础代谢与推荐热量。',
-    component: Health,
-  },
-  {
     id: 'calendar',
     permission: 'tool:calendar:use',
     name: '日历',
     icon: CalendarBlank,
     path: '/tools/calendar',
-    description: '农历黄历、节气宜忌与摸鱼倒计时。',
+    description: '农历黄历、节气宜忌与假期倒计时。',
     component: Calendar,
-  },
-  {
-    id: 'sixty-seconds',
-    permission: 'tool:sixty-seconds:use',
-    name: '60s 每日新闻',
-    icon: Newspaper,
-    path: '/tools/sixty-seconds',
-    description: '每天 60 秒读懂世界。',
-    component: SixtySeconds,
   },
   {
     id: 'image-to-pdf',
