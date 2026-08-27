@@ -1,7 +1,8 @@
-// 图表工作区（右侧）— 上：设置行（按图类型）· 下：图区（单图或 A/B 并排对比）+ CPK 统计
+// 图表工作区（右侧）— 上：导出按钮行（导出全部 / 导出当前）+ 设置行（按图类型）· 下：图区（单图或 A/B 并排对比）+ CPK 统计
 // 支持 Histogram / CDF / TimeSeries / Correlation 四类，对齐 OPP 各设置面板
 import React, { useMemo, useState } from 'react';
-import { ArrowsOutSimple, X } from '@phosphor-icons/react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowsOutSimple, DownloadSimple, X } from '@phosphor-icons/react';
 import useOppStore, { getActive, getCorrPair, getSharedPair } from '../store/useOppStore';
 import CpkHistogram from './CpkHistogram';
 import CdfChart from './CdfChart';
@@ -11,6 +12,15 @@ import type { CorrelationPair } from './CorrelationChart';
 import CorrelationSettings from './CorrelationSettings';
 import ItemSettingsPanel from '../pages/ItemSettingsPanel';
 import { pearsonCorrelation, formatIndex, formatValue, shortName, type ColumnAnalysis } from '../lib/stats';
+import {
+  downloadBlob,
+  renderCdfSvg,
+  renderCorrelationSvg,
+  renderHistogramSvg,
+  renderTimeSeriesSvg,
+  sanitizeFilename,
+  svgToPng,
+} from '../lib/export';
 import { cn } from '../../../../lib/cn';
 
 export type ChartView = 'histogram' | 'cdf' | 'timeseries' | 'correlation';
@@ -55,6 +65,7 @@ interface ChartWorkspaceProps {
 }
 
 const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
+  const navigate = useNavigate();
   const datasetA = useOppStore((s) => s.datasetA);
   const datasetB = useOppStore((s) => s.datasetB);
   const selectedName = useOppStore((s) => s.selectedName);
@@ -64,6 +75,7 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
   const compareMode = useOppStore((s) => s.compareMode);
   const settings = useOppStore((s) => s.settings);
   const updateSetting = useOppStore((s) => s.updateSetting);
+  const setError = useOppStore((s) => s.setError);
 
   const [zoom, setZoom] = useState<'A' | 'B' | null>(null);
 
@@ -88,6 +100,51 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
     return getActive(datasetB, selectedName, settings);
   }, [shared, datasetB, selectedName, settings]);
   const activeCol = activeA?.analysis ?? activeB?.analysis ?? null;
+
+  const isCorr = view === 'correlation';
+  const isCompare = compareMode && datasetA && datasetB;
+
+  /** 当前视图是否可导出（有配对 / 有激活测试项数据）。 */
+  const canExportCurrent = isCorr ? Boolean(pairA ?? pairB) : Boolean(activeCol);
+
+  /** 导出当前可见图：单图存一张，对比模式 A/B 各一张。 */
+  const handleExportCurrent = async (): Promise<void> => {
+    try {
+      if (isCorr) {
+        // 对比模式导出 A/B 两张；否则导出唯一可见的散点图
+        const targets: Array<{ pair: CorrelationPair | null; prefix: string }> = isCompare
+          ? [
+              { pair: pairA, prefix: 'A_' },
+              { pair: pairB, prefix: 'B_' },
+            ]
+          : [{ pair: pairA ?? pairB, prefix: '' }];
+        await Promise.all(
+          targets
+            .filter((t): t is { pair: CorrelationPair; prefix: string } => t.pair !== null)
+            .map(({ pair, prefix }) => svgToPng(renderCorrelationSvg(pair, settings)).then((png) => downloadBlob(png, `${prefix}${sanitizeFilename(pair.xName)}_vs_${sanitizeFilename(pair.yName)}.png`))),
+        );
+        return;
+      }
+      if (!activeCol) return;
+      const renderOne = (analysis: ColumnAnalysis): Promise<void> => {
+        const svg = view === 'cdf' ? renderCdfSvg(analysis, settings) : view === 'timeseries' ? renderTimeSeriesSvg(analysis, settings) : renderHistogramSvg(analysis, settings);
+        return svgToPng(svg).then((png) => downloadBlob(png, `${sanitizeFilename(analysis.column.name)}.png`));
+      };
+      if (isCompare) {
+        const a = activeA?.analysis ?? null;
+        const b = activeB?.analysis ?? null;
+        // 显式展开避免循环内 await；文件名加 A_/B_ 前缀区分来源
+        await Promise.all([
+          ...(a ? [svgToPng(view === 'cdf' ? renderCdfSvg(a, settings) : view === 'timeseries' ? renderTimeSeriesSvg(a, settings) : renderHistogramSvg(a, settings)).then((png) => downloadBlob(png, `A_${sanitizeFilename(a.column.name)}.png`))] : []),
+          ...(b ? [svgToPng(view === 'cdf' ? renderCdfSvg(b, settings) : view === 'timeseries' ? renderTimeSeriesSvg(b, settings) : renderHistogramSvg(b, settings)).then((png) => downloadBlob(png, `B_${sanitizeFilename(b.column.name)}.png`))] : []),
+        ]);
+      } else {
+        await renderOne(activeCol);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '当前图表导出失败');
+    }
+  };
 
   const renderChart = (analysis: ColumnAnalysis | null) => {
     if (!analysis) return <div className="flex h-40 items-center justify-center border border-dashed border-border font-mono text-xs text-muted-foreground">无此测试项</div>;
@@ -115,23 +172,38 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
     </div>
   );
 
-  const isCorr = view === 'correlation';
-
   return (
     <div className="flex min-h-0 flex-col gap-4">
-      {/* 上：设置行 */}
-      {isCorr ? (
-        <CorrelationSettings
-          settings={settings}
-          onUpdate={updateSetting}
-          selectedName={selectedName}
-          onSelectedName={setSelectedName}
-          corrYName={corrYName}
-          onCorrYName={setCorrYName}
-        />
-      ) : (
-        <ItemSettingsPanel view={view} settings={settings} onUpdate={updateSetting} activeCol={activeCol} />
-      )}
+      {/* 上：导出按钮行 + 设置行 */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button type="button" onClick={() => navigate('/tools/cpk-charts/export')} className="flex items-center gap-1.5 border border-border px-2.5 py-1 font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground hover:border-primary hover:text-primary">
+            <DownloadSimple className="size-3.5" />
+            导出全部
+          </button>
+          <button
+            type="button"
+            disabled={!canExportCurrent}
+            onClick={() => void handleExportCurrent()}
+            className="flex items-center gap-1.5 border border-border px-2.5 py-1 font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <DownloadSimple className="size-3.5" />
+            导出当前
+          </button>
+        </div>
+        {isCorr ? (
+          <CorrelationSettings
+            settings={settings}
+            onUpdate={updateSetting}
+            selectedName={selectedName}
+            onSelectedName={setSelectedName}
+            corrYName={corrYName}
+            onCorrYName={setCorrYName}
+          />
+        ) : (
+          <ItemSettingsPanel view={view} settings={settings} onUpdate={updateSetting} activeCol={activeCol} />
+        )}
+      </div>
 
       {/* 下：图区 */}
       {isCorr ? (
