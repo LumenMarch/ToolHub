@@ -245,6 +245,19 @@ def build_difference_details(
             record["identifier"],
         )
     )
+    # 同一资产编号可能同时命中多个差异维度（如"依保管人"新增与"依保管部门"新增、
+    # 保管人异常与部门异常）：按资产编号去重，避免总数把同一条差异重复计算。
+    # 保留排序后最先出现的一条（异常 > 新增 > 减少），与导出报表的资产级口径一致。
+    unique_records: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for record in records:
+        key = record["identifier"]
+        if key in seen_ids:
+            continue
+        seen_ids.add(key)
+        unique_records.append(record)
+    records = unique_records
+
     totals = {
         "all": len(records),
         "new": sum(record["changeType"] == "new" for record in records),
