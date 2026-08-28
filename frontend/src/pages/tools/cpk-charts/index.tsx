@@ -39,6 +39,8 @@ const CpkChartsTool: React.FC = () => {
   const clearFileB = useOppStore((s) => s.clearFileB);
   const loading = useOppStore((s) => s.loading);
   const progress = useOppStore((s) => s.progress);
+  const error = useOppStore((s) => s.error);
+  const clearError = useOppStore((s) => s.setError);
 
   const hasB = datasetB !== null && datasetB.columns.length > 0;
 
@@ -82,6 +84,18 @@ const CpkChartsTool: React.FC = () => {
               <p className="mt-1 font-mono text-[0.625rem] text-muted-foreground">OPP.app v2.2.9 · Web 复刻</p>
             </div>
           </div>
+          {/* 加载/解析错误提示 */}
+          {error && (
+            <div className="flex items-center justify-between gap-3 border border-status-danger/50 bg-status-danger/10 px-3 py-2">
+              <p className="min-w-0 font-mono text-[0.6875rem] text-status-danger-foreground">
+                <span className="font-bold uppercase tracking-[0.14em]">[ 错误 ] </span>
+                {error}
+              </p>
+              <button type="button" onClick={() => clearError('')} className="shrink-0 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-status-danger-foreground hover:underline" aria-label="关闭错误提示">
+                关闭
+              </button>
+            </div>
+          )}
         </header>
 
         {/* 文件选择 */}

@@ -57,6 +57,8 @@ const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
   for (const b of bins) {
     if (b.count > maxCount) maxCount = b.count;
   }
+  // 数据存在但全部被 Upper/Lower Range 过滤（OPP 越界丢弃语义）：给出提示而非静默空白
+  const rangeFilteredEmpty = stat.count > 0 && maxCount === 0;
   let yMax: number;
   let yStep: number;
   if (s.showPercentage) {
@@ -150,6 +152,19 @@ const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
       )}
       {/* 绘图区上边框 */}
       <line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={PLOT_TOP} y2={PLOT_TOP} stroke="currentColor" strokeOpacity={0.6} strokeWidth={1} />
+
+      {/* 数据被 Upper/Lower Range 全部过滤：提示而非空白 */}
+      {rangeFilteredEmpty && (
+        <g>
+          <rect x={PLOT_LEFT} y={PLOT_TOP} width={PLOT_W} height={PLOT_H} fill="currentColor" opacity={0.04} />
+          <text x={(PLOT_LEFT + PLOT_RIGHT) / 2} y={PLOT_TOP + PLOT_H / 2} textAnchor="middle" fontSize={11} fontWeight={600} fill="currentColor">
+            {`无数据在 Upper/Lower Range 范围内（${formatTick(dlo)} ~ ${formatTick(dhi)}）`}
+          </text>
+          <text x={(PLOT_LEFT + PLOT_RIGHT) / 2} y={PLOT_TOP + PLOT_H / 2 + 16} textAnchor="middle" fontSize={9} fontWeight={500} fill="currentColor">
+            请调整 Range 设置或清除后重新加载
+          </text>
+        </g>
+      )}
 
       {/* 直方柱（超出 Y 轴上限部分被裁剪，对齐 OPP） */}
       <g clipPath="url(#cpk-plot-clip)">
