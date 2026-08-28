@@ -9,8 +9,8 @@ import StatsLabels from './StatsLabels';
 
 const mapRange = (v: number, lo: number, hi: number, pl: number, ph: number): number => pl + ((v - lo) / (hi - lo)) * (ph - pl);
 
-/** Y 轴范围：合并主序列、次序列的样本值与需显示的规格限，保证次曲线不越出图框。 */
-function yRangeOf(a: ColumnAnalysis | null, b?: ColumnAnalysis | null): [number, number] {
+/** Y 轴范围：合并主序列、次序列的样本值与需显示的规格限，保证次曲线不越出图框；手动 Range 覆盖后不再外扩（对齐 OPP）。 */
+function yRangeOf(a: ColumnAnalysis | null, b?: ColumnAnalysis | null, s?: ChartSettings): [number, number] {
   const seriesList: Array<number[]> = [];
   if (a && a.values.length > 0) seriesList.push(a.values);
   if (b && b.values.length > 0) seriesList.push(b.values);
@@ -24,8 +24,11 @@ function yRangeOf(a: ColumnAnalysis | null, b?: ColumnAnalysis | null): [number,
   }
   if (a?.column.lower != null) lo = Math.min(lo, a.column.lower);
   if (a?.column.upper != null) hi = Math.max(hi, a.column.upper);
+  if (s && s.upperRange !== null) hi = s.upperRange;
+  if (s && s.lowerRange !== null) lo = s.lowerRange;
+  if (!(hi > lo)) return [lo - 1, hi + 1];
   let m = hi - lo;
-  if (!(m > 0)) m = 1;
+  if (s && (s.upperRange !== null || s.lowerRange !== null)) return [lo, hi];
   return [lo - m * 0.08, hi + m * 0.08];
 }
 
@@ -47,7 +50,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ analysis, settings, s
   const xLo = 0;
   const xHi = Math.max(1, n - 1);
   const xTicks = useMemo(() => ticksFor(xLo, xHi), [xHi]);
-  const [yLo, yHi] = useMemo(() => yRangeOf(analysis ?? null, secondary ?? null), [analysis, secondary]);
+  const [yLo, yHi] = useMemo(() => yRangeOf(analysis ?? null, secondary ?? null, settings), [analysis, secondary, settings]);
   const yStep = useMemo(() => pow10Interval(yHi - yLo, 10), [yLo, yHi]);
   // OPP：YMin 向下取整到 interval 整数倍；上限 = YMin + ceil(跨度/interval)*interval
   const [yTickLo, yTickHi] = useMemo(() => {
@@ -64,6 +67,15 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ analysis, settings, s
   const yMinor = useMemo(() => minorTicks(yTickLo, yTickHi, yStep, 3), [yTickLo, yTickHi, yStep]);
   const lineOf = useMemo(() => {
     const mk = (a: ColumnAnalysis | null) => (a ? a.values.map((v, i) => `${Math.round(mapRange(i, xLo, xHi, PLOT_LEFT, PLOT_RIGHT) * 100) / 100},${Math.round(mapRange(v, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP) * 100) / 100}`).join(' ') : '');
+    return { main: mk(analysis), sec: mk(secondary ?? null) };
+  }, [analysis, secondary, xHi, yTickLo, yTickHi]);
+  // Show Fill：折线与 X 轴基线间的填充多边形（对齐 OPP theTimeSeriesFill）
+  const fillOf = useMemo(() => {
+    const mk = (a: ColumnAnalysis | null) => {
+      if (!a || a.values.length === 0) return '';
+      const pts = a.values.map((v, i) => `${Math.round(mapRange(i, xLo, xHi, PLOT_LEFT, PLOT_RIGHT) * 100) / 100},${Math.round(mapRange(v, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP) * 100) / 100}`);
+      return `${PLOT_LEFT},${PLOT_BOTTOM} ${pts.join(' ')} ${PLOT_RIGHT},${PLOT_BOTTOM}`;
+    };
     return { main: mk(analysis), sec: mk(secondary ?? null) };
   }, [analysis, secondary, xHi, yTickLo, yTickHi]);
   const mean = useMemo(() => (analysis && analysis.values.length > 0 ? analysis.values.reduce((s, v) => s + v, 0) / analysis.values.length : NaN), [analysis]);
@@ -93,6 +105,8 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ analysis, settings, s
       {settings.tsMean && analysis && analysis.values.length > 0 && !Number.isNaN(mean) && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(mean, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(mean, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} stroke="currentColor" strokeOpacity={0.55} strokeWidth={1} strokeDasharray="5 4" />)}
       {analysis && settings.showLimits && analysis.column.upper !== null && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(analysis.column.upper!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(analysis.column.upper!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} stroke={SPEC_COLOR} strokeWidth={2} />)}
       {analysis && settings.showLimits && analysis.column.lower !== null && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(analysis.column.lower!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(analysis.column.lower!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} stroke={SPEC_COLOR} strokeWidth={2} />)}
+      {settings.tsFill && fillOf.sec && secondary && (<polygon points={fillOf.sec} fill={secondaryStroke || SPEC_COLOR} opacity={0.15} />)}
+      {settings.tsFill && fillOf.main && analysis && (<polygon points={fillOf.main} fill={stroke || '#2563eb'} opacity={0.15} />)}
       {settings.tsLines !== false && lineOf.sec && secondary && (<polyline points={lineOf.sec} fill="none" stroke={secondaryStroke || SPEC_COLOR} strokeWidth={Math.max(0.5, lineWidth * 1.75)} opacity={0.9} />)}
       {settings.tsLines !== false && lineOf.main && analysis && lineWidth > 0 && (<polyline points={lineOf.main} fill="none" stroke={stroke || '#2563eb'} strokeWidth={lineWidth} />)}
       {/* Data Ticks（None/O/+/x），对齐 OPP theTimeSeriesPlotSymbol */}

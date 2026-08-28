@@ -75,6 +75,10 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ settings, onU
         <input type="checkbox" checked={Boolean(settings.legendEnabled)} onChange={(e) => onUpdate('legendEnabled', e.target.checked)} className="size-3.5 accent-primary" />
         Legend
       </label>
+      <label className="flex cursor-pointer items-center gap-1.5 font-mono text-[0.6875rem] text-foreground">
+        <input type="checkbox" checked={Boolean(settings.legendCounts)} onChange={(e) => onUpdate('legendCounts', e.target.checked)} className="size-3.5 accent-primary" />
+        Show Legend Counts
+      </label>
       <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
         Position
         <select

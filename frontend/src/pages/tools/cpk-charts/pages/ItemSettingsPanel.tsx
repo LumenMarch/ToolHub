@@ -70,29 +70,43 @@ const ItemSettingsPanel: React.FC<ItemSettingsPanelProps> = ({ view, settings, o
           <div className="flex flex-wrap items-center gap-4">
             <NumInput label="Upper Limit" manual={settings.upperLimit} auto={activeCol ? activeCol.column.upper : null} onManual={(v) => onUpdate('upperLimit', v)} />
             <NumInput label="Lower Limit" manual={settings.lowerLimit} auto={activeCol ? activeCol.column.lower : null} onManual={(v) => onUpdate('lowerLimit', v)} />
+            {/* 对齐 OPP theYUpperTextBox：手动 Y 轴上限（无自动占位） */}
+            <NumInput label="Y-Upper" manual={settings.yUpper} auto={null} onManual={(v) => onUpdate('yUpper', v)} />
           </div>
         </>
       )}
       {view === 'cdf' && (
-        <div className="flex flex-wrap items-center gap-5">
-          {(['showTitle', 'showStats', 'showLimits', 'cdfLog', 'cdfShowHundredths', 'cdfFill'] as Array<keyof ChartSettings>).map((k) => check(k))}
-          <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
-            CDF Type
-            <select
-              value={settings.cdfType}
-              onChange={(e) => onUpdate('cdfType', e.target.value as ChartSettings['cdfType'])}
-              className="border border-border bg-background px-2 py-1 text-xs outline-none focus:border-foreground"
-            >
-              <option value="cdf">CDF</option>
-              <option value="ccdf">CCDF</option>
-              <option value="folded">Folded</option>
-            </select>
-          </label>
-        </div>
+        <>
+          <div className="flex flex-wrap items-center gap-5">
+            {(['showTitle', 'showStats', 'showLimits', 'cdfLog', 'cdfShowHundredths', 'cdfFill'] as Array<keyof ChartSettings>).map((k) => check(k))}
+            <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
+              CDF Type
+              <select
+                value={settings.cdfType}
+                onChange={(e) => onUpdate('cdfType', e.target.value as ChartSettings['cdfType'])}
+                className="border border-border bg-background px-2 py-1 text-xs outline-none focus:border-foreground"
+              >
+                <option value="cdf">CDF</option>
+                <option value="ccdf">CCDF</option>
+                <option value="folded">Folded</option>
+              </select>
+            </label>
+          </div>
+          {/* 对齐 OPP theCDFSettingsView：Range / Limit 手动输入（分析域已由 analyzeColumn 支持） */}
+          <div className="flex flex-wrap items-center gap-4">
+            <NumInput label="Upper Range" manual={settings.upperRange} auto={activeCol ? activeCol.dataDomain[1] : null} onManual={(v) => onUpdate('upperRange', v)} />
+            <NumInput label="Lower Range" manual={settings.lowerRange} auto={activeCol ? activeCol.dataDomain[0] : null} onManual={(v) => onUpdate('lowerRange', v)} />
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <NumInput label="Upper Limit" manual={settings.upperLimit} auto={activeCol ? activeCol.column.upper : null} onManual={(v) => onUpdate('upperLimit', v)} />
+            <NumInput label="Lower Limit" manual={settings.lowerLimit} auto={activeCol ? activeCol.column.lower : null} onManual={(v) => onUpdate('lowerLimit', v)} />
+          </div>
+        </>
       )}
       {view === 'timeseries' && (
-        <div className="flex flex-wrap items-center gap-5">
-          {(['showTitle', 'showStats', 'showLimits', 'tsLines', 'tsMean'] as Array<keyof ChartSettings>).map((k) => check(k))}
+        <>
+          <div className="flex flex-wrap items-center gap-5">
+            {(['showTitle', 'showStats', 'showLimits', 'tsLines', 'tsFill', 'tsMean'] as Array<keyof ChartSettings>).map((k) => check(k))}
           <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
             Line Width
             <select
@@ -119,7 +133,15 @@ const ItemSettingsPanel: React.FC<ItemSettingsPanelProps> = ({ view, settings, o
               <option value="cross">x</option>
             </select>
           </label>
-        </div>
+          </div>
+          {/* 对齐 OPP theTimeSeriesSettingsView：Range / Limit 手动输入 */}
+          <div className="flex flex-wrap items-center gap-4">
+            <NumInput label="Upper Range" manual={settings.upperRange} auto={activeCol ? activeCol.dataDomain[1] : null} onManual={(v) => onUpdate('upperRange', v)} />
+            <NumInput label="Lower Range" manual={settings.lowerRange} auto={activeCol ? activeCol.dataDomain[0] : null} onManual={(v) => onUpdate('lowerRange', v)} />
+            <NumInput label="Upper Limit" manual={settings.upperLimit} auto={activeCol ? activeCol.column.upper : null} onManual={(v) => onUpdate('upperLimit', v)} />
+            <NumInput label="Lower Limit" manual={settings.lowerLimit} auto={activeCol ? activeCol.column.lower : null} onManual={(v) => onUpdate('lowerLimit', v)} />
+          </div>
+        </>
       )}
       {/* 公共：Legend 显示开关 / 位置 / 计数（对齐 OPP 底部 Legend 设置） */}
       <div className="mt-3 flex flex-wrap items-center gap-5 border-t border-border pt-3">

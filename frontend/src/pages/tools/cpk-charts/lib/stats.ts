@@ -528,6 +528,8 @@ export interface ChartSettings {
   cdfFill: boolean;
   /** Time Series：显示均值虚线 */
   tsMean: boolean;
+  /** Time Series：折线下方区域填充（Show Fill 复选框，对齐 OPP displayFill） */
+  tsFill: boolean;
   /** Time Series：显示数据点（旧布尔，已由 dataSymbol 取代，保留兼容） */
   tsPoints: boolean;
   /** Time Series：显示折线（Show Lines 复选框，对齐 OPP displayLines） */
@@ -572,6 +574,7 @@ export const DEFAULT_CHART_SETTINGS: ChartSettings = {
   cdfLog: false,
   cdfFill: false,
   tsMean: true,
+  tsFill: false,
   tsPoints: true,
   tsLines: true,
   legendEnabled: false,

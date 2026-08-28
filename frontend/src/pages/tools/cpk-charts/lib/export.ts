@@ -227,6 +227,10 @@ export function renderTimeSeriesSvg(analysis: ColumnAnalysis, settings: ChartSet
     let hi = Math.max(...analysis.values);
     if (analysis.column.lower !== null) lo = Math.min(lo, analysis.column.lower);
     if (analysis.column.upper !== null) hi = Math.max(hi, analysis.column.upper);
+    if (s.upperRange !== null) hi = s.upperRange;
+    if (s.lowerRange !== null) lo = s.lowerRange;
+    if (!(hi > lo)) return [lo - 1, hi + 1];
+    if (s.upperRange !== null || s.lowerRange !== null) return [lo, hi];
     let m = hi - lo;
     if (!(m > 0)) m = 1;
     return [lo - m * 0.08, hi + m * 0.08];
@@ -265,6 +269,11 @@ export function renderTimeSeriesSvg(analysis: ColumnAnalysis, settings: ChartSet
   if (s.showLimits && analysis.column.lower !== null) { const y = mrange(analysis.column.lower, yLo, yHi, PLOT_BOTTOM, PLOT_TOP); parts.push('<line x1="' + PLOT_LEFT + '" x2="' + PLOT_RIGHT + '" y1="' + y + '" y2="' + y + '" stroke="' + SPEC_COLOR + '" stroke-width="2" />'); }
   const ptsStr = analysis.values.map((v, i) => mrange(i, xLo, xHi, PLOT_LEFT, PLOT_RIGHT) + ',' + mrange(v, yLo, yHi, PLOT_BOTTOM, PLOT_TOP)).join(' ');
   if (analysis.values.length > 0) {
+    // Show Fill：折线与基线间的填充多边形（对齐组件）
+    if (s.tsFill) {
+      const fillPts = PLOT_LEFT + ',' + PLOT_BOTTOM + ' ' + ptsStr + ' ' + PLOT_RIGHT + ',' + PLOT_BOTTOM;
+      parts.push('<polygon points="' + fillPts + '" fill="#2563eb" opacity="0.15" />');
+    }
     if (s.tsLines !== false && lineWidth > 0) parts.push('<polyline points="' + ptsStr + '" fill="none" stroke="#2563eb" stroke-width="' + lineWidth + '" />');
     const r = 2.6;
     analysis.values.forEach((v, i) => {
