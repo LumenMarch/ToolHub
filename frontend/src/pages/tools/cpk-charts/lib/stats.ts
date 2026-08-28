@@ -162,18 +162,18 @@ export function computeBins(
   if (rangeLo !== null) lo = rangeLo;
   if (rangeHi !== null) hi = rangeHi;
   if (!(hi > lo)) return empty();
-  // 数据范围：floor/ceil±1 + 手动 Range（不含规格限并入）——供设置面板 Range 自动显示，改 Limit 不影响它
-  const dataLo = lo;
-  const dataHi = hi;
-  const dataDomain: [number, number] = [dataLo, dataHi];
-  // 超出显示范围的值被过滤，不进入柱子（NA 单独计数）
+  // 超出显示范围的值被过滤，不进入柱子（NA 单独计数）；
+  // 数据全部被 Range 过滤时（visible 为空）仍保留 [lo, hi] 作为 X 轴域（对齐 OPP：
+  // custom Range 时 histogramMin/Max 直接用 Range，柱子全空而非回退到占位域）
   const visible = values.filter((v) => v >= lo && v <= hi);
-  if (visible.length === 0) return empty();
   // 规格限并入绘图域：仅在其显示开启时（OPP displayLimits 控制是否并入 histogramMin/Max）
   if (displayLimits) {
     if (upper !== null) hi = Math.max(hi, upper);
     if (lower !== null) lo = Math.min(lo, lower);
   }
+  // dataDomain（设置面板 Upper/Lower Range 的自动显示值）= 最终 histogramMin/Max，
+  // 与 OPP updateHistogramRange 一致：含 floor/ceil±1、手动 Range、以及并入的规格限
+  const dataDomain: [number, number] = [lo, hi];
   const span = hi - lo;
 
   // 对齐 OPP：bin 数 = histogramBinCount（可配置，默认 75）；binSize = span/binCount
