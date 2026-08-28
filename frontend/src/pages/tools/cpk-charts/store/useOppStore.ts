@@ -167,7 +167,11 @@ export const useOppStore = create<OppStore>()(
       setLoading: (v) => set({ loading: v }),
       setProgress: (v) => set({ progress: v }),
       setError: (v) => set({ error: v }),
-      setSelectedName: (v) => set({ selectedName: v }),
+      setSelectedName: (v) => set((s) => ({
+        selectedName: v,
+        // 切换测试项时清除手动 Upper/Lower Range，回落到该测试项的自动计算值
+        ...(v !== s.selectedName ? { settings: { ...s.settings, upperRange: null, lowerRange: null } } : {}),
+      })),
       setQuery: (v) => set({ query: v }),
       setCorrYName: (v) => set({ corrYName: v }),
       setChartType: (v) => set({ chartType: v }),
