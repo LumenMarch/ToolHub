@@ -85,6 +85,7 @@ export function renderHistogramSvg(analysis: ColumnAnalysis, settings: ChartSett
     yStep = cptNiceNum(yMax / 4);
   }
   if (!(yStep > 0)) yStep = 1;
+  if (!(yMax > 0)) yMax = 1;
   const yTicks = yTicksFor(yMax, yStep);
   const yMinorFracs = s.showPercentage ? [0.25, 0.5, 0.75] : [0.2, 0.4, 0.6, 0.8];
   const barY = (val: number): number => PLOT_BOTTOM - (val / yMax) * PLOT_H;

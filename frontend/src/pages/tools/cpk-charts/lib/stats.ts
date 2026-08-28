@@ -141,12 +141,18 @@ export function computeBins(
   };
   if (values.length === 0) return empty();
   let [lo, hi] = minMax(values);
-  // 对齐 OPP：binSize==0（常量数据）时 max×1.1、min×0.9，且所有分箱 idx 整体 +1
+  // 对齐 OPP：binSize==0（常量数据）时 max×1.1、min×0.9，且所有分箱 idx 整体 +1；
+  // 常量 0（×1.1/×0.9 后仍为 0）回退为 ±1 扩展，保证柱子可见
   let idxOffset = 0;
   if (lo === hi) {
     hi *= 1.1;
     lo *= 0.9;
-    idxOffset = 1;
+    if (hi > lo) {
+      idxOffset = 1;
+    } else {
+      lo = Math.floor(values[0] ?? 0) - 1;
+      hi = lo + 2;
+    }
   } else {
     // 对齐 OPP（反编译实证）：X 轴基准 = floor(dataMin)-1 ~ ceil(dataMax)+1
     lo = Math.floor(lo) - 1;
@@ -253,7 +259,16 @@ export function analyzeColumnPair(
     sharedDomain = [-0.5, 0.5];
   } else {
     let [lo, hi] = minMax(combinedBinValues);
-    if (lo === hi) { hi *= 1.1; lo *= 0.9; idxOffset = 1; } else {
+    if (lo === hi) {
+      hi *= 1.1;
+      lo *= 0.9;
+      if (hi > lo) {
+        idxOffset = 1;
+      } else {
+        lo = Math.floor(combinedBinValues[0] ?? 0) - 1;
+        hi = lo + 2;
+      }
+    } else {
       lo = Math.floor(lo) - 1;
       hi = Math.ceil(hi) + 1;
     }

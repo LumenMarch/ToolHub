@@ -73,6 +73,7 @@ const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
     yStep = cptNiceNum(yMax / 4);
   }
   if (!(yStep > 0)) yStep = 1;
+  if (!(yMax > 0)) yMax = 1;
   const yTicks = yTicksFor(yMax, yStep);
   // 对齐 OPP：Count 模式 minorTicksPerInterval=4，Percent=3
   const yMinorFracs = s.showPercentage ? [0.25, 0.5, 0.75] : [0.2, 0.4, 0.6, 0.8];
