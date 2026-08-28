@@ -143,25 +143,6 @@ const ItemSettingsPanel: React.FC<ItemSettingsPanelProps> = ({ view, settings, o
           </div>
         </>
       )}
-      {/* 公共：Legend 显示开关 / 位置 / 计数（对齐 OPP 底部 Legend 设置） */}
-      <div className="mt-3 flex flex-wrap items-center gap-5 border-t border-border pt-3">
-        {check('legendEnabled')}
-        <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
-          Position
-          <select
-            value={settings.legendPosition}
-            onChange={(e) => onUpdate('legendPosition', e.target.value as ChartSettings['legendPosition'])}
-            className="border border-border bg-background px-2 py-1 text-xs outline-none focus:border-foreground"
-          >
-            <option value="none">None</option>
-            <option value="topright">Top Right</option>
-            <option value="bottomright">Bottom Right</option>
-            <option value="topleft">Top Left</option>
-            <option value="bottomleft">Bottom Left</option>
-          </select>
-        </label>
-        {check('legendCounts')}
-      </div>
     </div>
   );
 };

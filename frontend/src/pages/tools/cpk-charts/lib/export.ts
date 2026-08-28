@@ -50,21 +50,44 @@ export function renderHistogramSvg(analysis: ColumnAnalysis, settings: ChartSett
   const { column, stat, bins, domain, hasLimits } = analysis;
   const s = settings;
   const [dlo, dhi] = domain;
-  const xTicks = ticksFor(dlo, dhi);
-  const xMajor = xTicks.length > 1 ? Math.abs(xTicks[1] - xTicks[0]) : oppInterval(dlo, dhi);
-  const xMinor = minorTicks(dlo, dhi, xMajor, 4);
-  const binW = bins.length > 0 ? PLOT_W / bins.length : 2;
+  // 对齐 OPP：plotSpace X range = bin 域 × expandRangeByFactor(1.05)，两端各留 2.5% 边距
+  const xCenter = (dlo + dhi) / 2;
+  const xHalf = ((dhi - dlo) / 2) * 1.05;
+  const plo = xCenter - xHalf;
+  const phi = xCenter + xHalf;
+  const xTicks = ticksFor(plo, phi);
+  const xMajor = xTicks.length > 1 ? Math.abs(xTicks[1] - xTicks[0]) : oppInterval(plo, phi);
+  const xMinor = minorTicks(plo, phi, xMajor, 4);
+  // 柱宽按数据单位换算像素：OPP barWidth = binSize（数据坐标）
+  const binWData = bins.length > 1 ? bins[1]!.x0 - bins[0]!.x0 : dhi - dlo;
+  const binW = (binWData / (phi - plo)) * PLOT_W;
   const unitSuffix = column.unit ? ` (${column.unit})` : '';
 
   const yVal = (count: number, percent: number): number => (s.showPercentage ? percent : count);
+  // 柱计数最大值（Y 上限自动推导的依据）
+  let maxCount = 0;
+  for (const b of bins) {
+    if (b.count > maxCount) maxCount = b.count;
+  }
   let yMax: number;
-  if (s.showPercentage) yMax = 100;
-  else yMax = s.yUpper !== null && s.yUpper > 0 ? s.yUpper : 100;
-  const yStep = s.showPercentage ? 20 : cptNiceNum(yMax / 4);
-  const yMaxNice = Math.max(yStep, Math.ceil(yMax / yStep) * yStep);
-  const yTicks = yTicksFor(yMaxNice, yStep);
+  let yStep: number;
+  if (s.showPercentage) {
+    // 对齐 OPP：Percent 模式 FixedInterval（interval = 20、上限 100）
+    yMax = 100;
+    yStep = 20;
+  } else if (s.yUpper !== null && s.yUpper > 0) {
+    // 对齐 OPP useCustomYUpperValue：上限 = Y-Upper 输入，主刻度间隔 = Y-Upper / 5
+    yMax = s.yUpper;
+    yStep = yMax / 5;
+  } else {
+    // 对齐 OPP：上限 = 最大柱计数 + floor(maxCount × 0.1)
+    yMax = maxCount + Math.floor(maxCount * 0.1);
+    yStep = cptNiceNum(yMax / 4);
+  }
+  if (!(yStep > 0)) yStep = 1;
+  const yTicks = yTicksFor(yMax, yStep);
   const yMinorFracs = s.showPercentage ? [0.25, 0.5, 0.75] : [0.2, 0.4, 0.6, 0.8];
-  const barY = (val: number): number => PLOT_BOTTOM - (val / yMaxNice) * PLOT_H;
+  const barY = (val: number): number => PLOT_BOTTOM - (val / yMax) * PLOT_H;
 
   const stats: Array<{ label: string; value: string }> = [
     { label: 'Data Count', value: String(stat.count) },
@@ -106,7 +129,7 @@ export function renderHistogramSvg(analysis: ColumnAnalysis, settings: ChartSett
   yTicks.slice(0, -1).forEach((t) => {
     yMinorFracs.forEach((frac) => {
       const v = t + yStep * frac;
-      if (v >= yMaxNice - 1e-9) return;
+      if (v >= yMax - 1e-9) return;
       const y = barY(v);
       parts.push(`<line x1="${PLOT_LEFT}" x2="${PLOT_RIGHT}" y1="${y}" y2="${y}" stroke="${TEXT_COLOR}" stroke-opacity="0.18" stroke-width="1" />`);
     });
@@ -116,7 +139,7 @@ export function renderHistogramSvg(analysis: ColumnAnalysis, settings: ChartSett
   parts.push('<g clip-path="url(#cpk-plot-clip)">');
   bins.forEach((b) => {
     // 对齐 OPP：bar 中心在 bin 中心、宽 1 bin → 起点左移半个 bin 宽（柱身会压过规格限红线）
-    const x = mapX(dlo, dhi, b.x0) - binW / 2;
+    const x = mapX(plo, phi, b.x0) - binW / 2;
     const y = barY(yVal(b.count, b.percent));
     const h = Math.max(0, PLOT_BOTTOM - y);
     if (h <= 0) return;
@@ -130,12 +153,12 @@ export function renderHistogramSvg(analysis: ColumnAnalysis, settings: ChartSett
   });
   parts.push('</g>');
   // 规格限红线
-  if (s.showLimits && column.upper !== null && mapX(dlo, dhi, column.upper) >= PLOT_LEFT && mapX(dlo, dhi, column.upper) <= PLOT_RIGHT) {
-    const x = mapX(dlo, dhi, column.upper);
+  if (s.showLimits && column.upper !== null && mapX(plo, phi, column.upper) >= PLOT_LEFT && mapX(plo, phi, column.upper) <= PLOT_RIGHT) {
+    const x = mapX(plo, phi, column.upper);
     parts.push(`<line x1="${x}" x2="${x}" y1="${PLOT_TOP}" y2="${PLOT_BOTTOM}" stroke="${SPEC_COLOR}" stroke-width="3" />`);
   }
-  if (s.showLimits && column.lower !== null && mapX(dlo, dhi, column.lower) >= PLOT_LEFT && mapX(dlo, dhi, column.lower) <= PLOT_RIGHT) {
-    const x = mapX(dlo, dhi, column.lower);
+  if (s.showLimits && column.lower !== null && mapX(plo, phi, column.lower) >= PLOT_LEFT && mapX(plo, phi, column.lower) <= PLOT_RIGHT) {
+    const x = mapX(plo, phi, column.lower);
     parts.push(`<line x1="${x}" x2="${x}" y1="${PLOT_TOP}" y2="${PLOT_BOTTOM}" stroke="${SPEC_COLOR}" stroke-width="3" />`);
   }
   if (s.showLimits && !hasLimits) {
@@ -144,11 +167,11 @@ export function renderHistogramSvg(analysis: ColumnAnalysis, settings: ChartSett
   // X 轴主线 + 小刻度（无数字） + 主刻度 + 轴名
   parts.push(`<line x1="${PLOT_LEFT}" x2="${PLOT_RIGHT}" y1="${PLOT_BOTTOM}" y2="${PLOT_BOTTOM}" stroke="${TEXT_COLOR}" stroke-width="1.75" />`);
   xMinor.forEach((v) => {
-    const mx = mapX(dlo, dhi, v);
+    const mx = mapX(plo, phi, v);
     parts.push(`<line x1="${mx}" x2="${mx}" y1="${PLOT_BOTTOM}" y2="${PLOT_BOTTOM + 2.5}" stroke="${TEXT_COLOR}" stroke-width="0.75" />`);
   });
   xTicks.forEach((t) => {
-    const x = mapX(dlo, dhi, t);
+    const x = mapX(plo, phi, t);
     parts.push(`<line x1="${x}" x2="${x}" y1="${PLOT_BOTTOM}" y2="${PLOT_BOTTOM + 5}" stroke="${TEXT_COLOR}" stroke-width="1" />`);
     parts.push(`<text x="${x}" y="${PLOT_BOTTOM + 16}" text-anchor="middle" font-size="9" font-weight="500" fill="${TEXT_COLOR}">${escapeXml(formatTick(t))}</text>`);
   });
@@ -480,7 +503,7 @@ async function renderNameEntry(
   const { name, entries } = ne;
   if (entries.length === 2 && canShare) {
     const a = entries[0]!, b = entries[1]!;
-    const pair = analyzeColumnPair(a.columnEff, a.raw, b.columnEff, b.raw, settings.binCount, settings.lowerRange, settings.upperRange);
+    const pair = analyzeColumnPair(a.columnEff, a.raw, b.columnEff, b.raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
     const make = async (analysis: ColumnAnalysis, pre: string, idx: number) => {
       const svg = renderHistogramSvg(analysis, settings);
       const png = await svgToPng(svg);
@@ -491,7 +514,7 @@ async function renderNameEntry(
   }
   // 单侧（entries 最多 2：A/B 各自一条），显式展开避免循环内 await
   const r1 = async (en: NameEntrySrc) => {
-    const analysis = analyzeColumn(en.columnEff, en.raw, settings.binCount, settings.lowerRange, settings.upperRange);
+    const analysis = analyzeColumn(en.columnEff, en.raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
     const svg = renderHistogramSvg(analysis, settings);
     const png = await svgToPng(svg);
     const bytes = new Uint8Array(await png.arrayBuffer());

@@ -25,7 +25,6 @@ import {
   ticksFor,
   yTicksFor,
 } from '../lib/layout';
-import PlotLegend from './PlotLegend';
 
 interface CpkHistogramProps {
   analysis: ColumnAnalysis;
@@ -37,30 +36,47 @@ const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
   const s = settings;
   const [dlo, dhi] = domain;
 
-  const xTicks = ticksFor(dlo, dhi);
-  const xMajor = xTicks.length > 1 ? Math.abs(xTicks[1] - xTicks[0]) : oppInterval(dlo, dhi);
+  // 对齐 OPP：plotSpace X range = bin 域 × expandRangeByFactor(1.05)，两端各留 2.5% 边距
+  const xCenter = (dlo + dhi) / 2;
+  const xHalf = ((dhi - dlo) / 2) * 1.05;
+  const [plo, phi] = [xCenter - xHalf, xCenter + xHalf];
+
+  const xTicks = ticksFor(plo, phi);
+  const xMajor = xTicks.length > 1 ? Math.abs(xTicks[1] - xTicks[0]) : oppInterval(plo, phi);
   // X 小刻度线（OPP：每主刻度间 4 条次刻度，5 等分）
-  const xMinorTicks = minorTicks(dlo, dhi, xMajor, 4);
-  const binW = bins.length > 0 ? PLOT_W / bins.length : 2;
+  const xMinorTicks = minorTicks(plo, phi, xMajor, 4);
+  // 柱宽按数据单位换算像素：OPP barWidth = binSize（数据坐标）
+  const binWData = bins.length > 1 ? bins[1]!.x0 - bins[0]!.x0 : dhi - dlo;
+  const binW = (binWData / (phi - plo)) * PLOT_W;
   const unitSuffix = column.unit ? ` (${column.unit})` : '';
 
   // Y 轴：百分比或数量；上限自动或手动
   const yVal = (count: number, percent: number): number => (s.showPercentage ? percent : count);
-  let yMax: number;
-  if (s.showPercentage) {
-    yMax = 100;
-  } else {
-    // Y 上限：手动设置优先，未设置时默认 100（对齐 OPP Y-Upper 默认值）
-    yMax = s.yUpper !== null && s.yUpper > 0 ? s.yUpper : 100;
+  // 柱计数最大值（Y 上限自动推导的依据）
+  let maxCount = 0;
+  for (const b of bins) {
+    if (b.count > maxCount) maxCount = b.count;
   }
-  // 对齐 OPP：Count 模式 Y 轴 Automatic（interval = CPTNiceNum(yMax/4)）；
-  // Percent 模式 FixedInterval（interval = 20）
-  const yStep = s.showPercentage ? 20 : cptNiceNum(yMax / 4);
-  const yMaxNice = Math.max(yStep, Math.ceil(yMax / yStep) * yStep);
-  const yTicks = yTicksFor(yMaxNice, yStep);
+  let yMax: number;
+  let yStep: number;
+  if (s.showPercentage) {
+    // 对齐 OPP：Percent 模式 FixedInterval（interval = 20、上限 100）
+    yMax = 100;
+    yStep = 20;
+  } else if (s.yUpper !== null && s.yUpper > 0) {
+    // 对齐 OPP useCustomYUpperValue：上限 = Y-Upper 输入，主刻度间隔 = Y-Upper / 5
+    yMax = s.yUpper;
+    yStep = yMax / 5;
+  } else {
+    // 对齐 OPP：上限 = 最大柱计数 + floor(maxCount × 0.1)，主刻度取 nice 步长
+    yMax = maxCount + Math.floor(maxCount * 0.1);
+    yStep = cptNiceNum(yMax / 4);
+  }
+  if (!(yStep > 0)) yStep = 1;
+  const yTicks = yTicksFor(yMax, yStep);
   // 对齐 OPP：Count 模式 minorTicksPerInterval=4，Percent=3
   const yMinorFracs = s.showPercentage ? [0.25, 0.5, 0.75] : [0.2, 0.4, 0.6, 0.8];
-  const barY = (val: number): number => PLOT_BOTTOM - (val / yMaxNice) * PLOT_H;
+  const barY = (val: number): number => PLOT_BOTTOM - (val / yMax) * PLOT_H;
 
   const stats: Array<{ label: string; value: string }> = [
     { label: 'Data Count', value: String(stat.count) },
@@ -126,7 +142,7 @@ const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
       {yTicks.slice(0, -1).map((t) =>
         yMinorFracs.map((frac) => {
           const v = t + yStep * frac;
-          if (v >= yMaxNice - 1e-9) return null;
+          if (v >= yMax - 1e-9) return null;
           const y = barY(v);
           return <line key={`y-light-${t}-${frac}`} x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={y} y2={y} stroke="currentColor" strokeOpacity={0.18} strokeWidth={1} />;
         }),
@@ -138,7 +154,7 @@ const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
       <g clipPath="url(#cpk-plot-clip)">
       {bins.map((b, i) => {
         // 对齐 OPP：bar 中心在 bin 中心、宽 1 bin → 起点左移半个 bin 宽（柱身会压过规格限红线）
-        const x = mapX(dlo, dhi, b.x0) - binW / 2;
+        const x = mapX(plo, phi, b.x0) - binW / 2;
         const y = barY(yVal(b.count, b.percent));
         const h = Math.max(0, PLOT_BOTTOM - y);
         return (
@@ -156,11 +172,11 @@ const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
       </g>
 
       {/* 规格限红线 */}
-      {s.showLimits && column.upper !== null && mapX(dlo, dhi, column.upper) >= PLOT_LEFT && mapX(dlo, dhi, column.upper) <= PLOT_RIGHT && (
-        <line x1={mapX(dlo, dhi, column.upper)} x2={mapX(dlo, dhi, column.upper)} y1={PLOT_TOP} y2={PLOT_BOTTOM} stroke={SPEC_COLOR} strokeWidth={3} />
+      {s.showLimits && column.upper !== null && mapX(plo, phi, column.upper) >= PLOT_LEFT && mapX(plo, phi, column.upper) <= PLOT_RIGHT && (
+        <line x1={mapX(plo, phi, column.upper)} x2={mapX(plo, phi, column.upper)} y1={PLOT_TOP} y2={PLOT_BOTTOM} stroke={SPEC_COLOR} strokeWidth={3} />
       )}
-      {s.showLimits && column.lower !== null && mapX(dlo, dhi, column.lower) >= PLOT_LEFT && mapX(dlo, dhi, column.lower) <= PLOT_RIGHT && (
-        <line x1={mapX(dlo, dhi, column.lower)} x2={mapX(dlo, dhi, column.lower)} y1={PLOT_TOP} y2={PLOT_BOTTOM} stroke={SPEC_COLOR} strokeWidth={3} />
+      {s.showLimits && column.lower !== null && mapX(plo, phi, column.lower) >= PLOT_LEFT && mapX(plo, phi, column.lower) <= PLOT_RIGHT && (
+        <line x1={mapX(plo, phi, column.lower)} x2={mapX(plo, phi, column.lower)} y1={PLOT_TOP} y2={PLOT_BOTTOM} stroke={SPEC_COLOR} strokeWidth={3} />
       )}
       {s.showLimits && !hasLimits && (
         <text x={PLOT_RIGHT - 6} y={PLOT_TOP + 13} textAnchor="end" fontSize={9} fontWeight={500} fill="currentColor">[ NO SPEC LIMITS ]</text>
@@ -170,24 +186,17 @@ const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
       <line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={PLOT_BOTTOM} y2={PLOT_BOTTOM} stroke="currentColor" strokeWidth={1.75} />
       {/* X 小刻度线 */}
       {xMinorTicks.map((v) => (
-        <line key={'minor-' + v} x1={mapX(dlo, dhi, v)} x2={mapX(dlo, dhi, v)} y1={PLOT_BOTTOM} y2={PLOT_BOTTOM + 2.5} stroke="currentColor" strokeWidth={0.75} />
+        <line key={'minor-' + v} x1={mapX(plo, phi, v)} x2={mapX(plo, phi, v)} y1={PLOT_BOTTOM} y2={PLOT_BOTTOM + 2.5} stroke="currentColor" strokeWidth={0.75} />
       ))}
       {/* X 主刻度 */}
       {xTicks.map((t) => (
         <g key={t}>
-          <line x1={mapX(dlo, dhi, t)} x2={mapX(dlo, dhi, t)} y1={PLOT_BOTTOM} y2={PLOT_BOTTOM + 5} stroke="currentColor" strokeWidth={1} />
-          <text x={mapX(dlo, dhi, t)} y={PLOT_BOTTOM + 16} textAnchor="middle" fontSize={9} fontWeight={500} fill="currentColor">{formatTick(t)}</text>
+          <line x1={mapX(plo, phi, t)} x2={mapX(plo, phi, t)} y1={PLOT_BOTTOM} y2={PLOT_BOTTOM + 5} stroke="currentColor" strokeWidth={1} />
+          <text x={mapX(plo, phi, t)} y={PLOT_BOTTOM + 16} textAnchor="middle" fontSize={9} fontWeight={500} fill="currentColor">{formatTick(t)}</text>
         </g>
       ))}
       {column.unit && (
         <text x={(PLOT_LEFT + PLOT_RIGHT) / 2} y={PLOT_BOTTOM + 32} textAnchor="middle" fontSize={9.5} fontWeight={500} fill="currentColor">{column.unit}</text>
-      )}
-      {s.legendEnabled && (
-        <PlotLegend
-          entries={[{ label: column.name, color: '#2563eb', count: stat.count }]}
-          position={s.legendPosition}
-          showCounts={s.legendCounts}
-        />
       )}
     </svg>
   );

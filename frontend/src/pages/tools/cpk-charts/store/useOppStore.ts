@@ -342,7 +342,7 @@ export function getActive(
     lower: settings.lowerLimit !== null ? settings.lowerLimit : column.lower,
   };
   const raw = dataset.rows.map((r) => r[idx] ?? 'NA');
-  return { index: idx, analysis: analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange) };
+  return { index: idx, analysis: analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits) };
 }
 
 export function getCorrPair(
@@ -378,7 +378,7 @@ export function getSharedPair(state: OppState): { idxA: number; idxB: number; pa
   const effB = { ...colB, upper: state.settings.upperLimit !== null ? state.settings.upperLimit : colB.upper, lower: state.settings.lowerLimit !== null ? state.settings.lowerLimit : colB.lower };
   const rawA = state.datasetA.rows.map((r) => r[idxA] ?? 'NA');
   const rawB = state.datasetB.rows.map((r) => r[idxB] ?? 'NA');
-  const pair = analyzeColumnPair(effA, rawA, effB, rawB, state.settings.binCount, state.settings.lowerRange, state.settings.upperRange);
+  const pair = analyzeColumnPair(effA, rawA, effB, rawB, state.settings.binCount, state.settings.lowerRange, state.settings.upperRange, state.settings.showLimits);
   return { idxA, idxB, pair };
 }
 
