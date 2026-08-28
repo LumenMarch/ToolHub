@@ -324,7 +324,9 @@ def build_difference_details(
             dim_unique.append(record)
         filtered = dim_unique
     elif change_type == "all":
-        filtered = records
+        # 全部明细展示每个维度的差异证据（同一资产可能同时出现在保管人与保管部门维度）；
+        # 总数（totals.all）仍按资产编号去重，明细条数允许大于资产数
+        filtered = raw_records
     else:
         filtered = [record for record in records if record["changeType"] == change_type]
     normalized_query = query.strip().casefold()
