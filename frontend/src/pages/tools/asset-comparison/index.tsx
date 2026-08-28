@@ -878,6 +878,8 @@ const AssetComparison: React.FC = () => {
     ?? checkResults.find(result => result.has_diff)
     ?? checkResults[0]
   );
+  // 财务-财务模块按保管人/保管部门维度分组统计差异
+  const isFinanceModule = activeResult?.key === 'ff';
   const activeSources = activeResult ? (RESULT_SOURCES[activeResult.key] ?? []) : [];
   const activeArtifactKey = activeResult ? `module_${activeResult.key}` : '';
   const activeArtifact = activeArtifactKey ? job?.artifacts[activeArtifactKey] : undefined;
@@ -918,6 +920,10 @@ const AssetComparison: React.FC = () => {
     new: activeResult?.counts?.new ?? 0,
     removed: activeResult?.counts?.removed ?? 0,
     anomaly: activeResult?.counts?.anomaly ?? 0,
+    custodianNew: activeResult?.sub_groups?.[0]?.new_count ?? 0,
+    custodianRemoved: activeResult?.sub_groups?.[0]?.removed_count ?? 0,
+    deptNew: activeResult?.sub_groups?.[1]?.new_count ?? 0,
+    deptRemoved: activeResult?.sub_groups?.[1]?.removed_count ?? 0,
   };
   const differencePageCount = Math.max(
     1,
@@ -1343,27 +1349,51 @@ const AssetComparison: React.FC = () => {
                 </div>
 
                 <div className="grid shrink-0 grid-cols-2 border-b border-border sm:grid-cols-4">
-                  {([
-                    ['全部差异', activeCounts.all, 'text-foreground'],
-                    ['异常', activeCounts.anomaly, 'text-status-warning-foreground'],
-                    ['新增', activeCounts.new, 'text-status-success-foreground'],
-                    ['减少', activeCounts.removed, 'text-status-danger-foreground'],
-                  ] as const).map(([label, value, color], index) => (
-                    <div key={label} className={`px-4 py-3 min-[80rem]:py-2.5 ${index < 3 ? 'border-r border-border' : ''} ${index < 2 ? 'border-b border-border sm:border-b-0' : ''}`}>
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className={`mt-1 font-mono text-xl font-bold tabular-nums min-[80rem]:mt-0.5 min-[80rem]:text-lg ${color}`}>{value}</p>
-                    </div>
-                  ))}
+                  {isFinanceModule
+                    ? ([
+                        ['全部差异', activeCounts.all, 'text-foreground'],
+                        ['保管人新增', activeCounts.custodianNew, 'text-status-success-foreground'],
+                        ['保管人减少', activeCounts.custodianRemoved, 'text-status-danger-foreground'],
+                        ['部门新增', activeCounts.deptNew, 'text-status-success-foreground'],
+                        ['部门减少', activeCounts.deptRemoved, 'text-status-danger-foreground'],
+                        ['异常', activeCounts.anomaly, 'text-status-warning-foreground'],
+                      ] as const).map(([label, value, color], index) => (
+                        <div key={label} className={`px-4 py-3 min-[80rem]:py-2.5 ${index % 2 === 0 ? 'border-r border-border' : ''} ${index < 4 ? 'border-b border-border sm:border-b-0' : ''}`}>
+                          <p className="text-xs text-muted-foreground">{label}</p>
+                          <p className={`mt-1 font-mono text-xl font-bold tabular-nums min-[80rem]:mt-0.5 min-[80rem]:text-lg ${color}`}>{value}</p>
+                        </div>
+                      ))
+                    : ([
+                        ['全部差异', activeCounts.all, 'text-foreground'],
+                        ['异常', activeCounts.anomaly, 'text-status-warning-foreground'],
+                        ['新增', activeCounts.new, 'text-status-success-foreground'],
+                        ['减少', activeCounts.removed, 'text-status-danger-foreground'],
+                      ] as const).map(([label, value, color], index) => (
+                        <div key={label} className={`px-4 py-3 min-[80rem]:py-2.5 ${index < 3 ? 'border-r border-border' : ''} ${index < 2 ? 'border-b border-border sm:border-b-0' : ''}`}>
+                          <p className="text-xs text-muted-foreground">{label}</p>
+                          <p className={`mt-1 font-mono text-xl font-bold tabular-nums min-[80rem]:mt-0.5 min-[80rem]:text-lg ${color}`}>{value}</p>
+                        </div>
+                      ))}
                 </div>
 
                 <div className="flex shrink-0 flex-col gap-2 border-b border-border px-4 py-2 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="grid grid-cols-4 border border-border">
-                    {([
-                      ['all', '全部'],
-                      ['anomaly', '异常'],
-                      ['new', '新增'],
-                      ['removed', '减少'],
-                    ] as Array<[DifferenceType, string]>).map(([type, label]) => (
+                  <div className="grid grid-cols-4 border border-border min-[60rem]:grid-cols-6">
+                    {(isFinanceModule
+                      ? ([
+                          ['all', '全部'],
+                          ['custodianNew', '保管人新增'],
+                          ['custodianRemoved', '保管人减少'],
+                          ['deptNew', '部门新增'],
+                          ['deptRemoved', '部门减少'],
+                          ['anomaly', '异常'],
+                        ] as Array<[DifferenceType, string]>)
+                      : ([
+                          ['all', '全部'],
+                          ['anomaly', '异常'],
+                          ['new', '新增'],
+                          ['removed', '减少'],
+                        ] as Array<[DifferenceType, string]>)
+                    ).map(([type, label]) => (
                       <button
                         key={type}
                         type="button"

@@ -8,6 +8,16 @@ import polars as pl
 
 CHANGE_TYPES = {"all", "new", "removed", "anomaly"}
 
+# 维度筛选：按“保管人 / 保管部门 × 新增 / 减少”聚合（仅 ff 财务对比模块具有保管人/部门维度）。
+# 键为前端传入的筛选类型，值为 (changeType, dimension 子串)。
+DIMENSION_FILTERS = {
+    "custodianNew": ("new", "依保管人"),
+    "custodianRemoved": ("removed", "依保管人"),
+    "deptNew": ("new", "依保管部门"),
+    "deptRemoved": ("removed", "依保管部门"),
+}
+ALL_CHANGE_TYPES = CHANGE_TYPES | set(DIMENSION_FILTERS)
+
 _IDENTIFIER_COLUMNS = (
     "資產編號",
     "资产编号",
@@ -197,7 +207,7 @@ def build_difference_details(
 ) -> dict:
     if module_key not in _MODULE_SPECS:
         raise ValueError("不支持的资产核对模块")
-    if change_type not in CHANGE_TYPES:
+    if change_type not in ALL_CHANGE_TYPES:
         raise ValueError("不支持的差异类型")
 
     frame_indexes: dict[str, dict[str, dict[str, Any]]] = {}
@@ -246,11 +256,12 @@ def build_difference_details(
         )
     )
     # 同一资产编号可能同时命中多个差异维度（如"依保管人"新增与"依保管部门"新增、
-    # 保管人异常与部门异常）：按资产编号去重，避免总数把同一条差异重复计算。
-    # 保留排序后最先出现的一条（异常 > 新增 > 减少），与导出报表的资产级口径一致。
+    # 保管人异常与部门异常）：明细按资产编号去重，避免重复行；保留排序后最先出现的一条
+    # （异常 > 新增 > 减少）。维度统计仍按各自维度独立去重计数（见 totals）。
+    raw_records = records
     unique_records: list[dict[str, str]] = []
     seen_ids: set[str] = set()
-    for record in records:
+    for record in raw_records:
         key = record["identifier"]
         if key in seen_ids:
             continue
@@ -258,18 +269,64 @@ def build_difference_details(
         unique_records.append(record)
     records = unique_records
 
+    def _unique_count(items: Iterable[dict[str, str]]) -> int:
+        return len({item["identifier"] for item in items})
+
+    # 维度统计：保管人/保管部门 × 新增/减少，各自按资产编号去重（可重叠）
+    custodian_new = _unique_count(
+        record
+        for record in raw_records
+        if record["changeType"] == "new" and "依保管人" in record["dimension"]
+    )
+    custodian_removed = _unique_count(
+        record
+        for record in raw_records
+        if record["changeType"] == "removed" and "依保管人" in record["dimension"]
+    )
+    dept_new = _unique_count(
+        record
+        for record in raw_records
+        if record["changeType"] == "new" and "依保管部门" in record["dimension"]
+    )
+    dept_removed = _unique_count(
+        record
+        for record in raw_records
+        if record["changeType"] == "removed" and "依保管部门" in record["dimension"]
+    )
+
     totals = {
         "all": len(records),
         "new": sum(record["changeType"] == "new" for record in records),
         "removed": sum(record["changeType"] == "removed" for record in records),
         "anomaly": sum(record["changeType"] == "anomaly" for record in records),
+        "custodianNew": custodian_new,
+        "custodianRemoved": custodian_removed,
+        "deptNew": dept_new,
+        "deptRemoved": dept_removed,
     }
 
-    filtered = (
-        records
-        if change_type == "all"
-        else [record for record in records if record["changeType"] == change_type]
-    )
+    # 筛选：支持传统 changeType（new/removed/anomaly）与维度筛选（custodianNew 等）
+    if change_type in DIMENSION_FILTERS:
+        want_change_type, want_dimension = DIMENSION_FILTERS[change_type]
+        dimension_records = [
+            record
+            for record in raw_records
+            if record["changeType"] == want_change_type
+            and want_dimension in record["dimension"]
+        ]
+        # 明细按资产编号去重（同一资产只显示一条该维度的差异）
+        dim_unique: list[dict[str, str]] = []
+        dim_seen: set[str] = set()
+        for record in dimension_records:
+            if record["identifier"] in dim_seen:
+                continue
+            dim_seen.add(record["identifier"])
+            dim_unique.append(record)
+        filtered = dim_unique
+    elif change_type == "all":
+        filtered = records
+    else:
+        filtered = [record for record in records if record["changeType"] == change_type]
     normalized_query = query.strip().casefold()
     if normalized_query:
         filtered = [
