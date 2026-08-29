@@ -1,8 +1,8 @@
 // OPP 复刻主视图 — 单页布局：
 // header(标题) → 文件选择(A/B) → 图表类型选择(Histogram/CDF/TimeSeries/Correlation + 单文件/对比)
-// → 主体两栏：左上测试项列表 · 右上设置 · 右下图
+// → 主体两栏：左上测试项列表 · 右上导出+设置 · 右下图
 import React, { useEffect, useRef } from 'react';
-import { Database, DownloadSimple } from '@phosphor-icons/react';
+import { Database } from '@phosphor-icons/react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { gsap } from 'gsap';
 import { cn } from '../../../lib/cn';
@@ -39,6 +39,8 @@ const CpkChartsTool: React.FC = () => {
   const clearFileB = useOppStore((s) => s.clearFileB);
   const loading = useOppStore((s) => s.loading);
   const progress = useOppStore((s) => s.progress);
+  const error = useOppStore((s) => s.error);
+  const clearError = useOppStore((s) => s.setError);
 
   const hasB = datasetB !== null && datasetB.columns.length > 0;
 
@@ -81,11 +83,19 @@ const CpkChartsTool: React.FC = () => {
               </h1>
               <p className="mt-1 font-mono text-[0.625rem] text-muted-foreground">OPP.app v2.2.9 · Web 复刻</p>
             </div>
-            <button type="button" onClick={() => navigate('/tools/cpk-charts/export')} className="flex items-center gap-1.5 border border-primary bg-primary px-3 py-1.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-primary-foreground hover:opacity-90">
-              <DownloadSimple className="size-4" />
-              导出
-            </button>
           </div>
+          {/* 加载/解析错误提示 */}
+          {error && (
+            <div className="flex items-center justify-between gap-3 border border-status-danger/50 bg-status-danger/10 px-3 py-2">
+              <p className="min-w-0 font-mono text-[0.6875rem] text-status-danger-foreground">
+                <span className="font-bold uppercase tracking-[0.14em]">[ 错误 ] </span>
+                {error}
+              </p>
+              <button type="button" onClick={() => clearError('')} className="shrink-0 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-status-danger-foreground hover:underline" aria-label="关闭错误提示">
+                关闭
+              </button>
+            </div>
+          )}
         </header>
 
         {/* 文件选择 */}

@@ -23,12 +23,15 @@ const NumInput: React.FC<{ label: string; manual: number | null; auto: number | 
           if (t === '') onManual(null);
           else {
             const n = Number(t);
-            if (Number.isFinite(n)) onManual(n);
-            else {
+            if (!Number.isFinite(n)) {
               // 无效输入不保留在控件中：回退为自动值，避免“显示手动值、实际用自动值”的错位
               onManual(null);
               setDraft(auto !== null ? String(auto) : '');
+              return;
             }
+            // 值与自动计算值相同则不固化为手动值：切换测试项后仍随自动值联动
+            if (manual === null && auto !== null && Math.abs(n - auto) < 1e-9) return;
+            onManual(n);
           }
         }}
         placeholder={auto !== null ? String(auto) : '—'}
@@ -70,29 +73,43 @@ const ItemSettingsPanel: React.FC<ItemSettingsPanelProps> = ({ view, settings, o
           <div className="flex flex-wrap items-center gap-4">
             <NumInput label="Upper Limit" manual={settings.upperLimit} auto={activeCol ? activeCol.column.upper : null} onManual={(v) => onUpdate('upperLimit', v)} />
             <NumInput label="Lower Limit" manual={settings.lowerLimit} auto={activeCol ? activeCol.column.lower : null} onManual={(v) => onUpdate('lowerLimit', v)} />
+            {/* 对齐 OPP theYUpperTextBox：手动 Y 轴上限（无自动占位） */}
+            <NumInput label="Y-Upper" manual={settings.yUpper} auto={null} onManual={(v) => onUpdate('yUpper', v)} />
           </div>
         </>
       )}
       {view === 'cdf' && (
-        <div className="flex flex-wrap items-center gap-5">
-          {(['showTitle', 'showStats', 'showLimits', 'cdfLog', 'cdfShowHundredths', 'cdfFill'] as Array<keyof ChartSettings>).map((k) => check(k))}
-          <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
-            CDF Type
-            <select
-              value={settings.cdfType}
-              onChange={(e) => onUpdate('cdfType', e.target.value as ChartSettings['cdfType'])}
-              className="border border-border bg-background px-2 py-1 text-xs outline-none focus:border-foreground"
-            >
-              <option value="cdf">CDF</option>
-              <option value="ccdf">CCDF</option>
-              <option value="folded">Folded</option>
-            </select>
-          </label>
-        </div>
+        <>
+          <div className="flex flex-wrap items-center gap-5">
+            {(['showTitle', 'showStats', 'showLimits', 'cdfLog', 'cdfShowHundredths', 'cdfFill'] as Array<keyof ChartSettings>).map((k) => check(k))}
+            <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
+              CDF Type
+              <select
+                value={settings.cdfType}
+                onChange={(e) => onUpdate('cdfType', e.target.value as ChartSettings['cdfType'])}
+                className="border border-border bg-background px-2 py-1 text-xs outline-none focus:border-foreground"
+              >
+                <option value="cdf">CDF</option>
+                <option value="ccdf">CCDF</option>
+                <option value="folded">Folded</option>
+              </select>
+            </label>
+          </div>
+          {/* 对齐 OPP theCDFSettingsView：Range / Limit 手动输入（分析域已由 analyzeColumn 支持） */}
+          <div className="flex flex-wrap items-center gap-4">
+            <NumInput label="Upper Range" manual={settings.upperRange} auto={activeCol ? activeCol.dataDomain[1] : null} onManual={(v) => onUpdate('upperRange', v)} />
+            <NumInput label="Lower Range" manual={settings.lowerRange} auto={activeCol ? activeCol.dataDomain[0] : null} onManual={(v) => onUpdate('lowerRange', v)} />
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <NumInput label="Upper Limit" manual={settings.upperLimit} auto={activeCol ? activeCol.column.upper : null} onManual={(v) => onUpdate('upperLimit', v)} />
+            <NumInput label="Lower Limit" manual={settings.lowerLimit} auto={activeCol ? activeCol.column.lower : null} onManual={(v) => onUpdate('lowerLimit', v)} />
+          </div>
+        </>
       )}
       {view === 'timeseries' && (
-        <div className="flex flex-wrap items-center gap-5">
-          {(['showTitle', 'showStats', 'showLimits', 'tsLines', 'tsMean'] as Array<keyof ChartSettings>).map((k) => check(k))}
+        <>
+          <div className="flex flex-wrap items-center gap-5">
+            {(['showTitle', 'showStats', 'showLimits', 'tsLines', 'tsFill', 'tsMean'] as Array<keyof ChartSettings>).map((k) => check(k))}
           <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
             Line Width
             <select
@@ -119,27 +136,16 @@ const ItemSettingsPanel: React.FC<ItemSettingsPanelProps> = ({ view, settings, o
               <option value="cross">x</option>
             </select>
           </label>
-        </div>
+          </div>
+          {/* 对齐 OPP theTimeSeriesSettingsView：Range / Limit 手动输入 */}
+          <div className="flex flex-wrap items-center gap-4">
+            <NumInput label="Upper Range" manual={settings.upperRange} auto={activeCol ? activeCol.dataDomain[1] : null} onManual={(v) => onUpdate('upperRange', v)} />
+            <NumInput label="Lower Range" manual={settings.lowerRange} auto={activeCol ? activeCol.dataDomain[0] : null} onManual={(v) => onUpdate('lowerRange', v)} />
+            <NumInput label="Upper Limit" manual={settings.upperLimit} auto={activeCol ? activeCol.column.upper : null} onManual={(v) => onUpdate('upperLimit', v)} />
+            <NumInput label="Lower Limit" manual={settings.lowerLimit} auto={activeCol ? activeCol.column.lower : null} onManual={(v) => onUpdate('lowerLimit', v)} />
+          </div>
+        </>
       )}
-      {/* 公共：Legend 显示开关 / 位置 / 计数（对齐 OPP 底部 Legend 设置） */}
-      <div className="mt-3 flex flex-wrap items-center gap-5 border-t border-border pt-3">
-        {check('legendEnabled')}
-        <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
-          Position
-          <select
-            value={settings.legendPosition}
-            onChange={(e) => onUpdate('legendPosition', e.target.value as ChartSettings['legendPosition'])}
-            className="border border-border bg-background px-2 py-1 text-xs outline-none focus:border-foreground"
-          >
-            <option value="none">None</option>
-            <option value="topright">Top Right</option>
-            <option value="bottomright">Bottom Right</option>
-            <option value="topleft">Top Left</option>
-            <option value="bottomleft">Bottom Left</option>
-          </select>
-        </label>
-        {check('legendCounts')}
-      </div>
     </div>
   );
 };

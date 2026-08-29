@@ -71,24 +71,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ settings, onU
           <option value={5}>5</option>
         </select>
       </label>
-      <label className="flex cursor-pointer items-center gap-1.5 font-mono text-[0.6875rem] text-foreground">
-        <input type="checkbox" checked={Boolean(settings.legendEnabled)} onChange={(e) => onUpdate('legendEnabled', e.target.checked)} className="size-3.5 accent-primary" />
-        Legend
-      </label>
-      <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
-        Position
-        <select
-          value={settings.legendPosition}
-          onChange={(e) => onUpdate('legendPosition', e.target.value as ChartSettings['legendPosition'])}
-          className="border border-border bg-background px-2 py-1 text-xs outline-none focus:border-foreground"
-        >
-          <option value="none">None</option>
-          <option value="topright">Top Right</option>
-          <option value="bottomright">Bottom Right</option>
-          <option value="topleft">Top Left</option>
-          <option value="bottomleft">Bottom Left</option>
-        </select>
-      </label>
     </div>
   );
 };

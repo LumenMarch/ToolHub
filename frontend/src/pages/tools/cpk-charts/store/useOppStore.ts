@@ -63,6 +63,21 @@ interface OppActions {
 
 export type OppStore = OppState & OppActions;
 
+/**
+ * 统一的测试项选择更新：选中值变化时清除手动 Upper/Lower Range，
+ * 回落到新测试项的自动计算值。所有选择路径（列表点击、文件加载自动选中）共用。
+ */
+function applyItemSelection(
+  state: OppState,
+  name: string,
+): Partial<OppState> {
+  if (name === state.selectedName) return { selectedName: name };
+  return {
+    selectedName: name,
+    settings: { ...state.settings, upperRange: null, lowerRange: null },
+  };
+}
+
 async function parseFileViaWorker(file: File, onProgress?: (p: number) => void): Promise<ParsedDataset> {
   // 大文件走 Worker，小文件直接解析，避免 Worker 开销
   const THRESHOLD = 5 * 1024 * 1024; // 5MB
@@ -152,13 +167,13 @@ export const useOppStore = create<OppStore>()(
       setFileNameB: (v) => set({ fileNameB: v }),
       setDatasetA: (ds) => {
         set({ datasetA: ds });
-        const { selectedName } = get();
+        const state = get();
         if (ds && ds.columns.length > 0) {
-          const exists = ds.columns.some((c) => c.name === selectedName);
-          if (!selectedName || !exists) {
+          const exists = ds.columns.some((c) => c.name === state.selectedName);
+          if (!state.selectedName || !exists) {
             // 若 B 也存在则以并集首项为准，单纯 A 则取 A 首项
             const first = ds.columns[0].name;
-            set({ selectedName: first });
+            set(applyItemSelection(state, first));
           }
         }
       },
@@ -167,7 +182,7 @@ export const useOppStore = create<OppStore>()(
       setLoading: (v) => set({ loading: v }),
       setProgress: (v) => set({ progress: v }),
       setError: (v) => set({ error: v }),
-      setSelectedName: (v) => set({ selectedName: v }),
+      setSelectedName: (v) => set((s) => applyItemSelection(s, v)),
       setQuery: (v) => set({ query: v }),
       setCorrYName: (v) => set({ corrYName: v }),
       setChartType: (v) => set({ chartType: v }),
@@ -179,9 +194,9 @@ export const useOppStore = create<OppStore>()(
           const ds = await parseFileViaWorker(file, (p) => set({ progress: p }));
           set({ datasetA: ds, progress: 1 });
           // 自动选中首项（若当前未选中或不存在）
-          const { selectedName } = get();
-          const exists = ds.columns.some((c) => c.name === selectedName);
-          if (!selectedName || !exists) set({ selectedName: ds.columns[0]?.name ?? '' });
+          const state = get();
+          const exists = ds.columns.some((c) => c.name === state.selectedName);
+          if (!state.selectedName || !exists) set(applyItemSelection(state, ds.columns[0]?.name ?? ''));
         } catch (e) {
           set({ error: e instanceof Error ? e.message : 'CSV 解析失败' });
         } finally {
@@ -194,9 +209,9 @@ export const useOppStore = create<OppStore>()(
           const ds = await parseFileViaWorker(file, (p) => set({ progress: p }));
           set({ datasetB: ds, progress: 1 });
           // 与 loadFileA 相同的兜底选择：仅加载 B（或 A 已清空）时自动选中首项
-          const { selectedName } = get();
-          const exists = ds.columns.some((c) => c.name === selectedName);
-          if (!selectedName || !exists) set({ selectedName: ds.columns[0]?.name ?? '' });
+          const state = get();
+          const exists = ds.columns.some((c) => c.name === state.selectedName);
+          if (!state.selectedName || !exists) set(applyItemSelection(state, ds.columns[0]?.name ?? ''));
         } catch (e) {
           set({ error: e instanceof Error ? e.message : 'CSV 解析失败' });
         } finally {
@@ -342,7 +357,7 @@ export function getActive(
     lower: settings.lowerLimit !== null ? settings.lowerLimit : column.lower,
   };
   const raw = dataset.rows.map((r) => r[idx] ?? 'NA');
-  return { index: idx, analysis: analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange) };
+  return { index: idx, analysis: analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits) };
 }
 
 export function getCorrPair(
@@ -378,7 +393,7 @@ export function getSharedPair(state: OppState): { idxA: number; idxB: number; pa
   const effB = { ...colB, upper: state.settings.upperLimit !== null ? state.settings.upperLimit : colB.upper, lower: state.settings.lowerLimit !== null ? state.settings.lowerLimit : colB.lower };
   const rawA = state.datasetA.rows.map((r) => r[idxA] ?? 'NA');
   const rawB = state.datasetB.rows.map((r) => r[idxB] ?? 'NA');
-  const pair = analyzeColumnPair(effA, rawA, effB, rawB, state.settings.binCount, state.settings.lowerRange, state.settings.upperRange);
+  const pair = analyzeColumnPair(effA, rawA, effB, rawB, state.settings.binCount, state.settings.lowerRange, state.settings.upperRange, state.settings.showLimits);
   return { idxA, idxB, pair };
 }
 

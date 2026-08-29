@@ -64,7 +64,7 @@ export async function buildItemCheckImages(
           const effB = { ...colB0, upper: settings.upperLimit !== null ? settings.upperLimit : colB0.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : colB0.lower };
           const rawA = datasetA.rows.map((r) => r[idxA] ?? 'NA');
           const rawB = datasetB.rows.map((r) => r[idxB] ?? 'NA');
-          const pair = analyzeColumnPair(effA, rawA, effB, rawB, settings.binCount, settings.lowerRange, settings.upperRange);
+          const pair = analyzeColumnPair(effA, rawA, effB, rawB, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
           const svgA = renderSvgFor(pair.a, settings, view);
           const svgB = renderSvgFor(pair.b, settings, view);
           const [pngA, pngB] = await Promise.all([svgToPng(svgA), svgToPng(svgB)]);
@@ -77,7 +77,7 @@ export async function buildItemCheckImages(
           const col = datasetA.columns[idxA];
           const eff = { ...col, upper: settings.upperLimit !== null ? settings.upperLimit : col.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : col.lower };
           const raw = datasetA.rows.map((r) => r[idxA] ?? 'NA');
-          const analysis = analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange);
+          const analysis = analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
           const svg = renderSvgFor(analysis, settings, view);
           const png = await svgToPng(svg);
           imagesA[pos] = await blobToBase64(png);
@@ -86,7 +86,7 @@ export async function buildItemCheckImages(
           const col = datasetB.columns[idxB];
           const eff = { ...col, upper: settings.upperLimit !== null ? settings.upperLimit : col.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : col.lower };
           const raw = datasetB.rows.map((r) => r[idxB] ?? 'NA');
-          const analysis = analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange);
+          const analysis = analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
           const svg = renderSvgFor(analysis, settings, view);
           const png = await svgToPng(svg);
           imagesB[pos] = await blobToBase64(png);

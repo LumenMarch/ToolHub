@@ -115,9 +115,11 @@ export function stdDev(values: number[], m: number): number {
 }
 
 /**
- * 直方图分箱。
- * 绘图域 = 数据范围 ∪ 规格限范围，再向外各扩展 5%（两侧）；
- * bin 宽取 nice 步长，目标 bin 数约 sqrt(n) * 6 且不低于 50（对齐 OPP 细柱）。
+ * 直方图分箱（对齐 OPP histogramBinsGenerateWithReturnSet: 反编译实现）：
+ * - 默认域 = floor(dataMin)-1 ~ ceil(dataMax)+1；常量数据改为 max×1.1 / min×0.9 且整体偏移 1 bin；
+ * - 手动 Range 覆盖；规格限仅在其显示开启时并入域（OPP 受 displayLimits 控制）；
+ * - 越界样本丢弃（不入任何柱，OPP 分箱越界时同样丢弃）；
+ * - percent 分母 = 计入柱的样本总数（OPP generateDataWithCounts 的累加总数）。
  */
 export function computeBins(
   values: number[],
@@ -126,6 +128,7 @@ export function computeBins(
   binCount: number | null = 75,
   rangeLo: number | null = null,
   rangeHi: number | null = null,
+  displayLimits: boolean = true,
 ): { bins: HistogramBin[]; domain: [number, number]; dataDomain: [number, number] } {
   const empty = (): { bins: HistogramBin[]; domain: [number, number]; dataDomain: [number, number] } => {
     // 无有效数值：仍生成一个 0 高度柱位，让 X 轴有柱、Y 高度为 0
@@ -138,31 +141,41 @@ export function computeBins(
   };
   if (values.length === 0) return empty();
   let [lo, hi] = minMax(values);
+  // 对齐 OPP：binSize==0（常量数据）时 max×1.1、min×0.9，且所有分箱 idx 整体 +1；
+  // 常量 0（×1.1/×0.9 后仍为 0）回退为 ±1 扩展，保证柱子可见
+  let idxOffset = 0;
   if (lo === hi) {
-    // 常量列：向两侧各扩展 1 个单位
-    lo -= 1;
-    hi += 1;
+    hi *= 1.1;
+    lo *= 0.9;
+    if (hi > lo) {
+      idxOffset = 1;
+    } else {
+      lo = Math.floor(values[0] ?? 0) - 1;
+      hi = lo + 2;
+    }
+  } else {
+    // 对齐 OPP（反编译实证）：X 轴基准 = floor(dataMin)-1 ~ ceil(dataMax)+1
+    lo = Math.floor(lo) - 1;
+    hi = Math.ceil(hi) + 1;
   }
-  // 对齐 OPP（反编译实证）：X 轴基准 = floor(dataMin)-1 ~ ceil(dataMax)+1
-  lo = Math.floor(lo) - 1;
-  hi = Math.ceil(hi) + 1;
   // 手动显示范围（Range）覆盖 X 轴范围（对齐 OPP 设置面板 Upper/Lower Range）
   if (rangeLo !== null) lo = rangeLo;
   if (rangeHi !== null) hi = rangeHi;
   if (!(hi > lo)) return empty();
-  // 数据范围：floor/ceil±1 + 手动 Range（不含规格限并入）——供设置面板 Range 自动显示，改 Limit 不影响它
-  const dataLo = lo;
-  const dataHi = hi;
-  const dataDomain: [number, number] = [dataLo, dataHi];
-  // 超出显示范围的值被过滤，不进入柱子（NA 单独计数）
+  // 超出显示范围的值被过滤，不进入柱子（NA 单独计数）；
+  // 数据全部被 Range 过滤时（visible 为空）仍保留 [lo, hi] 作为 X 轴域（对齐 OPP：
+  // custom Range 时 histogramMin/Max 直接用 Range，柱子全空而非回退到占位域）
   const visible = values.filter((v) => v >= lo && v <= hi);
-  if (visible.length === 0) return empty();
-  // 规格限并入绘图域（domain 用于画红线/柱子网格；不影响 dataDomain）
-  if (upper !== null) hi = Math.max(hi, upper);
-  if (lower !== null) lo = Math.min(lo, lower);
+  // 规格限并入绘图域：仅在其显示开启时（OPP displayLimits 控制是否并入 histogramMin/Max）
+  if (displayLimits) {
+    if (upper !== null) hi = Math.max(hi, upper);
+    if (lower !== null) lo = Math.min(lo, lower);
+  }
+  // dataDomain（设置面板 Upper/Lower Range 的自动显示值）= 最终 histogramMin/Max，
+  // 与 OPP updateHistogramRange 一致：含 floor/ceil±1、手动 Range、以及并入的规格限
+  const dataDomain: [number, number] = [lo, hi];
   const span = hi - lo;
 
-  const n = visible.length;
   // 对齐 OPP：bin 数 = histogramBinCount（可配置，默认 75）；binSize = span/binCount
   const safeCount = typeof binCount === 'number' && Number.isFinite(binCount) && binCount > 0 ? binCount : 75;
   const binWidth = span / safeCount;
@@ -172,16 +185,21 @@ export function computeBins(
   const binN = safeCount;
   const counts = new Array<number>(binN).fill(0);
   for (const v of visible) {
-    const idx = Math.min(binN - 1, Math.max(0, Math.floor((v - x0) / binWidth)));
+    // 对齐 OPP：无 clamp，越界样本丢弃（v == hi 时 idx == binN，同样丢弃）
+    const idx = Math.floor((v - x0) / binWidth) + idxOffset;
+    if (idx < 0 || idx >= binN) continue;
     counts[idx] += 1;
   }
+  // 对齐 OPP：percent 分母 = 实际计入柱的样本总数
+  let total = 0;
+  for (const c of counts) total += c;
   const bins: HistogramBin[] = [];
   for (let i = 0; i < binN; i += 1) {
     bins.push({
       x0: x0 + i * binWidth,
       x1: x0 + (i + 1) * binWidth,
       count: counts[i],
-      percent: (counts[i] / n) * 100,
+      percent: total > 0 ? (counts[i] / total) * 100 : 0,
     });
   }
   return { bins, domain: [x0, x0 + binN * binWidth], dataDomain };
@@ -200,6 +218,7 @@ export function analyzeColumnPair(
   binCount: number | null = 75,
   rangeLo: number | null = null,
   rangeHi: number | null = null,
+  displayLimits: boolean = true,
 ): { a: ColumnAnalysis; b: ColumnAnalysis } {
   const effUpper = (() => {
     const ua = columnA.upper, ub = columnB.upper;
@@ -233,14 +252,26 @@ export function analyzeColumnPair(
   const combinedBinValues = [...pA.binValues, ...pB.binValues];
   let sharedDataDomain: [number, number];
   let sharedDomain: [number, number];
+  // 对齐 OPP：常量数据 max×1.1 / min×0.9，分箱 idx 整体 +1
+  let idxOffset = 0;
   if (combinedBinValues.length === 0) {
     sharedDataDomain = [-0.5, 0.5];
     sharedDomain = [-0.5, 0.5];
   } else {
     let [lo, hi] = minMax(combinedBinValues);
-    if (lo === hi) { lo -= 1; hi += 1; }
-    lo = Math.floor(lo) - 1;
-    hi = Math.ceil(hi) + 1;
+    if (lo === hi) {
+      hi *= 1.1;
+      lo *= 0.9;
+      if (hi > lo) {
+        idxOffset = 1;
+      } else {
+        lo = Math.floor(combinedBinValues[0] ?? 0) - 1;
+        hi = lo + 2;
+      }
+    } else {
+      lo = Math.floor(lo) - 1;
+      hi = Math.ceil(hi) + 1;
+    }
     if (rangeLo !== null) lo = rangeLo;
     if (rangeHi !== null) hi = rangeHi;
     if (!(hi > lo)) {
@@ -249,8 +280,11 @@ export function analyzeColumnPair(
     } else {
       sharedDataDomain = [lo, hi];
       let dlo = lo, dhi = hi;
-      if (effUpper !== null) dhi = Math.max(dhi, effUpper);
-      if (effLower !== null) dlo = Math.min(dlo, effLower);
+      // 对齐 OPP：规格限仅在其显示开启时并入共享绘图域
+      if (displayLimits) {
+        if (effUpper !== null) dhi = Math.max(dhi, effUpper);
+        if (effLower !== null) dlo = Math.min(dlo, effLower);
+      }
       sharedDomain = [dlo, dhi];
     }
   }
@@ -275,20 +309,27 @@ export function analyzeColumnPair(
       const span = dhi - dlo;
       const safeCount = typeof binCount === 'number' && Number.isFinite(binCount) && binCount > 0 ? binCount : 75;
       const binWidth = span / safeCount;
-      const visible = binValues.filter((v) => v >= dlo && v <= dhi);
-      const nVis = visible.length;
+      // 对齐 OPP：样本按手动 Range（sharedDataDomain，不含并入的规格限）过滤，
+      // sharedDomain 仅用于柱坐标与规格限显示
+      const visible = binValues.filter(
+        (v) => v >= sharedDataDomain[0] && v <= sharedDataDomain[1],
+      );
       const counts = new Array<number>(safeCount).fill(0);
       for (const v of visible) {
-        const idx = Math.min(safeCount - 1, Math.max(0, Math.floor((v - dlo) / binWidth)));
+        // 对齐 OPP：无 clamp，越界样本丢弃；常量数据整体 +1 bin
+        const idx = Math.floor((v - dlo) / binWidth) + idxOffset;
+        if (idx < 0 || idx >= safeCount) continue;
         counts[idx] += 1;
       }
+      let total = 0;
+      for (const c of counts) total += c;
       bins = [];
       for (let i = 0; i < safeCount; i += 1) {
         bins.push({
           x0: dlo + i * binWidth,
           x1: dlo + (i + 1) * binWidth,
           count: counts[i],
-          percent: nVis === 0 ? 0 : (counts[i] / nVis) * 100,
+          percent: total > 0 ? (counts[i] / total) * 100 : 0,
         });
       }
     }
@@ -350,6 +391,7 @@ export function analyzeColumn(
   binCount: number | null = 75,
   rangeLo: number | null = null,
   rangeHi: number | null = null,
+  displayLimits: boolean = true,
 ): ColumnAnalysis {
   const values: number[] = [];
   let naCount = 0; // 空白 / Empty 行数
@@ -370,7 +412,7 @@ export function analyzeColumn(
   const s = stdDev(values, m);
   // 有内容但无有效数值的列（如 SerialNumber 文本列）：按单 bin 于 x=0 显示满柱（Y 轴反映 Data Count）
   const binValues = values.length > 0 ? values : valueCount > 0 ? new Array<number>(valueCount).fill(0) : values;
-  const { bins, domain, dataDomain } = computeBins(binValues, column.upper, column.lower, binCount, rangeLo, rangeHi);
+  const { bins, domain, dataDomain } = computeBins(binValues, column.upper, column.lower, binCount, rangeLo, rangeHi, displayLimits);
 
   let failureCount = 0;
   for (const v of values) {
@@ -528,6 +570,8 @@ export interface ChartSettings {
   cdfFill: boolean;
   /** Time Series：显示均值虚线 */
   tsMean: boolean;
+  /** Time Series：折线下方区域填充（Show Fill 复选框，对齐 OPP displayFill） */
+  tsFill: boolean;
   /** Time Series：显示数据点（旧布尔，已由 dataSymbol 取代，保留兼容） */
   tsPoints: boolean;
   /** Time Series：显示折线（Show Lines 复选框，对齐 OPP displayLines） */
@@ -572,6 +616,7 @@ export const DEFAULT_CHART_SETTINGS: ChartSettings = {
   cdfLog: false,
   cdfFill: false,
   tsMean: true,
+  tsFill: false,
   tsPoints: true,
   tsLines: true,
   legendEnabled: false,
