@@ -20,7 +20,26 @@ export interface CheckResult {
   sub_groups?: SubGroup[];
 }
 
-export type DifferenceType = 'all' | 'new' | 'removed' | 'anomaly';
+export type DifferenceType =
+  | 'all'
+  | 'new'
+  | 'removed'
+  | 'anomaly'
+  | 'custodianNew'
+  | 'custodianRemoved'
+  | 'deptNew'
+  | 'deptRemoved';
+
+export interface DifferenceTotals {
+  all: number;
+  new: number;
+  removed: number;
+  anomaly: number;
+  custodianNew: number;
+  custodianRemoved: number;
+  deptNew: number;
+  deptRemoved: number;
+}
 
 export interface DifferenceRecord {
   id: string;
@@ -36,7 +55,7 @@ export interface DifferenceRecord {
 export interface DifferenceDetails {
   moduleKey: string;
   records: DifferenceRecord[];
-  totals: Record<DifferenceType, number>;
+  totals: DifferenceTotals;
   filteredTotal: number;
   offset: number;
   limit: number;
