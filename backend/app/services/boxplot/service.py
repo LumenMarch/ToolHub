@@ -192,6 +192,11 @@ def _detect_separator(head: bytes) -> str:
     return best
 
 
+# 布局特征识别的采样字符数（与 SAMPLE_BYTES 同量级，足以覆盖前若干行；
+# 避免对全量解码文本逐行 splitlines）
+LAYOUT_SAMPLE_CHARS = 64 * 1024
+
+
 # Keysight 测试系统导出 CSV 的规格行第一列前缀（表头后连续五行）
 _KEYSIGHT_LAYOUT_FIRST_FIELDS = (
     "Display Name",
@@ -218,8 +223,12 @@ def _detect_export_layout(text: str, separator: str) -> _CsvLayout | None:
 
     命中后跳过标题行与五行规格行；普通 CSV 不受影响。
     """
-    lines = [line for line in text.splitlines() if line.strip()][:10]
-    if len(lines) < 8:
+    lines = [line for line in text[:LAYOUT_SAMPLE_CHARS].splitlines() if line.strip()][
+        :10
+    ]
+    # 布局本身只需前 7 个非空行（标题 + 表头 + 5 行规格行），
+    # 零数据行的导出也按布局跳过，交由 _parse_csv 报"没有可解析的数据行"
+    if len(lines) < 7:
         return None
     if _first_field(lines[1], separator) != "Site":
         return None
