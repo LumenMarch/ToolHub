@@ -274,6 +274,8 @@ export function renderTimeSeriesSvg(analysis: ColumnAnalysis, settings: ChartSet
   const parts: string[] = [];
   parts.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" font-family="' + FONT_FAMILY + '">');
   parts.push('<rect width="' + W + '" height="' + H + '" fill="#ffffff" />');
+  // 填充多边形裁剪到绘图区（与组件一致，避免手动 Range 时填充覆盖统计区）
+  parts.push('<defs><clipPath id="ts-plot-clip"><rect x="' + PLOT_LEFT + '" y="' + PLOT_TOP + '" width="' + PLOT_W + '" height="' + PLOT_H + '" /></clipPath></defs>');
   if (s.showTitle) parts.push('<text x="' + (W / 2) + '" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="' + TEXT_COLOR + '">' + escapeXml(analysis.column.name + unitSuffix) + '</text>');
   yTicks.forEach((t) => {
     const y = mrange(t, yLo, yHi, PLOT_BOTTOM, PLOT_TOP);
@@ -296,7 +298,7 @@ export function renderTimeSeriesSvg(analysis: ColumnAnalysis, settings: ChartSet
     // Show Fill：折线与基线间的填充多边形（对齐组件）
     if (s.tsFill) {
       const fillPts = PLOT_LEFT + ',' + PLOT_BOTTOM + ' ' + ptsStr + ' ' + PLOT_RIGHT + ',' + PLOT_BOTTOM;
-      parts.push('<polygon points="' + fillPts + '" fill="#2563eb" opacity="0.15" />');
+      parts.push('<polygon points="' + fillPts + '" fill="#2563eb" opacity="0.15" clip-path="url(#ts-plot-clip)" />');
     }
     if (s.tsLines !== false && lineWidth > 0) parts.push('<polyline points="' + ptsStr + '" fill="none" stroke="#2563eb" stroke-width="' + lineWidth + '" />');
     const r = 2.6;
@@ -325,6 +327,8 @@ export function renderCorrelationSvg(pair: CorrelationPair, settings: ChartSetti
   const pts: Array<{ x: number; y: number }> = [];
   const n0 = Math.min(pair.rawX.length, pair.rawY.length);
   for (let i = 0; i < n0; i += 1) {
+    // 空白单元格按缺失处理：Number('') === 0 会伪造零值散点（与组件端过滤一致）
+    if (pair.rawX[i].trim() === '' || pair.rawY[i].trim() === '') continue;
     const x = Number(pair.rawX[i]);
     const y = Number(pair.rawY[i]);
     if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x, y });

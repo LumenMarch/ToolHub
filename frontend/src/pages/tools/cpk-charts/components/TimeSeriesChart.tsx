@@ -97,6 +97,12 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ analysis, settings, s
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="font-sans text-foreground" role="img" aria-label="Time Series 时序图" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        {/* 填充多边形裁剪到绘图区：手动 Range 排除样本时避免覆盖网格/统计区 */}
+        <clipPath id="ts-plot-clip">
+          <rect x={PLOT_LEFT} y={PLOT_TOP} width={PLOT_RIGHT - PLOT_LEFT} height={PLOT_BOTTOM - PLOT_TOP} />
+        </clipPath>
+      </defs>
       {settings.showTitle && analysis && (<text x={W / 2} y={15} textAnchor="middle" fontSize={11} fontWeight={700} fill="currentColor">{analysis.column.name}{unitSuffix}</text>)}
       {settings.showStats && analysis && (<StatsLabels stat={analysis.stat} />)}
       {yTicks.map((t) => { const y = Math.round(mapRange(t, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)); return (<g key={t}><line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={y} y2={y} stroke="currentColor" strokeOpacity={0.45} strokeWidth={1} /><text x={PLOT_LEFT - 12} y={y + 3.5} textAnchor="end" fontSize={9} fontWeight={500} fill="currentColor">{formatTick(t)}</text></g>); })}
@@ -105,8 +111,8 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ analysis, settings, s
       {settings.tsMean && analysis && analysis.values.length > 0 && !Number.isNaN(mean) && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(mean, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(mean, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} stroke="currentColor" strokeOpacity={0.55} strokeWidth={1} strokeDasharray="5 4" />)}
       {analysis && settings.showLimits && analysis.column.upper !== null && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(analysis.column.upper!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(analysis.column.upper!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} stroke={SPEC_COLOR} strokeWidth={2} />)}
       {analysis && settings.showLimits && analysis.column.lower !== null && (<line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={mapRange(analysis.column.lower!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} y2={mapRange(analysis.column.lower!, yTickLo, yTickHi, PLOT_BOTTOM, PLOT_TOP)} stroke={SPEC_COLOR} strokeWidth={2} />)}
-      {settings.tsFill && fillOf.sec && secondary && (<polygon points={fillOf.sec} fill={secondaryStroke || SPEC_COLOR} opacity={0.15} />)}
-      {settings.tsFill && fillOf.main && analysis && (<polygon points={fillOf.main} fill={stroke || '#2563eb'} opacity={0.15} />)}
+      {settings.tsFill && fillOf.sec && secondary && (<polygon points={fillOf.sec} fill={secondaryStroke || SPEC_COLOR} opacity={0.15} clipPath="url(#ts-plot-clip)" />)}
+      {settings.tsFill && fillOf.main && analysis && (<polygon points={fillOf.main} fill={stroke || '#2563eb'} opacity={0.15} clipPath="url(#ts-plot-clip)" />)}
       {settings.tsLines !== false && lineOf.sec && secondary && (<polyline points={lineOf.sec} fill="none" stroke={secondaryStroke || SPEC_COLOR} strokeWidth={Math.max(0.5, lineWidth * 1.75)} opacity={0.9} />)}
       {settings.tsLines !== false && lineOf.main && analysis && lineWidth > 0 && (<polyline points={lineOf.main} fill="none" stroke={stroke || '#2563eb'} strokeWidth={lineWidth} />)}
       {/* Data Ticks（None/O/+/x），对齐 OPP theTimeSeriesPlotSymbol */}

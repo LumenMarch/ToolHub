@@ -309,7 +309,11 @@ export function analyzeColumnPair(
       const span = dhi - dlo;
       const safeCount = typeof binCount === 'number' && Number.isFinite(binCount) && binCount > 0 ? binCount : 75;
       const binWidth = span / safeCount;
-      const visible = binValues.filter((v) => v >= dlo && v <= dhi);
+      // 对齐 OPP：样本按手动 Range（sharedDataDomain，不含并入的规格限）过滤，
+      // sharedDomain 仅用于柱坐标与规格限显示
+      const visible = binValues.filter(
+        (v) => v >= sharedDataDomain[0] && v <= sharedDataDomain[1],
+      );
       const counts = new Array<number>(safeCount).fill(0);
       for (const v of visible) {
         // 对齐 OPP：无 clamp，越界样本丢弃；常量数据整体 +1 bin
