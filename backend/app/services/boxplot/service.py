@@ -21,8 +21,10 @@ import polars as pl
 IQR_FACTOR = 1.5
 # 每组回传的离群点上限：仅用于渲染，超出部分只计入 outlier_count
 MAX_OUTLIERS_PER_GROUP = 500
-# 分组上限：防止基数过大的分组列把响应与渲染撑爆
-MAX_GROUPS = 60
+# 分组上限：防止基数过大的分组列把响应与渲染撑爆。
+# 测试系统导出按机台/工位分组常达数十至上百组（如 Keysight 导出按
+# Station ID 分组），故放宽；离群点另有 MAX_OUTLIERS_PER_GROUP 兜底。
+MAX_GROUPS = 200
 # 列类型推断的采样行数（columns 接口）
 SAMPLE_ROWS = 10_000
 # 数据预览返回的行数（columns 接口，供用户确认选列）
@@ -36,6 +38,14 @@ _ATLAS_META_PREFIXES = (
     "Lower Limited",
     "Measurement Units",
 )
+
+
+@dataclass(frozen=True)
+class _CsvLayout:
+    """CSV 布局偏移：跳过文件头行数与表头后的元数据行数。"""
+
+    skip_rows: int = 0
+    skip_rows_after_header: int = 0
 
 
 class BoxPlotValidationError(ValueError):
@@ -105,12 +115,8 @@ def _read_csv(path: Path) -> pl.DataFrame:
     separator = _detect_separator(head)
     if not _is_valid_utf8(head):
         return _read_csv_encoded(path, separator)
-    try:
-        return pl.read_csv(path, separator=separator)
-    except pl.exceptions.NoDataError as exc:
-        raise BoxPlotValidationError("CSV 文件没有可解析的数据行") from exc
-    except pl.exceptions.PolarsError as exc:
-        raise BoxPlotValidationError("无法解析 CSV 文件") from exc
+    layout = _detect_export_layout(head.decode("utf-8"), separator)
+    return _parse_csv(path, separator, layout)
 
 
 def _is_valid_utf8(data: bytes) -> bool:
@@ -132,16 +138,30 @@ def _read_csv_encoded(path: Path, separator: str) -> pl.DataFrame:
             "无法识别 CSV 编码（已尝试 UTF-8 与 GB18030）"
         ) from exc
 
+    layout = _detect_export_layout(text, separator)
     fd, tmp_name = tempfile.mkstemp(suffix=".csv")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(text)
-        try:
-            return pl.read_csv(tmp_name, separator=separator)
-        except pl.exceptions.PolarsError as exc:
-            raise BoxPlotValidationError("无法解析 CSV 文件") from exc
+        return _parse_csv(tmp_name, separator, layout)
     finally:
         os.unlink(tmp_name)
+
+
+def _parse_csv(path: Path, separator: str, layout: _CsvLayout | None) -> pl.DataFrame:
+    """按布局偏移读取 CSV；解析错误统一转译为校验错误。"""
+    layout = layout or _CsvLayout()
+    kwargs: dict[str, int] = {}
+    if layout.skip_rows:
+        kwargs["skip_rows"] = layout.skip_rows
+    if layout.skip_rows_after_header:
+        kwargs["skip_rows_after_header"] = layout.skip_rows_after_header
+    try:
+        return pl.read_csv(path, separator=separator, **kwargs)
+    except pl.exceptions.NoDataError as exc:
+        raise BoxPlotValidationError("CSV 文件没有可解析的数据行") from exc
+    except pl.exceptions.PolarsError as exc:
+        raise BoxPlotValidationError("无法解析 CSV 文件") from exc
 
 
 # 分隔符检测：采样字节数与候选分隔符
@@ -170,6 +190,60 @@ def _detect_separator(head: bytes) -> str:
         if score > best_score:
             best, best_score = candidate, score
     return best
+
+
+# 布局特征识别的采样字符数（与 SAMPLE_BYTES 同量级，足以覆盖前若干行；
+# 避免对全量解码文本逐行 splitlines）
+LAYOUT_SAMPLE_CHARS = 64 * 1024
+
+
+# Keysight 测试系统导出 CSV 的规格行第一列前缀（表头后连续五行）
+_KEYSIGHT_LAYOUT_FIRST_FIELDS = (
+    "Display Name",
+    "PDCA",
+    "Upper Limit",
+    "Lower Limit",
+    "Measurement Unit",
+)
+
+
+def _detect_export_layout(text: str, separator: str) -> _CsvLayout | None:
+    """识别 Keysight 导出布局：首行标题、次行表头、表头后五行规格行。
+
+    这类测试系统导出文件形如：
+
+        HILO1,3.2.8-3.2.8 - All,...,Parametric,...   ← 标题行
+        Site,Product,SerialNumber,...                 ← 真正的表头
+        Display Name ----->,...
+        PDCA Priority ----->,...
+        Upper Limit ----->,...
+        Lower Limit ----->,...
+        Measurement Unit ----->,...
+        数据行...
+
+    命中后跳过标题行与五行规格行；普通 CSV 不受影响。
+    """
+    lines = [line for line in text[:LAYOUT_SAMPLE_CHARS].splitlines() if line.strip()][
+        :10
+    ]
+    # 布局本身只需前 7 个非空行（标题 + 表头 + 5 行规格行），
+    # 零数据行的导出也按布局跳过，交由 _parse_csv 报"没有可解析的数据行"
+    if len(lines) < 7:
+        return None
+    if _first_field(lines[1], separator) != "Site":
+        return None
+    for line, prefix in zip(lines[2:7], _KEYSIGHT_LAYOUT_FIRST_FIELDS, strict=True):
+        if not _first_field(line, separator).startswith(prefix):
+            return None
+    return _CsvLayout(skip_rows=1, skip_rows_after_header=5)
+
+
+def _first_field(line: str, separator: str) -> str:
+    """取 CSV 行第一列文本（去引号），用于布局特征识别。"""
+    field = line.split(separator, 1)[0].strip()
+    if len(field) >= 2 and field[0] == '"' and field[-1] == '"':
+        field = field[1:-1]
+    return field
 
 
 def exclude_atlas_meta_rows(df: pl.DataFrame) -> tuple[pl.DataFrame, int]:
