@@ -466,6 +466,21 @@ def _pick_sfc_columns(df: pl.DataFrame) -> tuple[str, str, str]:
     return name_col, asset_col, device_col
 
 
+def _sfc_select_cols(
+    name_col: str,
+    asset_col: str | None,
+    device_col: str | None,
+) -> list[str]:
+    """构造 SFC 导出列列表：仅加入实际存在的列，避免 select(None) 产生 null 占位列。"""
+    cols = [name_col]
+    if asset_col:
+        cols.append(asset_col)
+    cols.append("保管人")
+    if device_col and device_col not in cols:
+        cols.append(device_col)
+    return cols
+
+
 def task_ff(req: ComparisonRequest, input_catalog: InputCatalog | None = None):
     ff = Finance_Finance()
     ff.input_catalog = input_catalog
@@ -2108,10 +2123,9 @@ def _build_complete_export(
                         df, list(sfc.new_assets), asset_col, device_col
                     )
                     if not new_df.is_empty():
-                        select_cols = [name_col, asset_col, "保管人"]
-                        if device_col and device_col not in select_cols:
-                            select_cols.append(device_col)
-                        ss_dict["本月新增"] = new_df.select(select_cols).unique()
+                        ss_dict["本月新增"] = new_df.select(
+                            _sfc_select_cols(name_col, asset_col, device_col)
+                        ).unique()
             if getattr(sfc, "removed_assets", []):
                 df = sfc.last_SFC_data
                 if hasattr(df, "collect"):
@@ -2122,10 +2136,9 @@ def _build_complete_export(
                         df, list(sfc.removed_assets), asset_col, device_col
                     )
                     if not removed_df.is_empty():
-                        select_cols = [name_col, asset_col, "保管人"]
-                        if device_col and device_col not in select_cols:
-                            select_cols.append(device_col)
-                        ss_dict["本月减少"] = removed_df.select(select_cols).unique()
+                        ss_dict["本月减少"] = removed_df.select(
+                            _sfc_select_cols(name_col, asset_col, device_col)
+                        ).unique()
             if ss_dict:
                 comparisons.append(
                     ("3-SFC VS SFC", ss_dict, req.remarks.get("sfc", ""))
@@ -2199,18 +2212,29 @@ def _build_complete_export(
                 if hasattr(df, "collect"):
                     df = df.collect()
                 if df is not None and not df.is_empty():
+                    # 使用检测到的实际列名（繁/简体）构造导出列，避免 select 不存在的列
                     notes_asset_col = next(
                         (c for c in ["资产编号", "資產編號"] if c in df.columns), None
                     )
                     notes_device_col = next(
                         (c for c in ["设备编号", "設備編號"] if c in df.columns), None
                     )
+                    notes_name_col = next(
+                        (c for c in ["資產名稱", "资产名称"] if c in df.columns),
+                        df.columns[0],
+                    )
                     notes_new = _filter_by_prefixed_keys(
                         df, list(ns.Notes_new_assets), notes_asset_col, notes_device_col
                     )
                     if not notes_new.is_empty():
+                        notes_cols = [notes_name_col]
+                        if notes_asset_col:
+                            notes_cols.append(notes_asset_col)
+                        notes_cols.append("保管人")
+                        if notes_device_col and notes_device_col not in notes_cols:
+                            notes_cols.append(notes_device_col)
                         ns_dict["Notes有且SFC无"] = notes_new.select(
-                            ["資產名稱", "資產編號", "保管人"]
+                            notes_cols
                         ).unique()
             if getattr(ns, "Notes_removed_assets", []):
                 df = ns.this_SFC_data
@@ -2222,11 +2246,8 @@ def _build_complete_export(
                         df, list(ns.Notes_removed_assets), asset_col, device_col
                     )
                     if not sfc_only.is_empty():
-                        select_cols = [name_col, asset_col, "保管人"]
-                        if device_col and device_col not in select_cols:
-                            select_cols.append(device_col)
                         ns_dict["SFC有且Notes无"] = sfc_only.select(
-                            select_cols
+                            _sfc_select_cols(name_col, asset_col, device_col)
                         ).unique()
             if ns_dict:
                 comparisons.append(
