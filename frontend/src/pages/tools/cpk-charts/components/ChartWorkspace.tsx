@@ -102,17 +102,18 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
   const activeCol = activeA?.analysis ?? activeB?.analysis ?? null;
 
   const isCorr = view === 'correlation';
-  const isCompare = compareMode && datasetA && datasetB;
+  // 两个数据源都存在（无论是否处于对比视图）：导出当前即导出 A/B 两张
+  const hasBothDatasets = Boolean(datasetA && datasetB);
 
   /** 当前视图是否可导出（有配对 / 有激活测试项数据）。 */
   const canExportCurrent = isCorr ? Boolean(pairA ?? pairB) : Boolean(activeCol);
 
-  /** 导出当前可见图：单图存一张，对比模式 A/B 各一张。 */
+  /** 导出当前可见图：单图存一张，双数据源存 A/B 两张。 */
   const handleExportCurrent = async (): Promise<void> => {
     try {
       if (isCorr) {
-        // 对比模式导出 A/B 两张；否则导出唯一可见的散点图
-        const targets: Array<{ pair: CorrelationPair | null; prefix: string }> = isCompare
+        // 双数据源导出 A/B 两张；否则导出唯一可见的散点图
+        const targets: Array<{ pair: CorrelationPair | null; prefix: string }> = hasBothDatasets
           ? [
               { pair: pairA, prefix: 'A_' },
               { pair: pairB, prefix: 'B_' },
@@ -130,7 +131,7 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
         const svg = view === 'cdf' ? renderCdfSvg(analysis, settings) : view === 'timeseries' ? renderTimeSeriesSvg(analysis, settings) : renderHistogramSvg(analysis, settings);
         return svgToPng(svg).then((png) => downloadBlob(png, `${sanitizeFilename(analysis.column.name)}.png`));
       };
-      if (isCompare) {
+      if (hasBothDatasets) {
         const a = activeA?.analysis ?? null;
         const b = activeB?.analysis ?? null;
         // 显式展开避免循环内 await；文件名加 A_/B_ 前缀区分来源

@@ -53,8 +53,9 @@ const Export: React.FC = () => {
     if (!activeA && !activeB) return;
     setExporting({ kind: 'single' });
     try {
-      if (activeA) await exportChartPng(activeA.analysis, activeA.index + 1, settings);
-      if (compareMode && activeB) await exportChartPng(activeB.analysis, activeB.index + 1, settings);
+      // 两个文件都存在时导出当前 Item 的两张图，用 A_/B_ 前缀区分来源
+      if (activeA) await exportChartPng(activeA.analysis, settings, 'A');
+      if (datasetB && activeB) await exportChartPng(activeB.analysis, settings, 'B');
     } catch (err) {
       setError(err instanceof Error ? err.message : '图片导出失败');
     } finally {
@@ -75,12 +76,16 @@ const Export: React.FC = () => {
     }
   };
 
-  const handleExportChecked = async () => {
+  const hasBothDatasets = Boolean(datasetA && datasetB);
+
+  /** 批量导出勾选测试项的图片 ZIP：A / B / 双源合并。 */
+  const handleExportImages = async (scope: 'A' | 'B' | 'all') => {
     if (exportChecked.size === 0) return;
     const names = Array.from(exportChecked);
     const sources: Array<{ dataset: ParsedDataset; prefix: string }> = [];
-    if (datasetA) sources.push({ dataset: datasetA, prefix: 'A' });
-    if (compareMode && datasetB) sources.push({ dataset: datasetB, prefix: 'B' });
+    if (datasetA && scope !== 'B') sources.push({ dataset: datasetA, prefix: 'A' });
+    if (datasetB && scope !== 'A') sources.push({ dataset: datasetB, prefix: 'B' });
+    if (sources.length === 0) return;
     setExporting({ kind: 'all', done: 0, total: names.length });
     try {
       // 同名 Item 在双数据源下会产出多个文件：total 以导出器实际值为准，避免 2/1 之类的显示
@@ -92,23 +97,50 @@ const Export: React.FC = () => {
     }
   };
 
-  const handleExportItemCheck = async () => {
+  /** 批量导出报告：A / B 单列报告或 A+B 合并报告。 */
+  const handleExportReport = async (scope: 'A' | 'B' | 'merged') => {
     if (exportChecked.size === 0) return;
     const names = merged.flatMap((m) => (exportChecked.has(m.name) ? [m.name] : []));
     if (names.length === 0) return;
     setExporting({ kind: 'itemCheck', done: 0, total: names.length });
     try {
-      const { imagesA, imagesB } = await buildItemCheckImages(datasetA, datasetB, names, settings, (done) => setExporting({ kind: 'itemCheck', done, total: names.length }), chartType === 'cdf' || chartType === 'timeseries' ? chartType : 'histogram');
+      const view = chartType === 'cdf' || chartType === 'timeseries' ? chartType : 'histogram';
+      const onProgress = (done: number) => setExporting({ kind: 'itemCheck', done, total: names.length });
+      if (scope === 'B') {
+        const { imagesB } = await buildItemCheckImages(null, datasetB, names, settings, onProgress, view);
+        await exportItemCheckReport({
+          items: names,
+          fileNameA: fileNameB || datasetB?.title || '数据 B',
+          imagesA: imagesB,
+        });
+        return;
+      }
+      const { imagesA, imagesB } = await buildItemCheckImages(
+        datasetA,
+        scope === 'A' ? null : datasetB,
+        names,
+        settings,
+        onProgress,
+        view,
+      );
+      if (scope === 'A') {
+        await exportItemCheckReport({
+          items: names,
+          fileNameA: fileNameA || datasetA?.title || '数据 A',
+          imagesA,
+        });
+        return;
+      }
       await exportItemCheckReport({
         items: names,
         fileNameA: fileNameA || datasetA?.title || '数据 A',
-        fileNameB: compareMode ? fileNameB || datasetB?.title || '数据 B' : undefined,
+        fileNameB: fileNameB || datasetB?.title || '数据 B',
         imagesA,
-        imagesB: compareMode ? imagesB : undefined,
+        imagesB,
       });
     } catch (err) {
       const detail = (err as unknown as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(detail || (err instanceof Error ? err.message : 'Item Check 报告导出失败'));
+      setError(detail || (err instanceof Error ? err.message : '报告导出失败'));
     } finally {
       setExporting(null);
     }
@@ -193,19 +225,48 @@ const Export: React.FC = () => {
             {!exporting && <span className="hidden sm:inline">勾选 {exportChecked.size} 项 · 表头取文件名</span>}
           </div>
           <div className="flex items-center justify-end gap-3">
-            <button type="button" onClick={handleExportChecked} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-4 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
-              {exporting?.kind === 'all' ? 'ZIP 打包中…' : `导出 ZIP (${exportChecked.size})`}
-            </button>
-            <button
-              type="button"
-              onClick={handleExportItemCheck}
-              disabled={exporting !== null || exportChecked.size === 0}
-              title="按 Item_Check_For_Aquila1 格式生成 .numbers：A列Item，B/C列为数据A/B图表，表头为文件名"
-              className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.14em] text-primary-foreground hover:opacity-90 disabled:opacity-40"
-            >
-              <Images className="size-4" />
-              {exporting?.kind === 'itemCheck' ? '报告生成中…' : '导出报告 (.numbers)'}
-            </button>
+            {hasBothDatasets ? (
+              <>
+                <button type="button" onClick={() => void handleExportImages('A')} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-3 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
+                  {exporting?.kind === 'all' ? '打包中…' : '导出 A_图片'}
+                </button>
+                <button type="button" onClick={() => void handleExportImages('B')} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-3 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
+                  {exporting?.kind === 'all' ? '打包中…' : '导出 B_图片'}
+                </button>
+                <button type="button" onClick={() => void handleExportReport('A')} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-3 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
+                  {exporting?.kind === 'itemCheck' ? '生成中…' : '导出 A_报告'}
+                </button>
+                <button type="button" onClick={() => void handleExportReport('B')} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-3 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
+                  {exporting?.kind === 'itemCheck' ? '生成中…' : '导出 B_报告'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleExportReport('merged')}
+                  disabled={exporting !== null || exportChecked.size === 0}
+                  title="按 Item_Check_For_Aquila1 格式生成 .numbers：A列Item，B/C列为数据A/B图表，表头为文件名"
+                  className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.14em] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                >
+                  <Images className="size-4" />
+                  {exporting?.kind === 'itemCheck' ? '报告生成中…' : '导出合并报告'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => void handleExportImages('all')} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-4 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
+                  {exporting?.kind === 'all' ? 'ZIP 打包中…' : `导出图片 (${exportChecked.size})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleExportReport('merged')}
+                  disabled={exporting !== null || exportChecked.size === 0}
+                  title="按 Item_Check_For_Aquila1 格式生成 .numbers：A列Item，B列为图表，表头为文件名"
+                  className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.14em] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                >
+                  <Images className="size-4" />
+                  {exporting?.kind === 'itemCheck' ? '报告生成中…' : '导出报告 (.numbers)'}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
