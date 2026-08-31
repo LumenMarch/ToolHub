@@ -2,14 +2,16 @@
 轮询/公开/辅助端点不产生审计噪音。"""
 
 import json
+from datetime import datetime
 
+from dateutil.relativedelta import relativedelta
 from sqlalchemy import select
 
 from app.api.endpoints.asset_comparison import asset_comparison_job_manager
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.services.attendance import attendance_result_cache
-from tests.conftest import auth_header
+from tests.conftest import auth_header, tus_upload
 
 QR_URL = "/api/v1/tools/qrcode"
 ASSET_URL = "/api/v1/tools/asset"
@@ -62,26 +64,41 @@ def test_asset_compare_writes_audit_and_poll_is_silent(
     monkeypatch.setattr(asset_comparison_job_manager, "_executor", _NoopExecutor())
 
     client, token = admin_client
-    inputs = {}
-    for key in (
-        "thisFinance",
-        "lastFinance",
-        "thisSFC",
-        "lastSFC",
-        "thisNotes",
-        "lastNotes",
-        "thisCustomer",
-        "lastCustomer",
-        "departmentData",
-        "custodianData",
-        "driData",
-    ):
-        p = tmp_path / f"{key}.xlsx"
-        p.write_bytes(b"fake")
-        inputs[key] = str(p)
-    inputs["clientRequestId"] = "test-client-req-0001"
+    # 上传 11 个输入文件（文件名匹配扫描关键词与年月规则）后扫描，
+    # jobs 只接受 scan_id，不再接受路径。
+    now = datetime.now()
+    this_month = now.strftime("%Y%m")
+    last_month = (now - relativedelta(months=1)).strftime("%Y%m")
+    input_filenames = {
+        "thisFinance": f"财务资产{this_month}.xlsx",
+        "lastFinance": f"财务资产{last_month}.xlsx",
+        "thisSFC": f"SFC资产{this_month}.xlsx",
+        "lastSFC": f"SFC资产{last_month}.xlsx",
+        "thisNotes": f"Notes资产{this_month}.xlsx",
+        "lastNotes": f"Notes资产{last_month}.xlsx",
+        "thisCustomer": f"客户资产{this_month}.xlsx",
+        "lastCustomer": f"客户资产{last_month}.xlsx",
+        "custodianData": "财务保管人.xlsx",
+        "departmentData": "财务保管部门.xlsx",
+        "driData": "客户系统DRI.xlsx",
+    }
+    upload_ids = [
+        tus_upload(client, token, filename, b"fake")
+        for filename in input_filenames.values()
+    ]
+    scan_resp = client.post(
+        f"{ASSET_URL}/scan",
+        json={"upload_ids": upload_ids},
+        headers=auth_header(token),
+    )
+    assert scan_resp.status_code == 200, scan_resp.text
+    scan_id = scan_resp.json()["scan_id"]
 
-    resp = client.post(f"{ASSET_URL}/jobs", json=inputs, headers=auth_header(token))
+    resp = client.post(
+        f"{ASSET_URL}/jobs",
+        json={"scanId": scan_id, "clientRequestId": "test-client-req-0001"},
+        headers=auth_header(token),
+    )
     assert resp.status_code == 202, resp.text
     job_id = resp.json()["jobId"]
 
@@ -91,7 +108,7 @@ def test_asset_compare_writes_audit_and_poll_is_silent(
     assert logs[0].target_id == "asset-comparison"
     detail = json.loads(logs[0].detail)
     assert detail["job_id"] == job_id
-    assert detail["input_count"] == 11
+    assert detail["scan_id"] == scan_id
 
     # 轮询端点不产生新审计
     poll = client.get(f"{ASSET_URL}/jobs/{job_id}", headers=auth_header(token))

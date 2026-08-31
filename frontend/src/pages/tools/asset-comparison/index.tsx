@@ -38,10 +38,9 @@ import { useAssetComparisonJob } from './useAssetComparisonJob';
 const UnboxedFileInput: React.FC<{
   label: string;
   value: string;
-  onChange: (val: string) => void;
   displayValue?: string;
   disabled?: boolean;
-}> = ({ label, value, onChange, displayValue, disabled = false }) => {
+}> = ({ label, value, displayValue, disabled = false }) => {
   const shown = displayValue ?? (value.includes('/') ? value.split('/').pop()! : value.includes('\\') ? value.split('\\').pop()! : value);
 
   return (
@@ -53,7 +52,7 @@ const UnboxedFileInput: React.FC<{
         <input
           type="text"
           value={shown}
-          onChange={(e) => onChange(e.target.value)}
+          readOnly
           disabled={disabled}
           className="min-w-0 flex-1 truncate border-none bg-transparent p-0 text-base font-medium tracking-wide text-foreground outline-none placeholder:text-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-60 md:text-sm"
           placeholder="尚未匹配"
@@ -301,8 +300,8 @@ const AssetComparison: React.FC = () => {
 
   const [paths, setPaths] = useState<AssetComparisonInputs>(EMPTY_INPUTS);
 
-  const [folderPath, setFolderPath] = useState('');
   const selectedFilesRef = useRef<File[]>([]);
+  const [scanId, setScanId] = useState('');
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
   const [reviews, setReviews] = useState<Record<string, string>>({});
@@ -344,11 +343,6 @@ const AssetComparison: React.FC = () => {
   >(createEmptyModuleProgress);
 
   const { upload } = useTusUpload();
-
-  const handlePathChange = (key: keyof typeof paths, value: string) => {
-    if (isInputLocked) return;
-    setPaths(prev => ({ ...prev, [key]: value }));
-  };
 
   const handleRemarkChange = (key: string, value: string) => {
     setRemarks(prev => ({ ...prev, [key]: value }));
@@ -404,9 +398,12 @@ const AssetComparison: React.FC = () => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     selectedFilesRef.current = Array.from(files);
+    // 新文件夹使旧扫描会话失效：清空 scanId 与匹配结果，
+    // 避免 handleCheck 复用上一文件夹的扫描数据。
+    setScanId('');
+    setPaths(EMPTY_INPUTS);
     const firstPath = files[0].webkitRelativePath;
     const folderName = firstPath.split('/')[0];
-    setFolderPath(folderName);
 
     const counts: Record<string, number> = {};
     for (const f of Array.from(files)) {
@@ -538,6 +535,7 @@ const AssetComparison: React.FC = () => {
           const filledCount = Object.values(data).filter((v) => v !== '').length;
           const totalCount = Object.keys(data).length;
           setPaths(data);
+          setScanId(scanRes.data.scan_id as string);
           if (filledCount > 0) {
             setStatusMsg(
               <span>
@@ -576,49 +574,16 @@ const AssetComparison: React.FC = () => {
       }
       return;
     }
-
-    if (!folderPath.trim()) {
-      setStatusMsg(<span><Badge variant="warn">提示</Badge> 请先选择文件夹或输入服务器上的文件夹路径</span>);
-      scanInFlightRef.current = false;
-      return;
-    }
-    setIsScanning(true);
-    setStatusMsg(<span>正在解析文件夹: {folderPath} ...</span>);
-    try {
-      const res = await api.get('/tools/asset/auto-paths', {
-        params: { folder: folderPath.trim() }
-      });
-      if (res.data.status === 'success') {
-        const data = res.data.data;
-        const filledCount = Object.values(data).filter((v) => v !== '').length;
-        const totalCount = Object.keys(data).length;
-        setPaths(data);
-        if (filledCount > 0) {
-          setStatusMsg(
-            <span>
-              <Badge variant="ok">完成</Badge> 已匹配 {filledCount}/{totalCount} 个数据表，请确认后点击「开始核对」。
-            </span>
-          );
-        } else {
-          setStatusMsg(
-            <span>
-              <Badge variant="warn">警告</Badge> 未匹配到任何数据表，请确认文件名包含正确关键词和年月。
-            </span>
-          );
-        }
-      } else {
-        setStatusMsg(<span><Badge variant="err">失败</Badge> {res.data.message}</span>);
-      }
-    } catch (err: unknown) {
-      setStatusMsg(<span><Badge variant="err">错误</Badge> 请求: {getErrorMessage(err)}</span>);
-    } finally {
-      setIsScanning(false);
-      scanInFlightRef.current = false;
-    }
   };
 
   const handleCheck = async () => {
     if (isStarting || isJobActive || isResettingPage) return;
+    if (!scanId) {
+      setStatusMsg(
+        <span><Badge variant="warn">提示</Badge> 请先选择文件夹并扫描解析</span>,
+      );
+      return;
+    }
     const hasMissingPath = Object.values(paths).some(value => !value.trim());
     if (hasMissingPath) {
       setStatusMsg(
@@ -631,7 +596,7 @@ const AssetComparison: React.FC = () => {
     setRemarks({});
     setReviews({});
     try {
-      await start(paths);
+      await start(scanId);
       setStatusMsg('');
       setIsSourcesOpen(false);
     } catch (err: unknown) {
@@ -725,7 +690,6 @@ const AssetComparison: React.FC = () => {
   );
   const hasResettableState = Boolean(
     job
-    || folderPath.trim()
     || Object.values(paths).some(value => value.trim())
     || statusMsg
     || Object.keys(remarks).length
@@ -744,7 +708,6 @@ const AssetComparison: React.FC = () => {
     try {
       await reset();
       setPaths(EMPTY_INPUTS);
-      setFolderPath('');
       selectedFilesRef.current = [];
       if (folderInputRef.current) {
         folderInputRef.current.value = '';
@@ -756,6 +719,7 @@ const AssetComparison: React.FC = () => {
       setIsSourcesOpen(true);
       setActiveResultKey('');
       restoredJobRef.current = '';
+      setScanId('');
     } catch (err: unknown) {
       setStatusMsg(
         <span>
@@ -1062,19 +1026,12 @@ const AssetComparison: React.FC = () => {
         {isSourcesOpen && (
           <div className="border-t border-border py-5">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-              <label className="flex min-h-11 min-w-0 items-center border border-border bg-background focus-within:border-primary">
-                <span className="flex size-11 shrink-0 items-center justify-center border-r border-border text-primary">
-                  <FolderOpen weight="bold" className="size-5" />
+              <div className="flex min-h-11 items-center border border-border bg-background px-3 font-mono text-sm text-muted-foreground">
+                <span className="flex size-5 shrink-0 items-center justify-center text-primary">
+                  <FolderOpen weight="bold" />
                 </span>
-                <input
-                  type="text"
-                  value={folderPath}
-                  onChange={(event) => setFolderPath(event.target.value)}
-                  disabled={isInputLocked}
-                  placeholder="输入服务器文件夹路径，或从本机选择文件夹"
-                  className="min-w-0 flex-1 bg-transparent px-3 font-mono text-base text-foreground outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed disabled:opacity-60 md:text-sm"
-                />
-              </label>
+                <span className="ml-2 truncate">从本机选择文件夹后点击「扫描解析」上传并匹配数据表</span>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -1088,7 +1045,7 @@ const AssetComparison: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleScanFolder}
-                  disabled={isScanning || isStarting || isInputLocked || (!folderPath.trim() && selectedFilesRef.current.length === 0)}
+                  disabled={isScanning || isStarting || isInputLocked || selectedFilesRef.current.length === 0}
                   className="flex min-h-11 items-center justify-center gap-2 border border-primary bg-primary/10 px-4 font-bold text-primary outline-none transition-colors hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isScanning && <CircleNotch weight="bold" className="size-4 animate-spin" />}
@@ -1106,7 +1063,6 @@ const AssetComparison: React.FC = () => {
                       key={field.key}
                       label={field.label}
                       value={paths[field.key]}
-                      onChange={(value) => handlePathChange(field.key, value)}
                       disabled={isInputLocked}
                     />
                   ))}
@@ -1126,7 +1082,6 @@ const AssetComparison: React.FC = () => {
                     key={field.key}
                     label={field.label}
                     value={paths[field.key]}
-                    onChange={(value) => handlePathChange(field.key, value)}
                     disabled={isInputLocked}
                   />
                 ))}

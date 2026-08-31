@@ -41,6 +41,22 @@ def test_register_duplicate_username(client):
     assert resp.status_code == 400
 
 
+def test_register_rejects_oversized_utf8_password(client):
+    """密码按 bcrypt 的 UTF-8 字节上限（72 字节）校验，而非字符数。"""
+    # 25 个中文字符 = 75 字节，超限拒绝
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={"username": "cn-user", "password": "中" * 25},
+    )
+    assert resp.status_code == 422, resp.text
+    # 24 个中文字符 = 72 字节，恰好通过
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={"username": "cn-user", "password": "中" * 24},
+    )
+    assert resp.status_code == 200, resp.text
+
+
 def test_pending_user_can_login_and_read_me(client):
     register(client, "alice")
     resp = login(client, "alice")

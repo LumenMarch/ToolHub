@@ -1,6 +1,28 @@
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
+
+# bcrypt 输入上限 72 字节；最小长度防弱口令（与前端表单校验一致）
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_LENGTH = 72
+
+
+def _validate_password_utf8_bytes(value: str) -> str:
+    """bcrypt 按 UTF-8 字节截断到 72 字节；超限拒绝而非静默截断成弱哈希。"""
+    if len(value.encode("utf-8")) > PASSWORD_MAX_LENGTH:
+        raise ValueError(
+            f"密码 UTF-8 编码后不得超过 {PASSWORD_MAX_LENGTH} 字节（bcrypt 上限）"
+        )
+    return value
+
+
+# min 按字符数（用户感知长度），max 同时受字符数与 UTF-8 字节数约束
+PasswordField = Annotated[
+    str,
+    Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH),
+    AfterValidator(_validate_password_utf8_bytes),
+]
 
 
 class UserBase(BaseModel):
@@ -8,13 +30,13 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str
+    password: PasswordField
 
 
 class UserCreateByAdmin(UserBase):
     """管理员创建用户的请求体。"""
 
-    password: str
+    password: PasswordField
     role_ids: list[int] = []
     # 创建时一并设置的用户直接工具权限 ID（覆盖式，仅 tool:*:use）；
     # None = 不设置直接权限
@@ -26,7 +48,7 @@ class UserUpdate(BaseModel):
 
     role_ids: list[int] | None = None
     is_active: bool | None = None
-    password: str | None = None
+    password: PasswordField | None = None
     # 用户直接持有的工具权限 ID（覆盖式）；None = 不修改，
     # [] = 清空全部直接工具权限。仅接受 tool:*:use 权限。
     tool_permission_ids: list[int] | None = None

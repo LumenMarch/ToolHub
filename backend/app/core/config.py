@@ -1,10 +1,63 @@
 import json
+import os
+import secrets
 import tempfile
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import AliasChoices, Field, field_validator
+import portalocker
+from loguru import logger
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
+
+# 自动生成的密钥持久化位置（仓库根 .env，已纳入 .gitignore）
+_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+
+
+def _parse_secret_key(content: str) -> str | None:
+    """从 .env 文本中解析第一个非空 SECRET_KEY 值。"""
+    for raw in content.splitlines():
+        line = raw.strip()
+        if line.startswith("SECRET_KEY="):
+            value = line.split("=", 1)[1].strip().strip('"').strip("'")
+            if value:
+                return value
+    return None
+
+
+def _load_or_create_secret_key() -> str:
+    """优先复用 .env 中已有的 SECRET_KEY；缺失时生成 256 位随机密钥并落盘。
+
+    用跨进程文件锁（portalocker）覆盖 读 → 生成 → 写 → 重读 全流程：
+    并发启动的多个进程只会持久化并返回同一把密钥（只认已落盘的值），
+    避免负载均衡下各进程使用不同签名密钥导致会话随机失效。
+    写入失败不阻断启动（本次进程使用内存密钥），仅记录告警。
+    """
+    _ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with portalocker.Lock(_ENV_FILE, "a+", encoding="utf-8") as fh:
+            fh.seek(0)
+            existing = _parse_secret_key(fh.read())
+            if existing:
+                return existing
+            key = secrets.token_hex(32)
+            fh.write(f"SECRET_KEY={key}\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+            # 重读确认：返回已持久化的值，而非内存候选值
+            fh.seek(0)
+            persisted = _parse_secret_key(fh.read())
+            if persisted:
+                return persisted
+            return key
+    except OSError:
+        logger.warning("SECRET_KEY 写入 {} 失败，本次进程使用内存密钥", _ENV_FILE)
+        return secrets.token_hex(32)
+    finally:
+        try:
+            os.chmod(_ENV_FILE, 0o600)
+        except OSError:
+            pass
 
 
 class Settings(BaseSettings):
@@ -12,11 +65,25 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # SECURITY WARNING: keep the secret key used in production secret!
-    SECRET_KEY: str = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+    # 为空（未配置环境变量且仓库根 .env 无值）时由 _load_or_create_secret_key
+    # 自动生成 256 位随机密钥并持久化到仓库根 .env。
+    SECRET_KEY: str = ""
+
+    @model_validator(mode="after")
+    def _ensure_secret_key(self) -> "Settings":
+        if not self.SECRET_KEY:
+            self.SECRET_KEY = _load_or_create_secret_key()
+        return self
+
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    # 8 小时有效期；需要长会话时由前端定期续期，而不是放长 token 生命周期。
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8
     AUTH_COOKIE_NAME: str = "toolhub_session"
-    AUTH_COOKIE_SECURE: bool = False
+    # 生产强制 Secure cookie；本地 HTTP 开发用 AUTH_COOKIE_SECURE=false 覆盖。
+    AUTH_COOKIE_SECURE: bool = True
+    # 仅当部署在可信反向代理之后时开启：开启后审计与限流信任
+    # X-Forwarded-For 头；直连部署时该头可被客户端伪造。
+    TRUST_PROXY_HEADERS: bool = False
 
     # 可选 Redis：设置后 realtime hub 用 Pub/Sub 跨实例 fan-out；
     # 未设置或连接失败时自动回落进程内 hub（单实例仍可用）
@@ -111,6 +178,7 @@ class Settings(BaseSettings):
 
     class Config:
         case_sensitive = True
+        env_file = str(_ENV_FILE)
 
 
 settings = Settings()

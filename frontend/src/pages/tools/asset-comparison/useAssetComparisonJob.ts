@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../../../api/axios';
 import { realtimeClient } from '../../../lib/realtime';
-import type { AssetComparisonInputs, AssetComparisonJob } from './types';
+import type { AssetComparisonJob } from './types';
 
 const STORAGE_KEY = 'asset-comparison-active-job';
 const POLLING_STATUSES = new Set([
@@ -216,7 +216,7 @@ export function useAssetComparisonJob() {
     return () => window.clearTimeout(timer);
   }, [job, refresh, wsConnected]);
 
-  const start = useCallback(async (inputs: AssetComparisonInputs) => {
+  const start = useCallback(async (scanId: string) => {
     const controller = createRequestController();
     setError('');
     setExpiredJobId('');
@@ -225,7 +225,7 @@ export function useAssetComparisonJob() {
       const response = await api.post<AssetComparisonJob>(
         '/tools/asset/jobs',
         {
-          ...inputs,
+          scanId,
           clientRequestId: createClientRequestId(),
         },
         { signal: controller.signal },
