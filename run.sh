@@ -9,6 +9,9 @@ trap cleanup SIGINT SIGTERM EXIT
 
 echo "Starting backend..."
 cd backend
+# 本机 HTTP 开发需关闭 Secure cookie（生产部署应保持默认 True）。
+# SECRET_KEY 未配置时由 config 自动生成并持久化到 backend/.env。
+export AUTH_COOKIE_SECURE="${AUTH_COOKIE_SECURE:-false}"
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 

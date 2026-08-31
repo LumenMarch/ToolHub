@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -40,9 +41,30 @@ from app.services.asset_comparison.domain import (
 )
 from app.services.realtime.events import job_terminal_event, job_updated_event
 from app.services.realtime.hub import realtime_hub
-from app.services.task_artifacts import TaskArtifactStore, task_artifact_store
+from app.services.task_artifacts import (
+    TaskArtifactNotFoundError,
+    TaskArtifactStore,
+    task_artifact_store,
+)
 
 TASK_TOOL = "asset-comparison"
+# /scan 创建的受管扫描任务目录前缀（tool 维度，用于隔离与归属校验）
+SCAN_TOOL = "asset-comparison-scan"
+# 核对任务必需的输入键集合（与 ComparisonRequest 的 11 个数据表字段一致；
+# scan 结果必须完整覆盖，缺键任务会在运行期失败，故创建时直接拒绝）。
+COMPARISON_INPUT_KEYS = (
+    "thisFinance",
+    "lastFinance",
+    "thisSFC",
+    "lastSFC",
+    "thisNotes",
+    "lastNotes",
+    "thisCustomer",
+    "lastCustomer",
+    "departmentData",
+    "custodianData",
+    "driData",
+)
 BASE_ARTIFACT_KEYS = [*(f"module_{key}" for key in MODULE_ORDER), "raw_data_xlsx"]
 REVIEW_VALUES = {"差異確認OK", "待跟进", "異常"}
 RETAINED_JOB_STATUSES = [
@@ -201,7 +223,7 @@ class AssetComparisonJobManager:
         *,
         user_id: int,
         client_request_id: str,
-        inputs: dict[str, str],
+        scan_id: str,
     ) -> tuple[dict, bool]:
         create_started_at = perf_counter()
         self.cleanup()
@@ -219,19 +241,53 @@ class AssetComparisonJobManager:
             now = _utcnow()
             job_id = str(uuid.uuid4())
             expires_at = now + timedelta(hours=settings.ASSET_COMPARISON_JOB_TTL_HOURS)
-            source_paths = {
-                key: Path(value).resolve()
-                for key, value in inputs.items()
-                if str(value).strip()
-            }
+            # 输入文件只从受管 scan 任务目录解析：文件名来自 scan 时持久化的
+            # manifest（白名单），请求体不再携带任何路径。
+            try:
+                scan_manifest = self._artifact_store.read_task_manifest(
+                    user_id=user_id,
+                    tool=SCAN_TOOL,
+                    task_id=scan_id,
+                )
+            except TaskArtifactNotFoundError:
+                raise AssetComparisonJobValidationError(
+                    "扫描会话不存在或已过期，请重新上传并扫描"
+                ) from None
+            if scan_manifest.get("expires_at", 0) < time.time():
+                raise AssetComparisonJobValidationError(
+                    "扫描会话已过期，请重新上传并扫描"
+                )
+            inputs_map = scan_manifest.get("metadata", {}).get("inputs") or {}
+            if not inputs_map:
+                raise AssetComparisonJobValidationError("扫描结果为空，请重新扫描")
+            missing_keys = [
+                key for key in COMPARISON_INPUT_KEYS if key not in inputs_map
+            ]
+            if missing_keys:
+                raise AssetComparisonJobValidationError(
+                    f"扫描结果缺少必需输入: {', '.join(missing_keys)}，请重新上传并扫描"
+                )
+            source_paths = {}
+            for key, filename in inputs_map.items():
+                safe_name = Path(filename).name
+                if safe_name != filename:
+                    raise AssetComparisonJobValidationError(
+                        f"非法的输入文件名: {filename}"
+                    )
+                source_paths[key] = self._artifact_store.resolve_task_path(
+                    user_id=user_id,
+                    tool=SCAN_TOOL,
+                    task_id=scan_id,
+                    relative_path=f"inputs/{safe_name}",
+                )
             invalid_inputs = [
                 key
-                for key in inputs
-                if key not in source_paths or not source_paths[key].is_file()
+                for key, source_path in source_paths.items()
+                if not source_path.is_file()
             ]
             if invalid_inputs:
                 raise AssetComparisonJobValidationError(
-                    f"输入文件不存在: {', '.join(invalid_inputs)}"
+                    f"输入文件缺失: {', '.join(invalid_inputs)}"
                 )
             job_dir = self._artifact_store.ensure_task(
                 user_id=user_id,

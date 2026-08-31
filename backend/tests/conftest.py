@@ -13,6 +13,8 @@ from pathlib import Path
 _TEST_ROOT = tempfile.mkdtemp(prefix="toolhub-pytest-")
 os.environ["TASK_ARTIFACT_ROOT"] = str(Path(_TEST_ROOT) / "artifacts")
 os.environ["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{Path(_TEST_ROOT) / 'test.db'}"
+os.environ["SECRET_KEY"] = "test-only-secret-key-0f7c4a9e2b1d"
+os.environ["AUTH_COOKIE_SECURE"] = "false"
 
 # 环境变量设置必须先于 app 导入，此处有意将导入置于文件中部
 import pytest  # noqa: E402
@@ -89,3 +91,36 @@ def login(client, username: str, password: str = "pw-123456"):
 
 def auth_header(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def tus_upload(
+    client,
+    token: str,
+    filename: str,
+    content: bytes,
+) -> str:
+    """创建并完成一次 tus 上传，返回 upload_id。"""
+    import base64
+
+    headers = {
+        "Tus-Resumable": "1.0.0",
+        "Upload-Length": str(len(content)),
+        "Upload-Metadata": (f"filename {base64.b64encode(filename.encode()).decode()}"),
+    }
+    headers.update(auth_header(token))
+    resp = client.post("/api/v1/upload/tus", headers=headers)
+    assert resp.status_code == 201, resp.text
+    location = resp.headers["Location"]
+    upload_id = location.rstrip("/").split("/")[-1]
+    resp = client.patch(
+        f"/api/v1/upload/tus/{upload_id}",
+        headers={
+            "Tus-Resumable": "1.0.0",
+            "Upload-Offset": "0",
+            "Content-Type": "application/offset+octet-stream",
+            **auth_header(token),
+        },
+        content=content,
+    )
+    assert resp.status_code == 204, resp.text
+    return upload_id

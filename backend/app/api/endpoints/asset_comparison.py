@@ -123,81 +123,6 @@ class ComparisonRequest(BaseModel):
     reviews: dict = {}
 
 
-@router.get("/resolve-folder")
-async def resolve_folder(
-    name: str = "",
-    current_user: User = Depends(require_tool_permission("asset-comparison")),
-):
-    """前端选文件夹后只能拿到文件夹名，用 find 搜索定位绝对路径"""
-    import subprocess
-
-    if not name or not name.strip():
-        return {"status": "error", "message": "请提供文件夹名"}
-
-    search_dirs = [
-        str(Path.home() / "Desktop"),
-        str(Path.home() / "Downloads"),
-        str(Path.home() / "Documents"),
-    ]
-    found_paths = []
-
-    for search_dir in search_dirs:
-        if not os.path.isdir(search_dir):
-            continue
-        try:
-            result = subprocess.run(
-                [
-                    "find",
-                    search_dir,
-                    "-maxdepth",
-                    "3",
-                    "-type",
-                    "d",
-                    "-name",
-                    name.strip(),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            for line in result.stdout.strip().split("\n"):
-                line = line.strip()
-                if line:
-                    found_paths.append(line)
-        except Exception:
-            continue
-
-    if found_paths:
-        # 如果有多个匹配，优先选文件数量最多的那个
-        best_path = ""
-        best_count = 0
-        for p in found_paths:
-            try:
-                cnt = len(
-                    [
-                        f
-                        for f in os.listdir(p)
-                        if os.path.isfile(os.path.join(p, f)) and not f.startswith("~")
-                    ]
-                )
-            except Exception:
-                cnt = 0
-            if cnt > best_count:
-                best_count = cnt
-                best_path = p
-        return {
-            "status": "success",
-            "path": best_path,
-            "file_count": best_count,
-            "candidates": found_paths,
-        }
-    else:
-        return {
-            "status": "not_found",
-            "message": f"未在 Desktop/Downloads/Documents 下找到名为 '{name}' 的文件夹",
-        }
-
-
 def _build_match_rules(this_month_str: str, last_month_str: str) -> dict:
     """构建文件名匹配规则"""
     return {
@@ -231,11 +156,11 @@ def _scan_and_match(folder: Path, match_rules: dict) -> tuple:
                     kw_clean = keyword.replace(" ", "")
                     if rule_type == "fixed":
                         if stem_clean == kw_clean:
-                            result[k] = str(f)
+                            result[k] = f.name
                             matched_log.append(f"✓ {f.name} → {k}")
                     elif rule_type == "monthly":
                         if kw_clean in stem_clean and expected_date in stem_clean:
-                            result[k] = str(f)
+                            result[k] = f.name
                             matched_log.append(f"✓ {f.name} → {k}")
     else:
         found_files.append("⚠️ 文件夹不存在或不是目录")
@@ -260,13 +185,14 @@ async def scan_uploaded_files_by_ids(
     store = UploadStore()
 
     scan_id = uuid.uuid4().hex
+    scan_expires_at = (
+        datetime.now().timestamp() + settings.ASSET_COMPARISON_JOB_TTL_HOURS * 3600
+    )
     scan_dir = task_artifact_store.ensure_task(
         user_id=current_user.id,
         tool="asset-comparison-scan",
         task_id=scan_id,
-        expires_at=(
-            datetime.now().timestamp() + settings.ASSET_COMPARISON_JOB_TTL_HOURS * 3600
-        ),
+        expires_at=scan_expires_at,
         metadata={"upload_count": len(req.upload_ids)},
     )
     work_dir = scan_dir / "inputs"
@@ -340,7 +266,6 @@ async def scan_uploaded_files_by_ids(
     this_month_str = current_date.strftime("%Y%m")
     last_month_date = current_date - relativedelta(months=1)
     last_month_str = last_month_date.strftime("%Y%m")
-
     match_rules = _build_match_rules(this_month_str, last_month_str)
     result, found_files, matched_log = _scan_and_match(work_dir, match_rules)
 
@@ -348,6 +273,17 @@ async def scan_uploaded_files_by_ids(
     logger.info(f"[scan] 匹配 {matched_count}/{len(result)} 个数据表")
     for entry in matched_log:
         logger.info(f"[scan]   {entry}")
+
+    # 持久化键 → 文件名映射：后续 POST /jobs 仅凭 scan_id 在受管目录内定位输入，
+    # 客户端不再经手任何服务器路径。
+    matched_inputs = {key: filename for key, filename in result.items() if filename}
+    task_artifact_store.ensure_task(
+        user_id=current_user.id,
+        tool="asset-comparison-scan",
+        task_id=scan_id,
+        expires_at=scan_expires_at,
+        metadata={"inputs": matched_inputs},
+    )
 
     log_action(
         db,
@@ -369,35 +305,6 @@ async def scan_uploaded_files_by_ids(
         "scan_id": scan_id,
         "debug": {
             "folder": scan_id,
-            "found_files": found_files,
-            "matched": matched_log,
-        },
-    }
-
-
-@router.get("/auto-paths")
-async def get_auto_paths(
-    folder: str = "",
-    current_user: User = Depends(require_tool_permission("asset-comparison")),
-):
-    current_date = datetime.now()
-    this_month_str = current_date.strftime("%Y%m")
-    last_month_date = current_date - relativedelta(months=1)
-    last_month_str = last_month_date.strftime("%Y%m")
-
-    if folder:
-        all_data_path = Path(folder)
-    else:
-        all_data_path = Path.home() / "Desktop" / "对比数据"
-
-    match_rules = _build_match_rules(this_month_str, last_month_str)
-    result, found_files, matched_log = _scan_and_match(all_data_path, match_rules)
-
-    return {
-        "status": "success",
-        "data": result,
-        "debug": {
-            "folder": str(all_data_path),
             "found_files": found_files,
             "matched": matched_log,
         },
@@ -1287,13 +1194,11 @@ def create_asset_comparison_job(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(require_tool_permission("asset-comparison")),
 ):
-    payload = req.model_dump()
-    client_request_id = payload.pop("clientRequestId")
     try:
         job, reused = asset_comparison_job_manager.create_job(
             user_id=current_user.id,
-            client_request_id=client_request_id,
-            inputs=payload,
+            client_request_id=req.clientRequestId,
+            scan_id=req.scanId,
         )
     except Exception as exc:
         _raise_job_http_error(exc)
@@ -1305,7 +1210,7 @@ def create_asset_comparison_job(
         target_type="tool",
         target_id="asset-comparison",
         # 摘要记录输入文件数量，不落文件路径（可能含敏感业务数据）
-        detail={"job_id": job["jobId"], "reused": reused, "input_count": len(payload)},
+        detail={"job_id": job["jobId"], "reused": reused, "scan_id": req.scanId},
     )
     return {
         **job,
