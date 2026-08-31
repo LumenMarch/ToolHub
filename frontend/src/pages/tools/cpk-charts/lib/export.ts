@@ -473,11 +473,11 @@ export function downloadBlob(blob: Blob, filename: string): void {
 /** 导出勾选项目：按 CSV 列顺序打包 zip。 */
 // (exportCheckedCharts removed — 改用 exportComparedByName)
 
-/** 导出单张 PNG。 */
-export async function exportChartPng(analysis: ColumnAnalysis, index: number, settings: ChartSettings = DEFAULT_CHART_SETTINGS): Promise<void> {
+/** 导出单张 PNG（prefix 用于区分数据源：A_ / B_）。 */
+export async function exportChartPng(analysis: ColumnAnalysis, settings: ChartSettings = DEFAULT_CHART_SETTINGS, prefix = ''): Promise<void> {
   const svg = renderHistogramSvg(analysis, settings);
   const png = await svgToPng(svg);
-  downloadBlob(png, `${index}_${sanitizeFilename(analysis.column.name)}.png`);
+  downloadBlob(png, `${prefix}${prefix ? '_' : ''}${sanitizeFilename(analysis.column.name)}.png`);
 }
 
 
