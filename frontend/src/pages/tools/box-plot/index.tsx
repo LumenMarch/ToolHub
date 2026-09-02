@@ -28,6 +28,8 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Separator } from '@/components/ui/separator'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   Table,
   TableBody,
@@ -41,6 +43,7 @@ import BoxPlotChart, {
   type BoxPlotChartHandle,
   type WhiskerMode,
 } from './chart'
+import { SearchableMultiSelect } from './searchable-multi-select'
 import { SearchableSelect } from './searchable-select'
 
 /*
@@ -85,9 +88,12 @@ interface AnalyzeResponse {
   groups: BoxGroup[]
 }
 
+type QuartileMethod = 'R7' | 'JMP'
+
 type Phase = 'upload' | 'configure'
 
 const NG_GROUP = '__none__'
+const MAX_GROUPS = 200
 
 const toCamel = <T extends Record<string, unknown>>(record: T): Record<string, unknown> => {
   const output: Record<string, unknown> = {}
@@ -130,8 +136,14 @@ const BoxPlotTool: React.FC = () => {
   const [columns, setColumns] = useState<ColumnsResponse | null>(null)
   const [valueColumn, setValueColumn] = useState('')
   const [groupColumn, setGroupColumn] = useState<string>(NG_GROUP)
+  const [groupValueOptions, setGroupValueOptions] = useState<string[]>([])
+  const [groupValueTotal, setGroupValueTotal] = useState(0)
+  const [groupValuesTruncated, setGroupValuesTruncated] = useState(false)
+  const [selectedGroupValues, setSelectedGroupValues] = useState<string[]>([])
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null)
   const [whiskerMode, setWhiskerMode] = useState<WhiskerMode>('tukey')
+  const [quartileMethod, setQuartileMethod] = useState<QuartileMethod>('JMP')
+  const [showFences, setShowFences] = useState(false)
   const [showValues, setShowValues] = useState(false)
   const [error, setError] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
@@ -139,6 +151,7 @@ const BoxPlotTool: React.FC = () => {
   // 请求代际计数：换文件/重置/新请求会使旧代际失效，过期响应不得提交状态
   const columnsGenRef = useRef(0)
   const analyzeGenRef = useRef(0)
+  const groupValuesGenRef = useRef(0)
 
   const upload = useTusUpload({
     onSuccess: (uploadId) => {
@@ -186,10 +199,13 @@ const BoxPlotTool: React.FC = () => {
     async (selected: File) => {
       columnsGenRef.current += 1 // 使在途的旧列解析响应失效
       analyzeGenRef.current += 1
+      groupValuesGenRef.current += 1
       setFile(selected)
       setError('')
       setColumns(null)
       setAnalysis(null)
+      setGroupValueOptions([])
+      setSelectedGroupValues([])
       setPhase('upload')
       try {
         await upload.upload({ file: selected, metadata: { filename: selected.name } })
@@ -203,6 +219,7 @@ const BoxPlotTool: React.FC = () => {
   const handleCancelUpload = useCallback(() => {
     columnsGenRef.current += 1 // 取消后丢弃在途解析响应
     analyzeGenRef.current += 1
+    groupValuesGenRef.current += 1
     setAnalyzing(false) // 代际失效后旧请求 finally 不再收尾，需在此清除加载态
     upload.abort()
     setFile(null)
@@ -212,11 +229,14 @@ const BoxPlotTool: React.FC = () => {
   const handleReset = useCallback(() => {
     columnsGenRef.current += 1
     analyzeGenRef.current += 1
+    groupValuesGenRef.current += 1
     setAnalyzing(false) // 同上：防止分析中重置后"统计计算中…"卡住
     upload.reset()
     setFile(null)
     setColumns(null)
     setAnalysis(null)
+    setGroupValueOptions([])
+    setSelectedGroupValues([])
     setError('')
     setPhase('upload')
   }, [upload])
@@ -226,7 +246,36 @@ const BoxPlotTool: React.FC = () => {
     [columns],
   )
 
-  const doAnalyze = useCallback(async (valueCol: string, groupCol: string) => {
+  const loadGroupValues = useCallback(async (uploadId: string, groupCol: string) => {
+    const gen = ++groupValuesGenRef.current
+    try {
+      const response = await api.post<{
+        values: string[]
+        total: number
+        truncated: boolean
+      }>('/tools/box-plot/group-values', {
+        upload_id: uploadId,
+        group_col: groupCol,
+      })
+      if (gen !== groupValuesGenRef.current) return
+      setGroupValueOptions(response.data.values)
+      setGroupValueTotal(response.data.total)
+      setGroupValuesTruncated(response.data.truncated)
+    } catch (err) {
+      if (gen !== groupValuesGenRef.current) return
+      setGroupValueOptions([])
+      setGroupValueTotal(0)
+      setGroupValuesTruncated(false)
+      setError(readErrorMessage(err))
+    }
+  }, [])
+
+  const doAnalyze = useCallback(async (
+    valueCol: string,
+    groupCol: string,
+    method: QuartileMethod,
+    groupValues: string[],
+  ) => {
     if (!upload.uploadId || !valueCol) return
     const gen = ++analyzeGenRef.current
     setError('')
@@ -238,6 +287,9 @@ const BoxPlotTool: React.FC = () => {
           upload_id: upload.uploadId,
           value_col: valueCol,
           group_col: groupCol === NG_GROUP ? null : groupCol,
+          quartile_method: method,
+          group_values:
+            groupCol !== NG_GROUP && groupValues.length > 0 ? groupValues : null,
         },
       )
       if (gen !== analyzeGenRef.current) return // 已有更新的分析请求，丢弃过期响应
@@ -263,12 +315,48 @@ const BoxPlotTool: React.FC = () => {
     }
   }, [upload.uploadId])
 
-  // 列变更后自动刷新箱线图（无需点击生成按钮）
+  useEffect(() => {
+    if (phase !== 'configure' || !upload.uploadId || groupColumn === NG_GROUP) {
+      setGroupValueOptions([])
+      setGroupValueTotal(0)
+      setGroupValuesTruncated(false)
+      return
+    }
+    void loadGroupValues(upload.uploadId, groupColumn)
+  }, [phase, upload.uploadId, groupColumn, loadGroupValues])
+
+  // 列、分位或分组筛选变更后自动刷新箱线图（无需点击生成按钮）
   useEffect(() => {
     if (phase !== 'configure' || !columns || !valueColumn) return
     if (numericColumns.length === 0) return
-    void doAnalyze(valueColumn, groupColumn)
-  }, [phase, columns, valueColumn, groupColumn, numericColumns.length, doAnalyze])
+    const grouping = groupColumn !== NG_GROUP
+    if (grouping && groupValueTotal === 0 && groupValueOptions.length === 0) {
+      return
+    }
+    const selectedCount = selectedGroupValues.length
+    if (grouping && selectedCount === 0 && groupValueTotal > MAX_GROUPS) {
+      setAnalysis(null)
+      setError(`分组共 ${groupValueTotal} 个，超过 ${MAX_GROUPS} 上限，请先筛选分组值`)
+      return
+    }
+    if (grouping && selectedCount > MAX_GROUPS) {
+      setAnalysis(null)
+      setError(`最多选择 ${MAX_GROUPS} 个分组值`)
+      return
+    }
+    void doAnalyze(valueColumn, groupColumn, quartileMethod, selectedGroupValues)
+  }, [
+    phase,
+    columns,
+    valueColumn,
+    groupColumn,
+    quartileMethod,
+    selectedGroupValues,
+    groupValueTotal,
+    groupValueOptions.length,
+    numericColumns.length,
+    doAnalyze,
+  ])
 
   const handleExport = useCallback(
     async (format: 'svg' | 'png') => {
@@ -438,7 +526,10 @@ const BoxPlotTool: React.FC = () => {
                     <FieldLabel>分组列（可选）</FieldLabel>
                     <SearchableSelect
                       value={groupColumn}
-                      onValueChange={setGroupColumn}
+                      onValueChange={(value) => {
+                        setGroupColumn(value)
+                        setSelectedGroupValues([])
+                      }}
                       options={[
                         { value: NG_GROUP, label: '不分组（单箱对比）' },
                         ...columns.columns.map((c) => ({ value: c.name, label: c.name })),
@@ -449,6 +540,30 @@ const BoxPlotTool: React.FC = () => {
                       ariaLabel="分组列"
                     />
                   </Field>
+                  {groupColumn !== NG_GROUP ? (
+                    <Field className="md:col-span-2">
+                      <FieldLabel>分组值筛选</FieldLabel>
+                      <SearchableMultiSelect
+                        values={selectedGroupValues}
+                        onValuesChange={setSelectedGroupValues}
+                        options={groupValueOptions.map((value) => ({
+                          value,
+                          label: value,
+                        }))}
+                        placeholder={`全部（${groupValueTotal.toLocaleString('zh-CN')} 个）`}
+                        searchPlaceholder="搜索分组值..."
+                        emptyText="无匹配分组值"
+                        ariaLabel="分组值筛选"
+                        disabled={groupValueOptions.length === 0}
+                      />
+                      {groupValuesTruncated ? (
+                        <p className="text-sm text-muted-foreground">
+                          仅列出前 {groupValueOptions.length} 个唯一值（共{' '}
+                          {groupValueTotal.toLocaleString('zh-CN')}）。
+                        </p>
+                      ) : null}
+                    </Field>
+                  ) : null}
                 </div>
               </FieldGroup>
             </CardContent>
@@ -485,57 +600,111 @@ const BoxPlotTool: React.FC = () => {
                 </div>
               ) : analysis ? (
                 <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {(['tukey', 'minmax'] as const).map((mode) => (
-                      <Button
-                        key={mode}
-                        type="button"
+                  <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+                    <Field className="w-fit gap-1.5">
+                      <FieldLabel id="boxplot-quartile">分位</FieldLabel>
+                      <ToggleGroup
+                        type="single"
                         size="sm"
-                        variant={whiskerMode === mode ? 'default' : 'outline'}
-                        onClick={() => setWhiskerMode(mode)}
-                        aria-pressed={whiskerMode === mode}
+                        variant="outline"
+                        spacing={0}
+                        value={quartileMethod}
+                        onValueChange={(value) => {
+                          if (value === 'R7' || value === 'JMP') {
+                            setQuartileMethod(value)
+                          }
+                        }}
+                        aria-labelledby="boxplot-quartile"
                       >
-                        {mode === 'tukey' ? 'Tukey' : 'Min-Max'}
-                      </Button>
-                    ))}
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={showValues ? 'default' : 'outline'}
-                      onClick={() => setShowValues((v) => !v)}
-                      aria-pressed={showValues}
-                    >
-                      显示数值标签
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        void handleExport('svg')
-                      }}
-                      disabled={exporting}
-                    >
-                      <FileCode data-icon="inline-start" />
-                      SVG
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        void handleExport('png')
-                      }}
-                      disabled={exporting}
-                    >
-                      <ImageIcon data-icon="inline-start" />
-                      PNG
-                    </Button>
+                        <ToggleGroupItem value="JMP">JMP Type 6</ToggleGroupItem>
+                        <ToggleGroupItem value="R7">R7（Excel）</ToggleGroupItem>
+                      </ToggleGroup>
+                    </Field>
+                    <Separator orientation="vertical" className="hidden h-10 sm:block" />
+                    <Field className="w-fit gap-1.5">
+                      <FieldLabel id="boxplot-whisker">须线</FieldLabel>
+                      <ToggleGroup
+                        type="single"
+                        size="sm"
+                        variant="outline"
+                        spacing={0}
+                        value={whiskerMode}
+                        onValueChange={(value) => {
+                          if (value === 'tukey' || value === 'minmax') {
+                            setWhiskerMode(value)
+                          }
+                        }}
+                        aria-labelledby="boxplot-whisker"
+                      >
+                        <ToggleGroupItem value="tukey">Tukey</ToggleGroupItem>
+                        <ToggleGroupItem value="minmax">Min-Max</ToggleGroupItem>
+                      </ToggleGroup>
+                    </Field>
+                    <Separator orientation="vertical" className="hidden h-10 sm:block" />
+                    <Field className="w-fit gap-1.5">
+                      <FieldLabel id="boxplot-display">显示</FieldLabel>
+                      <ToggleGroup
+                        type="multiple"
+                        size="sm"
+                        variant="outline"
+                        spacing={0}
+                        value={[
+                          ...(showFences ? ['fences'] : []),
+                          ...(showValues ? ['labels'] : []),
+                        ]}
+                        onValueChange={(values) => {
+                          setShowFences(values.includes('fences'))
+                          setShowValues(values.includes('labels'))
+                        }}
+                        aria-labelledby="boxplot-display"
+                      >
+                        <ToggleGroupItem value="fences">围栏</ToggleGroupItem>
+                        <ToggleGroupItem value="labels">数值</ToggleGroupItem>
+                      </ToggleGroup>
+                    </Field>
+                    <Separator orientation="vertical" className="hidden h-10 sm:block" />
+                    <Field className="w-fit gap-1.5 sm:ml-auto">
+                      <FieldLabel id="boxplot-export">导出</FieldLabel>
+                      <div className="flex gap-2" aria-labelledby="boxplot-export">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            void handleExport('svg')
+                          }}
+                          disabled={exporting}
+                        >
+                          <FileCode data-icon="inline-start" />
+                          SVG
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            void handleExport('png')
+                          }}
+                          disabled={exporting}
+                        >
+                          <ImageIcon data-icon="inline-start" />
+                          PNG
+                        </Button>
+                      </div>
+                    </Field>
                   </div>
+                  {analysis.groups.some(
+                    (group) => group.outlierCount > group.outliers.length,
+                  ) ? (
+                    <p className="text-sm text-muted-foreground">
+                      部分组离群点超过 500 个，图上只绘制前 500 个；完整数量见统计表。
+                    </p>
+                  ) : null}
                   <BoxPlotChart
                     ref={chartHandleRef}
                     groups={analysis.groups}
                     whiskerMode={whiskerMode}
+                    showFences={showFences}
                     showValues={showValues}
                   />
                   <Table className="min-w-[40rem] tabular-nums">

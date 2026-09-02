@@ -17,6 +17,29 @@ class BoxPlotAnalyzeRequest(BaseModel):
     upload_id: str = Field(..., min_length=1, description="数据文件上传 ID")
     value_col: str = Field(..., min_length=1, description="数值列名")
     group_col: str | None = Field(default=None, description="分组列名，缺省不分组")
+    quartile_method: Literal["R7", "JMP"] = Field(
+        default="JMP",
+        description="分位算法：默认 JMP Type 6；R7 对齐 Excel/numpy",
+    )
+    group_values: list[str] | None = Field(
+        default=None,
+        description="限定分析的分组值；空或省略表示该列全部水平",
+    )
+
+
+class BoxPlotGroupValuesRequest(BaseModel):
+    """分组列唯一值请求，供列配置里筛选。"""
+
+    upload_id: str = Field(..., min_length=1, description="数据文件上传 ID")
+    group_col: str = Field(..., min_length=1, description="分组列名")
+
+
+class GroupValuesResponse(BaseModel):
+    """分组列唯一值。"""
+
+    values: list[str]
+    total: int
+    truncated: bool
 
 
 class ColumnMeta(BaseModel):
@@ -69,7 +92,7 @@ class AnalyzeResponse(BaseModel):
     value_column: str
     group_column: str | None
     # 分位数算法约定（Hyndman-Fan R7，与 numpy / Excel QUARTILE.INC 一致）
-    quartile_method: str = "R7 (linear)"
+    quartile_method: str = "JMP Type 6"
     # 后端按 Tukey fences 计算；前端可切换 min-max 仅影响渲染
     whisker: str = "tukey"
     total_rows: int
