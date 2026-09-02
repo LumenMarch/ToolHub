@@ -58,14 +58,14 @@ export function UsersRejectDialog({
         </span>
       }
       desc={
-        <div className='space-y-4'>
+        <div className='flex flex-col gap-4'>
           <p>
             确定要拒绝用户{' '}
-            <span className='font-bold'>{currentRow.username}</span>{' '}
+            <span className='font-medium'>{currentRow.username}</span>{' '}
             的注册申请吗？该用户将无法登录系统。
           </p>
-          <div className='space-y-1.5'>
-            <Label className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+          <div className='flex flex-col gap-1.5'>
+            <Label className='text-sm text-muted-foreground'>
               拒绝原因（可选，仅审计）
             </Label>
             <Input
@@ -75,7 +75,7 @@ export function UsersRejectDialog({
               autoFocus
             />
           </div>
-          <Alert variant='destructive' className='rounded-none'>
+          <Alert variant='destructive'>
             <AlertTitle>注意</AlertTitle>
             <AlertDescription>
               被拒绝用户可在登录页看到对应的拒绝提示。

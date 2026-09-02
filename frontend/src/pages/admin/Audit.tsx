@@ -1,5 +1,26 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { CaretDown, MagnifyingGlass } from '@phosphor-icons/react';
+import { Search } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from '@/components/ui/empty';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from '@/components/ui/input-group';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useAdminApi } from './hooks/use-admin-api';
 import { parseServerDate } from '../../lib/format-time';
 import type { AuditLog } from './hooks/use-admin-api';
@@ -140,16 +161,9 @@ const AdminAudit: React.FC = () => {
   const rangeEnd = Math.min(page * pageSize, total);
 
   return (
-    <div className="space-y-7">
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">
-            Chronological evidence
-          </p>
-          <h2 className="mt-2 text-3xl font-bold tracking-tight md:text-4xl">
-            事件时间带
-          </h2>
-        </div>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <p className="text-sm text-muted-foreground">按时间倒序查看系统操作记录。</p>
 
         <div
           className="flex flex-wrap gap-2"
@@ -157,33 +171,25 @@ const AdminAudit: React.FC = () => {
           aria-label="筛选事件类型"
         >
           {ACTION_FILTERS.map((filter) => (
-            <button
+            <Button
               key={filter.value}
               type="button"
+              size="sm"
+              variant={actionPrefix === filter.value ? 'default' : 'outline'}
               aria-pressed={actionPrefix === filter.value}
               onClick={() => handleActionPrefixChange(filter.value)}
-              className={
-                actionPrefix === filter.value
-                  ? 'min-h-11 border border-primary px-4 font-mono text-xs uppercase tracking-widest text-primary'
-                  : 'min-h-11 border border-border px-4 font-mono text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:border-foreground hover:text-foreground'
-              }
             >
               {filter.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
-      <label
-        htmlFor="audit-username-filter"
-        className="flex min-h-14 items-center gap-4 border-y border-border"
-      >
-        <MagnifyingGlass
-          aria-hidden="true"
-          className="size-4 shrink-0 text-muted-foreground"
-        />
-        <span className="sr-only">筛选用户名</span>
-        <input
+      <InputGroup>
+        <InputGroupAddon>
+          <Search />
+        </InputGroupAddon>
+        <InputGroupInput
           id="audit-username-filter"
           type="search"
           value={username}
@@ -192,46 +198,49 @@ const AdminAudit: React.FC = () => {
             setPage(1);
           }}
           placeholder="筛选用户名"
-          className="min-w-0 flex-1 bg-transparent py-3 font-mono text-base outline-none placeholder:text-muted-foreground md:text-sm"
+          aria-label="筛选用户名"
         />
-        <span className="hidden shrink-0 font-mono text-xs uppercase tracking-widest text-muted-foreground sm:block">
-          {total} events · desc
-        </span>
-      </label>
+        <InputGroupAddon align="inline-end">
+          <InputGroupText className="hidden sm:flex">
+            {total} 条 · 倒序
+          </InputGroupText>
+        </InputGroupAddon>
+      </InputGroup>
 
       {error && (
-        <div className="border-l-2 border-primary bg-primary/10 p-4 font-mono text-sm uppercase tracking-widest text-primary">
-          [ 异常: {error} ]
-        </div>
+        <Alert variant="destructive">
+          <AlertTitle>加载失败</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {loading ? (
         <AdminLoadingState
           ariaLabel="正在加载后台审计日志"
-          label="[ 审计日志 · 同步中 ]"
+          label="正在加载审计日志"
           detail="等待事件索引"
         />
       ) : groupedLogs.length > 0 ? (
-        <div>
+        <div className="flex flex-col gap-6">
           {groupedLogs.map((group) => (
             <section
               key={group.key}
               aria-labelledby={`audit-date-${group.key}`}
-              className="grid border-t border-border md:grid-cols-[7.5rem_minmax(0,1fr)]"
+              className="flex flex-col gap-3"
             >
-              <div className="py-5 pr-5 md:py-7">
-                <h3
+              <div>
+                <h2
                   id={`audit-date-${group.key}`}
-                  className="font-mono text-2xl font-medium tracking-tight"
+                  className="text-sm font-medium tracking-tight"
                 >
                   {group.day}
-                </h3>
-                <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  {group.weekday} · {group.logs.length} events
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {group.weekday} · {group.logs.length} 条
                 </p>
               </div>
 
-              <div className="border-l border-border">
+              <div className="overflow-hidden rounded-xl border">
                 {group.logs.map((log) => (
                   <AuditEventRow key={log.id} log={log} />
                 ))}
@@ -239,64 +248,65 @@ const AdminAudit: React.FC = () => {
             </section>
           ))}
 
-          <div className="flex flex-col gap-4 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
-              <span className="font-mono text-xs tabular-nums text-muted-foreground">
+              <span className="text-sm tabular-nums text-muted-foreground">
                 显示 {rangeStart}–{rangeEnd} / {total}
               </span>
-              <label className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
                 每页
-                <span className="relative">
-                  <select
-                    aria-label="每页日志条数"
-                    value={pageSize}
-                    onChange={(event) =>
-                      handlePageSizeChange(Number(event.target.value))
-                    }
-                    className="min-h-9 appearance-none border border-border bg-transparent py-1 pl-3 pr-8 text-base outline-none focus:border-primary sm:text-xs"
-                  >
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(value) => handlePageSizeChange(Number(value))}
+                >
+                  <SelectTrigger size="sm" aria-label="每页日志条数">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
                     {PAGE_SIZE_OPTIONS.map((size) => (
-                      <option key={size} value={size}>
+                      <SelectItem key={size} value={String(size)}>
                         {size}
-                      </option>
+                      </SelectItem>
                     ))}
-                  </select>
-                  <CaretDown className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2" />
-                </span>
+                  </SelectContent>
+                </Select>
               </label>
             </div>
 
             <div className="flex items-center gap-2">
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 disabled={page <= 1}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
-                className="min-h-11 border border-border px-4 font-mono text-xs uppercase tracking-widest transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
-                ← 上一页
-              </button>
-              <span className="px-2 font-mono text-xs tabular-nums text-muted-foreground">
+                上一页
+              </Button>
+              <span className="px-2 text-sm tabular-nums text-muted-foreground">
                 {page} / {totalPages}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 disabled={page >= totalPages}
                 onClick={() =>
                   setPage((current) => Math.min(totalPages, current + 1))
                 }
-                className="min-h-11 border border-border px-4 font-mono text-xs uppercase tracking-widest transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
-                下一页 →
-              </button>
+                下一页
+              </Button>
             </div>
           </div>
         </div>
       ) : (
-        <div className="border border-border px-6 py-16 text-center">
-          <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-            [ 无日志记录 ]
-          </p>
-        </div>
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyTitle>无日志记录</EmptyTitle>
+            <EmptyDescription>当前筛选条件下没有审计事件。</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       )}
     </div>
   );
@@ -308,22 +318,16 @@ const AuditEventRow: React.FC<{ log: AuditLog }> = ({ log }) => {
   const action = formatAction(log.action);
 
   return (
-    <article
-      className={`relative border-b border-border pl-5 transition-colors last:border-b-0 hover:bg-muted/40 before:absolute before:-left-[0.3125rem] before:top-7 before:size-2 before:border before:bg-background ${
-        expanded
-          ? 'before:border-primary before:bg-primary'
-          : 'before:border-muted-foreground'
-      }`}
-    >
-      <div className="grid gap-4 py-4 pr-1 sm:grid-cols-2 md:min-h-[4.75rem] md:grid-cols-[5.75rem_8.5rem_12.5rem_minmax(8rem,1fr)_4rem] md:items-center md:gap-0 md:py-0">
-        <div className="font-mono text-xs tabular-nums">
+    <article className="border-b last:border-b-0 hover:bg-muted/40">
+      <div className="grid gap-3 px-4 py-3 sm:grid-cols-2 md:grid-cols-[6rem_8rem_minmax(8rem,1fr)_minmax(6rem,1fr)_auto] md:items-center">
+        <div className="text-sm tabular-nums">
           {date.time}
           <span className="mt-1 block text-xs text-muted-foreground">
             事件 #{log.id}
           </span>
         </div>
 
-        <div className="min-w-0 font-mono text-xs">
+        <div className="min-w-0 text-sm">
           <span className="block truncate">{log.username ?? '系统'}</span>
           <span className="mt-1 block truncate text-xs text-muted-foreground">
             {log.ip_address ?? '—'}
@@ -332,9 +336,7 @@ const AuditEventRow: React.FC<{ log: AuditLog }> = ({ log }) => {
 
         <div className="min-w-0">
           <strong className="block text-sm font-medium">{action.label}</strong>
-          <code
-            className={`mt-1 block truncate font-mono text-xs ${action.tone}`}
-          >
+          <code className={`mt-1 block truncate text-xs ${action.tone}`}>
             {log.action}
           </code>
         </div>
@@ -343,25 +345,24 @@ const AuditEventRow: React.FC<{ log: AuditLog }> = ({ log }) => {
           <span className="block truncate">
             {log.target_id ?? '无目标'}
           </span>
-          <span className="mt-1 block truncate font-mono text-xs text-muted-foreground">
+          <span className="mt-1 block truncate text-xs text-muted-foreground">
             {log.target_id ? `${log.target_type}#${log.target_id}` : '无目标'}
           </span>
         </div>
 
         <div className="flex justify-end sm:col-span-2 md:col-span-1">
           {log.detail ? (
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               aria-expanded={expanded}
               onClick={() => setExpanded((current) => !current)}
-              className="min-h-9 border border-border px-3 font-mono text-xs transition-colors hover:border-primary hover:text-primary"
             >
               {expanded ? '收起' : '查看'}
-            </button>
+            </Button>
           ) : (
-            <span className="px-3 font-mono text-xs text-muted-foreground">
-              —
-            </span>
+            <span className="px-3 text-sm text-muted-foreground">—</span>
           )}
         </div>
       </div>
@@ -383,7 +384,7 @@ const AuditDetailPanel: React.FC<{ log: AuditLog }> = ({ log }) => {
   }
 
   return (
-    <div className="mb-5 mr-1 grid gap-4 border border-primary bg-primary/[0.03] p-4 font-mono text-xs sm:grid-cols-2">
+    <div className="mx-4 mb-4 grid gap-4 rounded-lg border bg-muted/40 p-4 text-sm sm:grid-cols-2">
       <div>
         <span className="text-muted-foreground">目标类型</span>
         <p className="mt-1">{log.target_type ?? '—'}</p>
@@ -402,7 +403,7 @@ const AuditDetailPanel: React.FC<{ log: AuditLog }> = ({ log }) => {
       </div>
       <div className="sm:col-span-2">
         <span className="text-muted-foreground">Payload</span>
-        <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all bg-foreground p-3 text-background">
+        <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-background p-3 text-xs">
           {detail}
         </pre>
       </div>

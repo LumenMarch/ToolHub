@@ -9,13 +9,13 @@ import PermissionGuard from '../../components/guards/PermissionGuard'
 const AdminUsers: React.FC = () => {
   return (
     <UsersProvider>
-      <div className='space-y-8'>
+      <div className='flex flex-col gap-6'>
         <div className='flex flex-col gap-4 md:flex-row md:items-end md:justify-between'>
-          <div className='space-y-1'>
-            <p className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+          <div className='flex flex-col gap-1'>
+            <p className='text-sm text-muted-foreground'>
               管理系统账号、审批状态与角色
             </p>
-            <p className='text-xs text-muted-foreground/70'>
+            <p className='text-sm text-muted-foreground'>
               新注册用户需管理员审批后方可使用工具。
             </p>
           </div>

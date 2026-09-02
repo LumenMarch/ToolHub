@@ -56,7 +56,7 @@ export const usersColumns: ColumnDef<User>[] = [
       <DataTableColumnHeader column={column} title='用户名' />
     ),
     cell: ({ row }) => (
-      <span className='ps-3 font-mono'>{row.getValue('username')}</span>
+      <span className='ps-3'>{row.getValue('username')}</span>
     ),
     meta: {
       title: '用户名',
@@ -76,16 +76,13 @@ export const usersColumns: ColumnDef<User>[] = [
       return roles.length > 0 ? (
         <div className='flex flex-wrap gap-1'>
           {roles.map((role) => (
-            <span
-              key={role}
-              className='inline-flex items-center border border-border px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-widest text-muted-foreground'
-            >
+            <Badge key={role} variant='outline'>
               {role}
-            </span>
+            </Badge>
           ))}
         </div>
       ) : (
-        <span className='text-[11px] font-mono text-muted-foreground'>—</span>
+        <span className='text-sm text-muted-foreground'>—</span>
       )
     },
     meta: { title: '角色' },
@@ -100,7 +97,7 @@ export const usersColumns: ColumnDef<User>[] = [
     cell: ({ row }) => {
       const display = resolveStatusDisplay(row.original)
       return (
-        <div className='flex space-x-2'>
+        <div className='flex gap-2'>
           <Badge variant='outline' className={cn(display.className)}>
             {display.label}
           </Badge>
@@ -117,7 +114,7 @@ export const usersColumns: ColumnDef<User>[] = [
       <DataTableColumnHeader column={column} title='创建时间' />
     ),
     cell: ({ row }) => (
-      <span className='text-[11px] font-mono text-muted-foreground'>
+      <span className='text-sm text-muted-foreground'>
         {formatAdminDate(row.getValue('created_at'))}
       </span>
     ),

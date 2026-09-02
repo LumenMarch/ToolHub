@@ -1,240 +1,160 @@
-import React, { useState, useContext, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
-import axios from 'axios';
-import api from '../api/axios';
-import { ThemeToggle } from '../components/ThemeToggle';
-import { LoadingSignal } from '../components/LoadingSignal';
-import { gsap } from 'gsap';
-import { useHitokoto, splitIntoLines, isBackendUnreachable } from '../hooks/use-hitokoto';
+import { useContext, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import axios from 'axios'
 
-const UNREACHABLE_ERROR = '暂时无法连接，请稍后重试';
+import { BrandMark } from '@/components/BrandMark'
+import { ThemeToggle } from '@/components/ThemeToggle'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+} from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+import { Spinner } from '@/components/ui/spinner'
+import { AuthContext } from '@/context/AuthContext'
+import { isBackendUnreachable } from '@/hooks/use-hitokoto'
+import { pageTitle } from '@/lib/title'
+import api from '@/api/axios'
+
+const UNREACHABLE_ERROR = '暂时无法连接，请稍后重试'
 
 const Login: React.FC = () => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const { login, user } = useContext(AuthContext);
-  const navigate = useNavigate();
+  const [isLogin, setIsLogin] = useState(true)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const { login, user } = useContext(AuthContext)
+  const navigate = useNavigate()
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const titleRef = useRef<HTMLHeadingElement>(null);
+  const displayError = error
+  const submitLabel = isLogin ? '登录' : '注册'
 
-  const { text: hitokotoText, loading: hitokotoLoading, unreachable } = useHitokoto();
-  const displayError = error || (unreachable ? UNREACHABLE_ERROR : '');
-  // 提交按钮文案：加载中 / 登录 / 注册（避免 JSX 嵌套三元）
-  const submitLabel = loading ? '等待...' : isLogin ? '登录 ↗' : '注册 ↗';
-  const lines = hitokotoText ? splitIntoLines(hitokotoText, 3) : [];
-  let lineOffset = 0;
-  const displayLines = lines.map((text) => {
-    const line = { id: `${lineOffset}:${text}`, text };
-    lineOffset += text.length;
-    return line;
-  });
+  useEffect(() => {
+    document.title = pageTitle()
+  }, [])
 
   useEffect(() => {
     if (user) {
-      navigate('/');
+      navigate('/')
     }
-  }, [user, navigate]);
+  }, [user, navigate])
 
-  // 每日一言加载完成后只执行标题动画。
-  useEffect(() => {
-    if (
-      !hitokotoText ||
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
-      return;
-    }
-
-    const ctx = gsap.context(() => {
-      gsap.to('.clip-text > span', {
-        y: 0,
-        duration: 1.2,
-        stagger: 0.1,
-        ease: 'power4.out',
-        delay: 0.1
-      });
-    }, containerRef);
-    return () => ctx.revert();
-  }, [hitokotoText]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setLoading(true)
 
     try {
       if (isLogin) {
-        const formData = new URLSearchParams();
-        formData.append('username', username);
-        formData.append('password', password);
-        const response = await api.post('/auth/session', formData);
-        login(response.data);
-        
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          navigate('/');
-        } else {
-          gsap.to(containerRef.current, {
-            opacity: 0,
-            scale: 0.95,
-            duration: 0.8,
-            ease: 'power3.inOut',
-            onComplete: () => {
-              navigate('/');
-            }
-          });
-        }
+        const formData = new URLSearchParams()
+        formData.append('username', username)
+        formData.append('password', password)
+        const response = await api.post('/auth/session', formData)
+        login(response.data)
+        navigate('/')
       } else {
-        await api.post('/auth/register', { username, password });
-        setIsLogin(true);
-        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          gsap.fromTo('.form-wrapper',
-            { x: -20 },
-            { x: 0, duration: 0.6, ease: 'expo.out' }
-          );
-        }
+        await api.post('/auth/register', { username, password })
+        setIsLogin(true)
       }
     } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
         if (isBackendUnreachable(err)) {
-          setError(UNREACHABLE_ERROR);
+          setError(UNREACHABLE_ERROR)
         } else {
-          const detail = err.response?.data?.detail;
-          setError(typeof detail === 'string' ? detail : '系统发生错误。');
+          const detail = err.response?.data?.detail
+          setError(typeof detail === 'string' ? detail : '系统发生错误。')
         }
       } else {
-        setError(UNREACHABLE_ERROR);
-      }
-      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        gsap.fromTo('.form-wrapper',
-          { x: -10 },
-          { x: 0, duration: 0.5, ease: 'elastic.out(1, 0.3)' }
-        );
+        setError(UNREACHABLE_ERROR)
       }
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   return (
-    <div ref={containerRef} className="min-h-[100dvh] bg-background flex flex-col lg:flex-row relative">
-      <div className="grain-overlay" />
-      
-      {/* 登录页主题切换 */}
-      <div className="absolute top-8 right-8 z-50  pointer-events-auto">
+    <div className="relative flex min-h-dvh flex-col items-center justify-center bg-background p-6">
+      <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>
-      
-      {/* 左侧每日一言 */}
-      <div className="flex-1 flex flex-col justify-center p-8 md:p-16 lg:p-24 relative z-10">
-        <div className="min-h-32 w-full max-w-xl">
-          {hitokotoLoading ? (
-            <LoadingSignal
-              ariaLabel="正在加载每日一言"
-              meta="Hitokoto / Remote"
-              label="[ 每日一言 · 握手中 ]"
-              detail="等待远端响应"
-              className="pt-4"
-            />
-          ) : !unreachable && hitokotoText ? (
-            <h1
-              ref={titleRef}
-              className="text-3xl font-bold leading-[1.2] tracking-tight md:text-4xl lg:text-5xl"
-            >
-              {displayLines.map((line) => (
-                <div key={line.id} className="clip-text">
-                  <span>{line.text}</span>
-                </div>
-              ))}
-            </h1>
-          ) : (
-            <div className="space-y-2 font-mono" role="status">
-              <div className="text-sm text-primary uppercase tracking-widest">
-                暂时无法连接
-              </div>
-              <div className="text-xs text-muted-foreground tracking-wider">
-                请检查网络后重试，或稍后再试。
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 右侧极简粗野主义表单 */}
-      <div className="flex-1 flex flex-col justify-center p-8 md:p-16 lg:p-24 relative z-10 form-wrapper max-w-2xl">
-        <form onSubmit={handleSubmit} className="space-y-12 w-full">
-          {displayError && (
-            <div
-              id="auth-error"
-              role="alert"
-              className="text-sm font-mono text-primary bg-primary/10 p-4 border-l-2 border-primary uppercase tracking-widest"
-            >
-              [ 异常: {displayError} ]
-            </div>
-          )}
-          
-          <div className="relative group">
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="awwwards-input w-full"
-              placeholder=" "
-              autoComplete="off"
-              required
-              id="username"
-              aria-invalid={Boolean(displayError)}
-              aria-describedby={displayError ? 'auth-error' : undefined}
-            />
-            <label htmlFor="username" className="absolute left-0 top-4 text-muted-foreground font-mono text-sm tracking-widest uppercase transition-[color,font-size,transform] duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-[11px] group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px]">
-              用户名
-            </label>
-          </div>
-          
-          <div className="relative group">
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="awwwards-input w-full font-mono tracking-widest"
-              placeholder=" "
-              required
-              id="password"
-              aria-invalid={Boolean(displayError)}
-              aria-describedby={displayError ? 'auth-error' : undefined}
-            />
-            <label htmlFor="password" className="absolute left-0 top-4 text-muted-foreground font-mono text-sm tracking-widest uppercase transition-[color,font-size,transform] duration-300 pointer-events-none group-focus-within:-translate-y-8 group-focus-within:text-[11px] group-focus-within:text-primary [.awwwards-input:not(:placeholder-shown)~&]:-translate-y-8 [.awwwards-input:not(:placeholder-shown)~&]:text-[11px]">
-              密码
-            </label>
-          </div>
-
-          <div className="pt-4 flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center justify-between gap-6 sm:gap-8">
-            <button
-              type="submit"
-              disabled={loading || unreachable}
-              className="text-4xl md:text-5xl font-bold uppercase tracking-tighter hover:text-primary transition-colors active:scale-95 origin-left disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            >
-              {submitLabel}
-            </button>
-            
-            <button
-              type="button"
-              onClick={() => {
-                setIsLogin(!isLogin);
-                setError('');
-              }}
-              className="text-base md:text-lg font-mono text-muted-foreground hover:text-foreground uppercase tracking-[0.2em] transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-full after:h-[1px] after:bg-muted-foreground hover:after:bg-foreground"
-            >
-              {isLogin ? "注册" : "登录"}
-            </button>
-          </div>
-        </form>
-      </div>
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <BrandMark />
+          <CardTitle>{isLogin ? '登录' : '注册'}</CardTitle>
+          <CardDescription>
+            {isLogin ? '使用账号进入工具台。' : '提交注册后等待管理员审批。'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={(event) => void handleSubmit(event)}>
+            <FieldGroup>
+              {displayError ? (
+                <Alert variant="destructive">
+                  <AlertTitle>无法继续</AlertTitle>
+                  <AlertDescription id="auth-error">{displayError}</AlertDescription>
+                </Alert>
+              ) : null}
+              <Field data-invalid={Boolean(displayError) || undefined}>
+                <FieldLabel htmlFor="username">用户名</FieldLabel>
+                <Input
+                  id="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  autoComplete="username"
+                  required
+                  aria-invalid={Boolean(displayError)}
+                  aria-describedby={displayError ? 'auth-error' : undefined}
+                />
+              </Field>
+              <Field data-invalid={Boolean(displayError) || undefined}>
+                <FieldLabel htmlFor="password">密码</FieldLabel>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete={isLogin ? 'current-password' : 'new-password'}
+                  required
+                  aria-invalid={Boolean(displayError)}
+                  aria-describedby={displayError ? 'auth-error' : undefined}
+                />
+              </Field>
+              <Field>
+                <Button type="submit" disabled={loading}>
+                  {loading ? <Spinner data-icon="inline-start" /> : null}
+                  {submitLabel}
+                </Button>
+              </Field>
+            </FieldGroup>
+          </form>
+        </CardContent>
+        <CardFooter>
+          <Button
+            type="button"
+            variant="link"
+            className="px-0"
+            onClick={() => {
+              setIsLogin(!isLogin)
+              setError('')
+            }}
+          >
+            {isLogin ? '没有账号？注册' : '已有账号？登录'}
+          </Button>
+        </CardFooter>
+      </Card>
     </div>
-  );
-};
+  )
+}
 
-export default Login;
+export default Login

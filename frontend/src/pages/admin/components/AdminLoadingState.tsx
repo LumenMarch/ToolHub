@@ -1,10 +1,9 @@
-import React from 'react';
-import { LoadingSignal } from '../../../components/LoadingSignal';
+import { LoadingSignal } from '@/components/LoadingSignal'
 
 interface AdminLoadingStateProps {
-  ariaLabel: string;
-  label: string;
-  detail: string;
+  ariaLabel: string
+  label: string
+  detail: string
 }
 
 const AdminLoadingState: React.FC<AdminLoadingStateProps> = ({
@@ -12,15 +11,9 @@ const AdminLoadingState: React.FC<AdminLoadingStateProps> = ({
   label,
   detail,
 }) => (
-  <div className="flex min-h-56 items-center border border-border px-5 py-10 md:px-8">
-    <LoadingSignal
-      ariaLabel={ariaLabel}
-      meta="Admin / Secure Data"
-      label={label}
-      detail={detail}
-      className="mx-auto max-w-3xl"
-    />
+  <div className="flex min-h-56 items-center justify-center rounded-xl border px-5 py-10">
+    <LoadingSignal ariaLabel={ariaLabel} label={label} detail={detail} />
   </div>
-);
+)
 
-export default AdminLoadingState;
+export default AdminLoadingState

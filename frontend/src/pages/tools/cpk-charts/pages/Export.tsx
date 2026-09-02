@@ -1,17 +1,24 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ChartBar, DownloadSimple, Images, MagnifyingGlass } from '@phosphor-icons/react';
+import { BarChart3, Download, Images, Search } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
+import { Button } from '@/components/ui/button';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import useOppStore, { getActive, getCorrPair, getMerged, getSharedPair } from '../store/useOppStore';
 import { shortName } from '../lib/stats';
 import { exportChartPng, exportComparedByName, exportCorrelationPng } from '../lib/export';
 import { buildItemCheckImages, exportItemCheckReport } from '../lib/itemCheckReport';
-import { cn } from '../../../../lib/cn';
 import type { ParsedDataset } from '../lib/csv';
 type ExportState = { kind: 'single' } | { kind: 'all'; done: number; total: number } | { kind: 'itemCheck'; done: number; total: number } | null;
 
 const Export: React.FC = () => {
-  const navigate = useNavigate();
   const datasetA = useOppStore((s) => s.datasetA);
   const datasetB = useOppStore((s) => s.datasetB);
   const selectedName = useOppStore((s) => s.selectedName);
@@ -148,123 +155,123 @@ const Export: React.FC = () => {
 
   if (!datasetA && !datasetB) {
     return (
-      <div className="flex h-64 flex-col items-center justify-center border border-dashed border-border p-8 text-center">
-        <ChartBar className="mb-4 size-12 text-muted-foreground opacity-40" />
-        <p className="font-mono text-sm text-muted-foreground">[ 请先在总览上传数据 ]</p>
-        <button type="button" onClick={() => navigate('/tools/cpk-charts')} className="mt-4 border border-border px-3 py-1.5 font-mono text-xs text-foreground hover:border-foreground">
-          返回总览
-        </button>
-      </div>
+      <Empty className="h-64 border border-dashed">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <BarChart3 />
+          </EmptyMedia>
+          <EmptyTitle>请先在总览上传数据</EmptyTitle>
+          <EmptyDescription>返回总览后选择 CSV 再导出。</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => navigate('/tools/cpk-charts')} className="border border-border px-3 py-1.5 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-muted-foreground hover:border-foreground hover:text-foreground">
-          ← 总览
-        </button>
-        <span className="font-mono text-xs font-bold uppercase tracking-[0.14em] text-foreground">导出与报告</span>
-        <span className="font-mono text-[0.625rem] text-muted-foreground">共 {merged.length} 项</span>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 border border-border bg-muted/40 px-4 py-3">
-        <button type="button" onClick={handleExportCurrent} disabled={exporting !== null || (!activeA && !activeB)} className="flex items-center gap-1.5 border border-border px-3 py-1.5 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
-          <DownloadSimple className="size-3.5" />
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/40 px-4 py-3">
+        <Button type="button" variant="outline" size="sm" onClick={handleExportCurrent} disabled={exporting !== null || (!activeA && !activeB)}>
+          <Download data-icon="inline-start" />
           导出当前{selectedName ? ` · ${shortName(selectedName)}` : ''}
-        </button>
-        <button type="button" onClick={handleExportCorrelation} disabled={exporting !== null || !selectedName || !corrYName} className="flex items-center gap-1.5 border border-border px-3 py-1.5 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
-          <DownloadSimple className="size-3.5" />
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={handleExportCorrelation} disabled={exporting !== null || !selectedName || !corrYName}>
+          <Download data-icon="inline-start" />
           导出相关性图{selectedName && corrYName ? ` · ${shortName(selectedName)} vs ${shortName(corrYName)}` : ''}
-        </button>
-        {exporting?.kind === 'single' && <span className="font-mono text-[0.625rem] text-muted-foreground">导出中…</span>}
+        </Button>
+        {exporting?.kind === 'single' ? <span className="text-xs text-muted-foreground">导出中…</span> : null}
       </div>
 
-      <div className="flex flex-col gap-3 border border-border bg-background">
-        <div className="flex flex-col gap-3 border-b border-border px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 border border-border px-3 py-1.5">
-            <MagnifyingGlass className="size-4 shrink-0 text-muted-foreground" />
-            <input type="text" value={exportQuery} onChange={(e) => setExportQuery(e.target.value)} aria-label="搜索测试项" placeholder="搜索测试项…" className="w-full bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground" />
+      <div className="flex flex-col gap-3 rounded-xl border bg-card">
+        <div className="flex flex-col gap-3 border-b px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative min-w-0 sm:w-72">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="text"
+              value={exportQuery}
+              onChange={(e) => setExportQuery(e.target.value)}
+              aria-label="搜索测试项"
+              placeholder="搜索测试项…"
+              className="pl-8"
+            />
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="font-mono text-[0.625rem] uppercase tracking-[0.14em] text-muted-foreground">已勾选 {exportChecked.size}/{merged.length}</span>
-            <button type="button" onClick={() => setExportChecked(new Set(merged.map((m) => m.name)))} className="font-mono text-[0.625rem] uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">已勾选 {exportChecked.size}/{merged.length}</span>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setExportChecked(new Set(merged.map((m) => m.name)))}>
               全选
-            </button>
-            <button type="button" onClick={() => setExportChecked(new Set())} className="font-mono text-[0.625rem] uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground">
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setExportChecked(new Set())}>
               清空
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={() => setExportChecked(new Set(merged.flatMap((m) => (hasAnyLimit(m.name) ? [m.name] : []))))}
-              className="border border-border px-2.5 py-1 font-mono text-[0.625rem] uppercase tracking-[0.12em] text-foreground hover:border-foreground"
             >
               仅保留有规格限
-            </button>
+            </Button>
           </div>
         </div>
 
         <div className="max-h-[28rem] overflow-y-auto px-2 py-1">
-          {filteredExport.length === 0 && <p className="p-4 font-mono text-xs text-muted-foreground">[ 无匹配测试项 ]</p>}
+          {filteredExport.length === 0 ? <p className="p-4 text-sm text-muted-foreground">无匹配测试项</p> : null}
           {filteredExport.map((m) => (
-            <label key={m.name} className="flex w-full cursor-pointer items-center gap-2.5 border-b border-border px-3 py-2 text-left hover:bg-muted">
+            <label key={m.name} className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-muted">
               <input type="checkbox" checked={exportChecked.has(m.name)} onChange={() => setExportChecked((prev) => { const next = new Set(prev); if (next.has(m.name)) next.delete(m.name); else next.add(m.name); return next; })} className="size-3.5 shrink-0 accent-primary" />
-              <span className="min-w-0 flex-1 break-words font-mono text-[0.6875rem] leading-snug text-foreground">{shortName(m.name)}</span>
-              {compareMode && (
-                <span className={cn('shrink-0 border px-1.5 py-0.5 font-mono text-[0.5625rem] uppercase tracking-[0.1em]', m.hasA && m.hasB ? 'border-status-success-foreground bg-status-success-surface text-status-success-foreground' : 'border-status-warning-foreground bg-status-warning-surface text-status-warning-foreground')}>
+              <span className="min-w-0 flex-1 break-words text-sm leading-snug">{shortName(m.name)}</span>
+              {compareMode ? (
+                <span className={cn('shrink-0 rounded-md border px-1.5 py-0.5 text-[0.5625rem]', m.hasA && m.hasB ? 'border-status-success-foreground bg-status-success-surface text-status-success-foreground' : 'border-status-warning-foreground bg-status-warning-surface text-status-warning-foreground')}>
                   {m.hasA && m.hasB ? 'A·B' : !m.hasA ? 'B only' : 'A only'}
                 </span>
-              )}
+              ) : null}
             </label>
           ))}
         </div>
 
-        <div className="flex flex-col gap-3 border-t border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="font-mono text-[0.625rem] tabular-nums text-muted-foreground">
-            {exporting && (exporting.kind === 'all' || exporting.kind === 'itemCheck') && <span>导出中 {exporting.done}/{exporting.total} {exporting.kind === 'itemCheck' ? '(报告)' : '(ZIP)'}</span>}
-            {!exporting && <span className="hidden sm:inline">勾选 {exportChecked.size} 项 · 表头取文件名</span>}
+        <div className="flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs tabular-nums text-muted-foreground">
+            {exporting && (exporting.kind === 'all' || exporting.kind === 'itemCheck') ? <span>导出中 {exporting.done}/{exporting.total} {exporting.kind === 'itemCheck' ? '(报告)' : '(ZIP)'}</span> : null}
+            {!exporting ? <span className="hidden sm:inline">勾选 {exportChecked.size} 项 · 表头取文件名</span> : null}
           </div>
-          <div className="flex items-center justify-end gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {hasBothDatasets ? (
               <>
-                <button type="button" onClick={() => void handleExportImages('A')} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-3 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
+                <Button type="button" variant="outline" size="sm" onClick={() => void handleExportImages('A')} disabled={exporting !== null || exportChecked.size === 0}>
                   {exporting?.kind === 'all' ? '打包中…' : '导出 A_图片'}
-                </button>
-                <button type="button" onClick={() => void handleExportImages('B')} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-3 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => void handleExportImages('B')} disabled={exporting !== null || exportChecked.size === 0}>
                   {exporting?.kind === 'all' ? '打包中…' : '导出 B_图片'}
-                </button>
-                <button type="button" onClick={() => void handleExportReport('A')} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-3 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => void handleExportReport('A')} disabled={exporting !== null || exportChecked.size === 0}>
                   {exporting?.kind === 'itemCheck' ? '生成中…' : '导出 A_报告'}
-                </button>
-                <button type="button" onClick={() => void handleExportReport('B')} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-3 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => void handleExportReport('B')} disabled={exporting !== null || exportChecked.size === 0}>
                   {exporting?.kind === 'itemCheck' ? '生成中…' : '导出 B_报告'}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={() => void handleExportReport('merged')}
                   disabled={exporting !== null || exportChecked.size === 0}
                   title="按 Item_Check_For_Aquila1 格式生成 .numbers：A列Item，B/C列为数据A/B图表，表头为文件名"
-                  className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.14em] text-primary-foreground hover:opacity-90 disabled:opacity-40"
                 >
-                  <Images className="size-4" />
+                  <Images data-icon="inline-start" />
                   {exporting?.kind === 'itemCheck' ? '报告生成中…' : '导出合并报告'}
-                </button>
+                </Button>
               </>
             ) : (
               <>
-                <button type="button" onClick={() => void handleExportImages('all')} disabled={exporting !== null || exportChecked.size === 0} className="border border-border bg-muted px-4 py-2 font-mono text-xs uppercase tracking-[0.14em] text-foreground hover:border-foreground disabled:opacity-40">
+                <Button type="button" variant="outline" size="sm" onClick={() => void handleExportImages('all')} disabled={exporting !== null || exportChecked.size === 0}>
                   {exporting?.kind === 'all' ? 'ZIP 打包中…' : `导出图片 (${exportChecked.size})`}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={() => void handleExportReport('merged')}
                   disabled={exporting !== null || exportChecked.size === 0}
                   title="按 Item_Check_For_Aquila1 格式生成 .numbers：A列Item，B列为图表，表头为文件名"
-                  className="flex items-center gap-1.5 border border-primary bg-primary px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.14em] text-primary-foreground hover:opacity-90 disabled:opacity-40"
                 >
-                  <Images className="size-4" />
+                  <Images data-icon="inline-start" />
                   {exporting?.kind === 'itemCheck' ? '报告生成中…' : '导出报告 (.numbers)'}
-                </button>
+                </Button>
               </>
             )}
           </div>

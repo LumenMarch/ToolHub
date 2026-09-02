@@ -2,7 +2,15 @@
 // 支持 Histogram / CDF / TimeSeries / Correlation 四类，对齐 OPP 各设置面板
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowsOutSimple, DownloadSimple, X } from '@phosphor-icons/react';
+import { Download, Maximize2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
 import useOppStore, { getActive, getCorrPair, getSharedPair } from '../store/useOppStore';
 import CpkHistogram from './CpkHistogram';
 import CdfChart from './CdfChart';
@@ -21,7 +29,6 @@ import {
   sanitizeFilename,
   svgToPng,
 } from '../lib/export';
-import { cn } from '../../../../lib/cn';
 
 export type ChartView = 'histogram' | 'cdf' | 'timeseries' | 'correlation';
 
@@ -148,24 +155,24 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
   };
 
   const renderChart = (analysis: ColumnAnalysis | null) => {
-    if (!analysis) return <div className="flex h-40 items-center justify-center border border-dashed border-border font-mono text-xs text-muted-foreground">无此测试项</div>;
+    if (!analysis) return <div className="flex h-40 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">无此测试项</div>;
     if (view === 'cdf') return <CdfChart analysis={analysis} settings={settings} />;
     if (view === 'timeseries') return <TimeSeriesChart analysis={analysis} settings={settings} />;
     return <CpkHistogram analysis={analysis} settings={settings} />;
   };
 
   const renderCorrPanel = (pair: CorrelationPair | null, st: ReturnType<typeof corrStatsOf>, label: string, keyPrefix: string) => (
-    <div className="relative border border-border bg-background p-2 sm:p-3">
-      <span className={cn('absolute -top-2.5 left-3 z-10 border bg-background px-2 py-0.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.16em]', label === '数据 A' ? 'border-primary/40 text-primary' : 'border-status-warning-foreground/40 text-status-warning-foreground')}>
+    <div className="relative rounded-xl border bg-card p-2 sm:p-3">
+      <span className={cn('absolute -top-2.5 left-3 z-10 rounded-md border bg-background px-2 py-0.5 text-[0.625rem] font-medium', label === '数据 A' ? 'border-primary/40 text-primary' : 'border-status-warning-foreground/40 text-status-warning-foreground')}>
         {label}
       </span>
-      {pair ? <CorrelationChart pair={pair} settings={settings} /> : <div className="flex h-40 items-center justify-center font-mono text-xs text-muted-foreground">{label} 无配对数据</div>}
+      {pair ? <CorrelationChart pair={pair} settings={settings} /> : <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{label} 无配对数据</div>}
       {settings.showStats && st && (
-        <div className="mt-3 grid grid-cols-2 gap-px border border-border bg-border sm:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-4">
           {singleStatsCards(st).map((m) => (
             <div key={keyPrefix + m.label} className="bg-background p-2">
-              <p className="font-mono text-[0.625rem] uppercase tracking-[0.14em] text-muted-foreground">{m.label}</p>
-              <p className="mt-1 font-mono text-xs tabular-nums text-foreground">{m.value}</p>
+              <p className="text-[0.625rem] text-muted-foreground">{m.label}</p>
+              <p className="mt-1 text-xs tabular-nums">{m.value}</p>
             </div>
           ))}
         </div>
@@ -178,19 +185,20 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
       {/* 上：导出按钮行 + 设置行 */}
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <button type="button" onClick={() => navigate('/tools/cpk-charts/export')} className="flex items-center gap-1.5 border border-border px-2.5 py-1 font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground hover:border-primary hover:text-primary">
-            <DownloadSimple className="size-3.5" />
+          <Button type="button" variant="outline" size="sm" onClick={() => navigate('/tools/cpk-charts/export')}>
+            <Download data-icon="inline-start" />
             导出全部
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             disabled={!canExportCurrent}
             onClick={() => void handleExportCurrent()}
-            className="flex items-center gap-1.5 border border-border px-2.5 py-1 font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <DownloadSimple className="size-3.5" />
+            <Download data-icon="inline-start" />
             导出当前
-          </button>
+          </Button>
         </div>
         {isCorr ? (
           <CorrelationSettings
@@ -209,7 +217,7 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
       {/* 下：图区 */}
       {isCorr ? (
         !pairA && !pairB ? (
-          <div className="flex h-64 flex-col items-center justify-center border border-dashed border-border p-8 text-center font-mono text-xs text-muted-foreground">请选择 X 与 Y 测试项以绘制相关性散点</div>
+          <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">请选择 X 与 Y 测试项以绘制相关性散点</div>
         ) : compareMode && datasetA && datasetB ? (
           <div className="flex flex-col gap-5">
             {renderCorrPanel(pairA, statA, '数据 A', 'A')}
@@ -219,47 +227,47 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
           renderCorrPanel(pairA ?? pairB, statA ?? statB, pairA ? '数据 A' : '数据 B', 'S')
         )
       ) : !datasetA && !datasetB ? (
-        <div className="flex h-64 flex-col items-center justify-center border border-dashed border-border p-8 text-center">
-          <p className="font-mono text-sm text-muted-foreground">[ 请先在总览上传数据 ]</p>
+        <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center">
+          <p className="text-sm text-muted-foreground">请先上传数据</p>
         </div>
       ) : !selectedName ? (
-        <p className="font-mono text-sm text-muted-foreground">[ 未选择测试项 ]</p>
+        <p className="text-sm text-muted-foreground">未选择测试项</p>
       ) : !activeCol ? (
-        <div className="flex h-64 flex-col items-center justify-center border border-dashed border-border p-8 text-center">
-          <p className="font-mono text-sm text-muted-foreground">[ 该测试项无数据: {shortName(selectedName)} ]</p>
+        <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center">
+          <p className="text-sm text-muted-foreground">该测试项无数据: {shortName(selectedName)}</p>
         </div>
       ) : compareMode && datasetA && datasetB ? (
         <div className="flex flex-col gap-5">
           <div className="relative">
-            <span className="absolute -top-2.5 left-3 z-10 border border-primary/40 bg-background px-2 py-0.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.16em] text-primary">数据 A</span>
-            <div className="relative border border-border bg-background p-2 sm:p-3">
+            <span className="absolute -top-2.5 left-3 z-10 rounded-md border border-primary/40 bg-background px-2 py-0.5 text-[0.625rem] font-medium text-primary">数据 A</span>
+            <div className="relative rounded-xl border bg-card p-2 sm:p-3">
               {renderChart(activeA?.analysis ?? null)}
-              {activeA && (
-                <button type="button" onClick={() => setZoom('A')} className="absolute right-2 top-2 flex items-center gap-1 border border-border bg-background px-2 py-1 font-mono text-[0.625rem] text-muted-foreground hover:border-foreground hover:text-foreground">
-                  <ArrowsOutSimple className="size-3.5" />放大
-                </button>
-              )}
+              {activeA ? (
+                <Button type="button" variant="outline" size="xs" onClick={() => setZoom('A')} className="absolute top-2 right-2">
+                  <Maximize2 data-icon="inline-start" />放大
+                </Button>
+              ) : null}
             </div>
           </div>
           <div className="relative">
-            <span className="absolute -top-2.5 left-3 z-10 border border-status-warning-foreground/40 bg-background px-2 py-0.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.16em] text-status-warning-foreground">数据 B</span>
-            <div className="relative border border-border bg-background p-2 sm:p-3">
+            <span className="absolute -top-2.5 left-3 z-10 rounded-md border border-status-warning-foreground/40 bg-background px-2 py-0.5 text-[0.625rem] font-medium text-status-warning-foreground">数据 B</span>
+            <div className="relative rounded-xl border bg-card p-2 sm:p-3">
               {renderChart(activeB?.analysis ?? null)}
-              {activeB && (
-                <button type="button" onClick={() => setZoom('B')} className="absolute right-2 top-2 flex items-center gap-1 border border-border bg-background px-2 py-1 font-mono text-[0.625rem] text-muted-foreground hover:border-foreground hover:text-foreground">
-                  <ArrowsOutSimple className="size-3.5" />放大
-                </button>
-              )}
+              {activeB ? (
+                <Button type="button" variant="outline" size="xs" onClick={() => setZoom('B')} className="absolute top-2 right-2">
+                  <Maximize2 data-icon="inline-start" />放大
+                </Button>
+              ) : null}
             </div>
           </div>
         </div>
       ) : (
-        <div className="border border-border bg-background p-2 sm:p-3">{renderChart(activeCol)}</div>
+        <div className="rounded-xl border bg-card p-2 sm:p-3">{renderChart(activeCol)}</div>
       )}
 
       {/* CPK 统计网格（histogram/cdf/timeseries 单测试项时显示） */}
       {!isCorr && activeCol && !(compareMode && datasetA && datasetB) && (
-        <div className="grid grid-cols-2 gap-px border border-border bg-border sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-4">
           {[
             { label: 'Data Count', value: String(activeCol.stat.count) },
             { label: 'NA Count', value: String(activeCol.stat.naCount) },
@@ -271,8 +279,8 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
             { label: 'Cpl', value: formatIndex(activeCol.stat.cpl) },
           ].map((mm) => (
             <div key={mm.label} className="bg-background p-3">
-              <p className="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground">{mm.label}</p>
-              <p className="mt-1 font-mono text-sm font-bold tabular-nums text-foreground">{mm.value}</p>
+              <p className="text-[0.625rem] text-muted-foreground">{mm.label}</p>
+              <p className="mt-1 text-sm font-medium tabular-nums">{mm.value}</p>
             </div>
           ))}
         </div>
@@ -280,13 +288,13 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
 
       {/* 对比模式：指标对比表 */}
       {!isCorr && compareMode && activeA && activeB && (
-        <div className="overflow-x-auto border border-border bg-background">
-          <table className="w-full border-collapse font-mono text-xs">
+        <div className="overflow-x-auto rounded-xl border bg-card">
+          <table className="w-full border-collapse text-xs">
             <thead>
-              <tr className="border-b border-border">
-                <th className="px-3 py-2 text-left text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground">指标</th>
-                <th className="px-3 py-2 text-right text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground">数据 A</th>
-                <th className="px-3 py-2 text-right text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground">数据 B</th>
+              <tr className="border-b">
+                <th className="px-3 py-2 text-left text-[0.625rem] text-muted-foreground">指标</th>
+                <th className="px-3 py-2 text-right text-[0.625rem] text-muted-foreground">数据 A</th>
+                <th className="px-3 py-2 text-right text-[0.625rem] text-muted-foreground">数据 B</th>
               </tr>
             </thead>
             <tbody>
@@ -318,22 +326,16 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
         </div>
       )}
 
-      {/* 放大弹窗 */}
-      {zoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setZoom(null)}>
-          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-border px-5 py-3">
-              <span className="font-mono text-[0.625rem] uppercase tracking-[0.2em] text-muted-foreground">[ 数据集 {zoom} · 放大视图 ]</span>
-              <button type="button" onClick={() => setZoom(null)} aria-label="关闭" className="p-1 text-muted-foreground hover:text-foreground">
-                <X className="size-5" />
-              </button>
-            </div>
-            <div className="overflow-auto p-4">
-              {zoom === 'A' && activeA ? renderChart(activeA.analysis) : zoom === 'B' && activeB ? renderChart(activeB.analysis) : null}
-            </div>
+      <Dialog open={Boolean(zoom)} onOpenChange={(open) => { if (!open) setZoom(null); }}>
+        <DialogContent className="max-h-[92vh] w-full max-w-5xl overflow-auto sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>数据集 {zoom} · 放大视图</DialogTitle>
+          </DialogHeader>
+          <div className="overflow-auto">
+            {zoom === 'A' && activeA ? renderChart(activeA.analysis) : zoom === 'B' && activeB ? renderChart(activeB.analysis) : null}
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

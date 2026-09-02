@@ -72,18 +72,16 @@ export function SearchableSelect({
           aria-expanded={open}
           aria-label={ariaLabel}
           disabled={disabled}
+          type="button"
           className={cn(
-            "w-full justify-between rounded-none border-0 border-b border-border bg-transparent px-0 py-2 font-mono text-base font-semibold tracking-tight",
-            "hover:bg-transparent hover:text-foreground",
-            "focus-visible:border-primary focus-visible:ring-0",
-            "data-[state=open]:border-primary",
+            "w-full justify-between font-normal",
             !value && "text-muted-foreground",
           )}
         >
           <span className="truncate text-left">
             {selectedLabel ?? placeholder}
           </span>
-          <ChevronsUpDownIcon className="ml-2 size-4 shrink-0 opacity-40" />
+          <ChevronsUpDownIcon className="size-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
@@ -104,7 +102,6 @@ export function SearchableSelect({
                     onValueChange(currentValue === value ? currentValue : option.value)
                     setOpen(false)
                   }}
-                  className="font-mono text-sm"
                 >
                   <span className="truncate">{option.label}</span>
                   <CheckIcon

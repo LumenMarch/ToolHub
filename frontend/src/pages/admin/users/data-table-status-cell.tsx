@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import {
   Tooltip,
   TooltipContent,
@@ -30,20 +31,21 @@ export function DataTableStatusCell({ user }: { user: User }) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
+          <Button
             type='button'
+            variant='ghost'
             aria-label='查看登录会话'
             onClick={openSessions}
-            className='flex w-full cursor-pointer items-center gap-1.5 hover:underline'
+            className='h-auto w-full justify-start gap-1.5 px-1 py-0.5'
           >
             <span
               className='size-2 rounded-full bg-status-success-foreground'
               aria-hidden='true'
             />
-            <span className='text-[11px] font-mono uppercase tracking-widest text-status-success-foreground'>
+            <span className='text-sm text-status-success-foreground'>
               在线
             </span>
-          </button>
+          </Button>
         </TooltipTrigger>
         <TooltipContent>{tooltipText}</TooltipContent>
       </Tooltip>
@@ -54,14 +56,15 @@ export function DataTableStatusCell({ user }: { user: User }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
+        <Button
           type='button'
+          variant='ghost'
           aria-label='查看登录会话'
           onClick={openSessions}
-          className='w-full cursor-pointer text-left font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-primary'
+          className='h-auto w-full justify-start px-1 py-0.5 text-sm text-muted-foreground'
         >
           上次登录 {formatAdminDate(user.last_login_at)}
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent>{tooltipText}</TooltipContent>
     </Tooltip>

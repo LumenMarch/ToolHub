@@ -1,27 +1,29 @@
 import axios from 'axios';
 import {
-  ArrowCounterClockwise,
-  ChartBar,
-  CheckCircle,
-  DownloadSimple,
+  AlertTriangle,
+  BarChart3,
+  CircleCheck,
+  Download,
   FolderOpen,
-  Trash,
-  TreeStructure,
-  Warning,
+  FolderTree,
+  RotateCcw,
+  Trash2,
   X,
-} from '@phosphor-icons/react';
+} from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { zip } from 'fflate';
-import { gsap } from 'gsap';
 import React, {
   useEffect,
   useRef,
   useState,
 } from 'react';
 
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
+import { cn } from '@/lib/utils';
 import api from '../../../api/axios';
 import { LoadingSignal } from '../../../components/LoadingSignal';
-import { cn } from '../../../lib/cn';
 import { formatTime, parseServerDate } from '../../../lib/format-time';
 import {
   type UploadState,
@@ -259,13 +261,13 @@ const UploadProgressRow: React.FC<{
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-4">
-        <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           {label}
         </span>
-        <span className="inline-flex items-center gap-2 font-mono text-xs tabular-nums text-foreground">
+        <span className="inline-flex items-center gap-2 text-xs tabular-nums">
           {isCompleted ? (
             <>
-              <CheckCircle weight="fill" className="size-4 text-primary" />
+              <CircleCheck className="size-4 text-primary" />
               {upload.cacheHit ? '已使用缓存' : '已完成'}
             </>
           ) : isHashing ? (
@@ -295,7 +297,7 @@ const UploadProgressRow: React.FC<{
         />
       </div>
       {upload.bytesTotal > 0 && upload.bytesAccepted > 0 && !isCompleted && (
-        <p className="mt-2 font-mono text-[0.625rem] tabular-nums text-muted-foreground">
+        <p className="mt-2 text-[0.625rem] tabular-nums text-muted-foreground">
           已确认 {formatBytes(upload.bytesAccepted)} / {formatBytes(upload.bytesTotal)}
         </p>
       )}
@@ -307,11 +309,11 @@ const Metric: React.FC<{ label: string; value: number }> = ({
   label,
   value,
 }) => (
-  <div className="border-t border-border pt-4">
-    <p className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground">
+  <div className="border-t pt-4">
+    <p className="text-xs text-muted-foreground">
       {label}
     </p>
-    <p className="mt-3 font-mono text-3xl font-bold tabular-nums md:text-4xl">
+    <p className="mt-2 text-2xl font-semibold tabular-nums">
       {NUMBER_FORMATTER.format(value)}
     </p>
   </div>
@@ -340,11 +342,10 @@ const MergeProgress: React.FC<{ progress: AtlasMergeJobProgress | null }> = ({
   return (
     <div className="mb-8">
       <div className="mb-2 flex items-center justify-between gap-4">
-        <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
-          [ MERGE: {NUMBER_FORMATTER.format(done)} /{' '}
-          {NUMBER_FORMATTER.format(total)} UNITS ]
+        <span className="text-xs text-muted-foreground">
+          合并 {NUMBER_FORMATTER.format(done)} / {NUMBER_FORMATTER.format(total)} units
         </span>
-        <span className="font-mono text-xs tabular-nums text-foreground">
+        <span className="text-xs tabular-nums">
           {percent}%
         </span>
       </div>
@@ -354,7 +355,7 @@ const MergeProgress: React.FC<{ progress: AtlasMergeJobProgress | null }> = ({
           style={{ width: `${percent}%` }}
         />
       </div>
-      <p className="mt-3 font-mono text-xs text-muted-foreground">
+      <p className="mt-3 text-xs text-muted-foreground">
         正在合并测试日志，请勿关闭页面
       </p>
     </div>
@@ -383,19 +384,17 @@ const AnalysisInProgress: React.FC<{
   const isPacking = step === 'packing';
 
   return (
-    <section className="flex min-h-96 flex-col justify-start gap-8 border-2 border-border p-6 md:p-10">
+    <section className="flex min-h-96 flex-col justify-start gap-8 rounded-xl border bg-card p-6">
       <div className="flex items-start justify-between gap-6">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">
-            [{` ${
-              step === 'processing'
-                ? '合并中'
-                : step === 'uploading'
-                  ? '上传中'
-                  : '打包中'
-            } `}]
+          <p className="text-xs text-muted-foreground">
+            {step === 'processing'
+              ? '合并中'
+              : step === 'uploading'
+                ? '上传中'
+                : '打包中'}
           </p>
-          <h2 className="mt-4 text-3xl font-bold tracking-tight md:text-5xl">
+          <h2 className="mt-1 text-lg font-medium tracking-tight">
             {step === 'processing'
               ? '正在合并测试日志'
               : step === 'uploading'
@@ -403,7 +402,7 @@ const AnalysisInProgress: React.FC<{
                 : '正在整理日志文件'}
           </h2>
         </div>
-        <TreeStructure weight="bold" className="size-10 shrink-0 text-primary" />
+        <FolderTree className="size-6 shrink-0 text-muted-foreground" />
       </div>
 
       <div>
@@ -420,22 +419,22 @@ const AnalysisInProgress: React.FC<{
             className="mb-8"
           />
         ) : step === 'uploading' ? (
-          <div className="mb-12 space-y-6">
+          <div className="mb-12 flex flex-col gap-6">
             <UploadProgressRow label="日志归档 zip" upload={upload} />
           </div>
         ) : (
           <MergeProgress progress={jobProgress} />
         )}
 
-        <dl className="grid gap-5 border-t border-border pt-6 font-mono text-xs md:grid-cols-3">
+        <dl className="grid gap-5 border-t pt-6 text-xs md:grid-cols-3">
           <div className="min-w-0">
-            <dt className="uppercase tracking-[0.16em] text-muted-foreground">
+            <dt className="text-muted-foreground">
               归档目录
             </dt>
             <dd className="mt-2 break-words text-foreground">{rootName}</dd>
           </div>
           <div className="min-w-0">
-            <dt className="uppercase tracking-[0.16em] text-muted-foreground">
+            <dt className="text-muted-foreground">
               CSV 文件
             </dt>
             <dd className="mt-2 break-words text-foreground">
@@ -444,7 +443,7 @@ const AnalysisInProgress: React.FC<{
             </dd>
           </div>
           <div className="min-w-0">
-            <dt className="uppercase tracking-[0.16em] text-muted-foreground">
+            <dt className="text-muted-foreground">
               归档体积
             </dt>
             <dd className="mt-2 break-words text-foreground">
@@ -469,18 +468,17 @@ const ParseErrorBanner: React.FC<{ errors: string[] }> = ({ errors }) => {
     <section
       role="alert"
       aria-label="解析错误"
-      className="mt-8 border-2 border-status-danger-foreground/40 bg-status-danger-surface p-6"
+      className="mt-8 rounded-xl border border-status-danger-foreground/40 bg-status-danger-surface p-6"
     >
       <div className="flex items-start gap-4">
-        <Warning
-          weight="fill"
-          className="mt-1 size-6 shrink-0 text-status-danger-foreground"
+        <AlertTriangle
+          className="mt-1 size-5 shrink-0 text-status-danger-foreground"
         />
         <div className="min-w-0">
-          <h3 className="font-bold text-status-danger-foreground">
+          <h3 className="font-medium text-status-danger-foreground">
             部分文件解析失败
           </h3>
-          <p className="mt-2 font-mono text-xs leading-relaxed text-status-danger-foreground/80">
+          <p className="mt-2 text-xs leading-relaxed text-status-danger-foreground/80">
             合并结果仍可用，但以下 {NUMBER_FORMATTER.format(errors.length)} 个文件
             未计入，请核对后重新分析。
           </p>
@@ -488,7 +486,7 @@ const ParseErrorBanner: React.FC<{ errors: string[] }> = ({ errors }) => {
             {errors.map((message, index) => (
               <li
                 key={`${message}-${index}`}
-                className="break-words border-t border-status-danger-foreground/20 pt-3 font-mono text-xs text-status-danger-foreground/80"
+                className="break-words border-t border-status-danger-foreground/20 pt-3 text-xs text-status-danger-foreground/80"
               >
                 {message}
               </li>
@@ -528,7 +526,6 @@ const readErrorMessage = async (error: unknown) => {
 };
 
 const AtlasMerge: React.FC = () => {
-  const phaseRef = useRef<HTMLDivElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
   const isAnalyzingRef = useRef(false);
 
@@ -549,21 +546,6 @@ const AtlasMerge: React.FC = () => {
   const [isExpired, setIsExpired] = useState(false);
 
   const archiveUpload = useTusUpload();
-
-  useEffect(() => {
-    if (
-      !phaseRef.current ||
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
-      return;
-    }
-
-    gsap.fromTo(
-      phaseRef.current,
-      { y: 8, opacity: 0 },
-      { y: 0, opacity: 1, duration: 0.4, ease: 'expo.out' },
-    );
-  }, [phase]);
 
   useEffect(() => {
     if (!analysis?.expires_at) {
@@ -820,24 +802,19 @@ const AtlasMerge: React.FC = () => {
   const hiddenUnitCount = Math.max(0, (stats?.units.length ?? 0) - 8);
 
   return (
-    <div className="flex w-full flex-col pb-20 min-[80rem]:-mx-44 min-[80rem]:w-auto">
-      <p className="mb-8 max-w-2xl font-mono text-xs uppercase leading-relaxed tracking-[0.18em] text-muted-foreground md:text-sm">
-        选择 unit-archive 日志目录，自动过滤出 system 与 user 下的 CSV
-        并合并为统一结果。
-      </p>
-
-      <div ref={phaseRef}>
+    <div className="flex w-full flex-col">
+      <div>
         {phase === 'upload' && (
           <>
-            <section className="border-2 border-border" aria-labelledby="atlas-archive-title">
+            <section className="overflow-hidden rounded-xl border bg-card" aria-labelledby="atlas-archive-title">
               <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-                <div className="min-w-0 p-6 md:p-8 lg:p-10">
-                  <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">
-                    [ ARCHIVE: {stats ? `${stats.units.length} UNITS · ${stats.runs.length} RUNS` : 'NO DIRECTORY'} ]
+                <div className="min-w-0 p-6">
+                  <p className="text-xs text-muted-foreground">
+                    {stats ? `${stats.units.length} units · ${stats.runs.length} runs` : '尚未选择目录'}
                   </p>
                   <h2
                     id="atlas-archive-title"
-                    className="mt-4 text-3xl font-bold tracking-tight md:text-4xl"
+                    className="mt-1 text-lg font-medium tracking-tight"
                   >
                     选择测试日志目录
                   </h2>
@@ -855,22 +832,19 @@ const AtlasMerge: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => directoryInputRef.current?.click()}
-                    className="mt-8 flex min-h-16 w-full items-center justify-between gap-4 border-2 border-dashed border-border px-6 text-left transition-colors hover:border-primary"
+                    className="mt-6 flex min-h-16 w-full items-center justify-between gap-4 rounded-xl border border-dashed px-6 text-left transition-colors hover:border-primary hover:bg-muted/40"
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-lg font-bold">
+                      <span className="block truncate text-sm font-medium">
                         {stats ? stats.rootName : '选择 unit-archive 目录'}
                       </span>
-                      <span className="mt-1 block font-mono text-xs text-muted-foreground">
+                      <span className="mt-1 block text-xs text-muted-foreground">
                         {stats
                           ? '点击重新选择目录'
                           : 'unit 目录 → run 目录 → system/ 与 user/ 子目录'}
                       </span>
                     </span>
-                    <FolderOpen
-                      weight="bold"
-                      className="size-7 shrink-0 text-primary"
-                    />
+                    <FolderOpen className="size-5 shrink-0 text-muted-foreground" />
                   </button>
 
                   {stats && (
@@ -885,27 +859,28 @@ const AtlasMerge: React.FC = () => {
                         />
                       </div>
 
-                      <div className="mt-6 flex items-center justify-between gap-4 border-t border-border pt-5 font-mono text-xs">
+                      <div className="mt-6 flex items-center justify-between gap-4 border-t pt-5 text-xs">
                         <span className="text-muted-foreground">
                           已排除 {NUMBER_FORMATTER.format(stats.excludedCount)} 个无关文件
                           （约 {formatBytes(stats.excludedBytes)}）
                         </span>
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="sm"
                           onClick={() => setStats(null)}
-                          className="inline-flex min-h-10 items-center gap-2 text-muted-foreground transition-colors hover:text-primary"
                         >
-                          <X weight="bold" className="size-4" />
+                          <X data-icon="inline-start" />
                           清除选择
-                        </button>
+                        </Button>
                       </div>
 
                       {stats.units.length > 0 && (
                         <div className="mt-6 border-t border-border pt-5">
-                          <p className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground">
+                          <p className="text-xs text-muted-foreground">
                             顶层 unit 目录
                           </p>
-                          <ul className="mt-3 grid gap-1 font-mono text-xs sm:grid-cols-2">
+                          <ul className="mt-3 grid gap-1 text-xs sm:grid-cols-2">
                             {visibleUnits.map((unit) => (
                               <li
                                 key={unit}
@@ -916,7 +891,7 @@ const AtlasMerge: React.FC = () => {
                             ))}
                           </ul>
                           {hiddenUnitCount > 0 && (
-                            <p className="mt-2 font-mono text-xs text-muted-foreground">
+                            <p className="mt-2 text-xs text-muted-foreground">
                               + {NUMBER_FORMATTER.format(hiddenUnitCount)} 个更多
                             </p>
                           )}
@@ -926,16 +901,16 @@ const AtlasMerge: React.FC = () => {
                   )}
                 </div>
 
-                <aside className="flex min-w-0 flex-col justify-between border-t border-border bg-muted p-6 md:p-8 lg:border-l lg:border-t-0 lg:p-10">
+                <aside className="flex min-w-0 flex-col justify-between border-t bg-muted p-6 lg:border-l lg:border-t-0">
                   <div>
-                    <TreeStructure weight="bold" className="size-9 text-primary" />
-                    <h3 className="mt-6 text-2xl font-bold">合并白名单</h3>
-                    <p className="mt-4 font-mono text-xs leading-relaxed text-muted-foreground">
+                    <FolderTree className="size-5 text-muted-foreground" />
+                    <h3 className="mt-4 text-base font-medium">合并白名单</h3>
+                    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                       仅打包以下 3 类 CSV，其余日志（device.log、*.plist、
                       Datalogger、*_flow.log 等）一律丢弃，上传体积可从
                       GB 级降到百 MB 级。
                     </p>
-                    <ul className="mt-6 grid gap-3 font-mono text-xs">
+                    <ul className="mt-4 grid gap-2 text-xs">
                       {[
                         'system/time.csv',
                         'system/records.csv',
@@ -943,37 +918,34 @@ const AtlasMerge: React.FC = () => {
                       ].map((pattern) => (
                         <li
                           key={pattern}
-                          className="break-words border border-border bg-background px-4 py-3"
+                          className="break-words rounded-lg border bg-background px-3 py-2"
                         >
                           {pattern}
                         </li>
                       ))}
                     </ul>
                   </div>
-                  <p className="mt-8 font-mono text-xs leading-relaxed text-muted-foreground">
+                  <p className="mt-6 text-xs leading-relaxed text-muted-foreground">
                     支持 Chromium 内核浏览器（Chrome / Edge）目录选择。
                   </p>
                 </aside>
               </div>
             </section>
 
-            <div className="mt-8 flex flex-col gap-6 border-t-2 border-border pt-8 md:flex-row md:items-center">
-              <button
+            <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-center">
+              <Button
                 type="button"
                 onClick={handleAnalyze}
                 disabled={!stats || !stats.files.length}
-                className="flex min-h-14 items-center justify-center gap-3 whitespace-nowrap bg-foreground px-8 py-4 text-lg font-bold uppercase tracking-tight text-background transition-colors hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <ChartBar weight="bold" className="size-6" />
+                <BarChart3 data-icon="inline-start" />
                 分析
-              </button>
-              <div className="min-h-12 flex-1 font-mono text-sm leading-relaxed">
-                {error && (
-                  <p role="alert" className="text-primary">
-                    [ 异常 ] {error}
-                  </p>
-                )}
-              </div>
+              </Button>
+              {error ? (
+                <Alert variant="destructive" className="flex-1">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
             </div>
           </>
         )}
@@ -993,34 +965,35 @@ const AtlasMerge: React.FC = () => {
 
         {phase === 'ready' && analysis && (
           <>
-            <section className="border-2 border-border" aria-labelledby="atlas-result-title">
+            <section className="overflow-hidden rounded-xl border bg-card" aria-labelledby="atlas-result-title">
               <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-                <div className="min-w-0 p-6 md:p-8 lg:p-10">
-                  <div className="flex flex-col gap-5 border-b border-border pb-7 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 p-6">
+                  <div className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <p className="font-mono text-xs uppercase tracking-[0.2em] text-status-success-foreground">
-                        [ 合并完成 ]
+                      <p className="text-xs text-status-success-foreground">
+                        合并完成
                       </p>
                       <h2
                         id="atlas-result-title"
-                        className="mt-3 text-3xl font-bold tracking-tight md:text-4xl"
+                        className="mt-1 text-lg font-medium tracking-tight"
                       >
                         结果可以复核
                       </h2>
-                      <p className="mt-3 font-mono text-xs text-muted-foreground">
+                      <p className="mt-1 text-xs text-muted-foreground">
                         {analysis.unit_count ?? 0} 个 unit ·{' '}
                         {analysis.run_count ?? 0} 行记录 · 数据源{' '}
                         {analysis.data_source ?? '—'}
                       </p>
                     </div>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={handleReset}
-                      className="inline-flex min-h-11 items-center gap-2 self-start whitespace-nowrap font-mono text-xs text-muted-foreground transition-colors hover:text-primary"
                     >
-                      <ArrowCounterClockwise weight="bold" />
+                      <RotateCcw data-icon="inline-start" />
                       重新分析
-                    </button>
+                    </Button>
                   </div>
 
                   <div className="mt-7 grid grid-cols-2 gap-x-5 gap-y-7 xl:grid-cols-4">
@@ -1035,19 +1008,16 @@ const AtlasMerge: React.FC = () => {
                   <ParseErrorBanner errors={analysis.parse_errors ?? []} />
                 </div>
 
-                <aside className="flex min-w-0 flex-col justify-between border-t border-border bg-muted p-6 md:p-8 lg:border-l lg:border-t-0 lg:p-10">
+                <aside className="flex min-w-0 flex-col justify-between border-t bg-muted p-6 lg:border-l lg:border-t-0">
                   <div>
-                    <DownloadSimple
-                      weight="bold"
-                      className="size-9 text-primary"
-                    />
-                    <h3 className="mt-6 text-2xl font-bold">导出合并结果</h3>
-                    <p className="mt-4 break-words font-mono text-xs leading-relaxed text-muted-foreground">
+                    <Download className="size-5 text-muted-foreground" />
+                    <h3 className="mt-4 text-base font-medium">导出合并结果</h3>
+                    <p className="mt-2 break-words text-xs leading-relaxed text-muted-foreground">
                       {analysis.download_filename}
                     </p>
                     <p
                       className={cn(
-                        'mt-3 font-mono text-xs',
+                        'mt-3 text-xs',
                         isExpired
                           ? 'text-status-danger-foreground'
                           : 'text-muted-foreground',
@@ -1061,48 +1031,44 @@ const AtlasMerge: React.FC = () => {
                     </p>
                   </div>
 
-                  <div className="mt-10 grid gap-3">
-                    <button
+                  <div className="mt-8 grid gap-3">
+                    <Button
                       type="button"
                       onClick={handleDownload}
                       disabled={isDownloading || isExpired}
-                      className="flex min-h-14 w-full items-center justify-center gap-3 whitespace-nowrap bg-foreground px-6 py-4 font-bold text-background transition-colors hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {isDownloading ? (
-                        <span className="size-5 animate-spin border-2 border-current border-r-transparent" />
+                        <Spinner data-icon="inline-start" />
                       ) : (
-                        <DownloadSimple weight="bold" className="size-5" />
+                        <Download data-icon="inline-start" />
                       )}
                       {isDownloading ? '正在下载' : '下载 CSV'}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
+                      variant="destructive"
                       onClick={handleDeleteResult}
                       disabled={isBusy}
-                      className="flex min-h-12 w-full items-center justify-center gap-3 whitespace-nowrap border border-status-danger-foreground/50 px-6 font-bold text-status-danger-foreground transition-colors hover:bg-status-danger-foreground hover:text-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {isBusy ? (
-                        <span className="size-4 animate-spin border-2 border-current border-r-transparent" />
+                        <Spinner data-icon="inline-start" />
                       ) : (
-                        <Trash weight="bold" className="size-4" />
+                        <Trash2 data-icon="inline-start" />
                       )}
                       {isBusy ? '正在删除' : '删除结果'}
-                    </button>
+                    </Button>
                     {downloadError && (
                       <p
                         role="alert"
                         className="mt-1 flex gap-2 text-sm text-status-danger-foreground"
                       >
-                        <Warning weight="fill" className="mt-0.5 size-4 shrink-0" />
+                        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                         {downloadError}
                       </p>
                     )}
                     {!downloadError && !isExpired && (
                       <p className="mt-1 flex gap-2 text-xs leading-relaxed text-muted-foreground">
-                        <CheckCircle
-                          weight="fill"
-                          className="mt-0.5 size-4 shrink-0 text-status-success-foreground"
-                        />
+                        <CircleCheck className="mt-0.5 size-4 shrink-0 text-status-success-foreground" />
                         结果在有效期内可重复下载。
                       </p>
                     )}
