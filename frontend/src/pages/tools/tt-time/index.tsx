@@ -1,19 +1,29 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import {
-  ArrowsClockwise,
-  FileCsv,
-  MagicWand,
-  Warning,
-} from '@phosphor-icons/react';
+import { Database, RefreshCw, Sparkles } from 'lucide-react';
 
-import api from '../../../api/axios';
-import FileDropZone from '../../../components/FileDropZone';
+import api from '@/api/axios';
+import FileDropZone from '@/components/FileDropZone';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import {
-  TtCdfChart,
-  TtHistogramChart,
-  type HistogramMode,
-} from './charts';
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Field, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { TtCdfChart, TtHistogramChart, type HistogramMode } from './charts';
 import {
   binByWidth,
   buildAnalysisContext,
@@ -40,15 +50,13 @@ const StatItem: React.FC<{ label: string; value: number; unit?: string }> = ({
   value,
   unit = 'S',
 }) => (
-  <div className="flex items-baseline justify-between border-b border-border/60 pb-2 last:border-b-0">
-    <span className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground">
-      {label}
-    </span>
-    <span className="font-mono text-lg font-semibold tabular-nums">
+  <div className="flex items-baseline justify-between gap-3 py-1.5">
+    <dt className="text-sm text-muted-foreground">{label}</dt>
+    <dd className="text-sm font-semibold tabular-nums">
       {Number.isFinite(value)
         ? `${Number.isInteger(value) ? value : value.toFixed(1)} ${unit}`
         : '—'}
-    </span>
+    </dd>
   </div>
 );
 
@@ -130,229 +138,218 @@ const TtTimeTool: React.FC = () => {
       api.post<AnalysisResult>('/tools/tt-time/analyze', ctx).then((r) => r.data),
   });
 
+  if (phase === 'upload') {
+    return (
+      <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>上传测试日志 CSV</CardTitle>
+            <CardDescription>数据仅在本地浏览器内解析，不上传服务器。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FileDropZone
+              id="tt-time-csv"
+              label="测试日志 CSV"
+              description="拖拽或点击选择 Export-*.csv 文件"
+              accept=".csv,text/csv"
+              file={null}
+              onSelect={(file) => void onFileSelect(file)}
+            />
+            <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <Database className="size-4 shrink-0" />
+              需要列：Station ID、StartTime、EndTime
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const parseError = parse && parse.rows.length === 0;
+  const adviceError =
+    adviceMutation.isError && adviceMutation.error instanceof Error
+      ? adviceMutation.error.message
+      : adviceMutation.data?.error ?? null;
+
   return (
-    <div className="flex w-full min-w-0 flex-col pb-20 min-[80rem]:-mx-44 min-[80rem]:w-auto">
-      {phase === 'upload' ? (
-        <section className="flex flex-col items-center gap-8 py-10">
-          <div className="text-center">
-            <p className="mb-1.5 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-primary">
-              Tool / Test Time
-            </p>
-            <h2 className="text-[26px] font-bold tracking-tight md:text-[30px]">
-              TT 时间计算
-            </h2>
-            <p className="mx-auto mt-3 max-w-xl font-mono text-xs text-muted-foreground">
-              上传测试工站导出的日志 CSV，按机台统计测试时间分布、占比与累计曲线。
-              数据仅在本地浏览器内解析，不上传服务器。
-            </p>
-          </div>
+    <div className="flex w-full min-w-0 flex-col gap-6">
+      {/* 头部：文件名 + 重新上传 */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+          <Database className="size-4 shrink-0" />
+          <span className="truncate">{fileName}</span>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={reset}>
+          <RefreshCw data-icon="inline-start" />
+          重新上传
+        </Button>
+      </div>
 
-          <FileDropZone
-            id="tt-time-csv"
-            label="测试日志 CSV"
-            description="拖拽或点击选择 Export-*.csv 文件"
-            accept=".csv,text/csv"
-            file={null}
-            onSelect={onFileSelect}
-          />
+      {/* 解析失败提示 */}
+      {parseError ? (
+        <Alert variant="destructive">
+          <AlertDescription>
+            未解析到有效数据：请确认文件包含 Station ID / StartTime / EndTime 三列，
+            且时间格式为 YYYY/M/D H:mm。
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
-          <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-            <FileCsv weight="fill" className="size-4" />
-            需要列：Station ID、StartTime、EndTime
-          </div>
-        </section>
-      ) : (
-        <div className="flex flex-col gap-6">
-          {/* 头部：文件名 + 控制条 */}
-          <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
-            <div>
-              <p className="mb-1.5 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-primary">
-                Tool / Test Time
-              </p>
-              <h2 className="text-[22px] font-bold tracking-tight md:text-[26px]">
-                TT 时间计算
-              </h2>
-              <p className="mt-1 max-w-xl truncate font-mono text-xs text-muted-foreground">
-                {fileName}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={reset}
-              className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-primary"
-            >
-              <ArrowsClockwise weight="bold" className="size-4" />
-              重新上传
-            </button>
-          </header>
-
-          {/* 数据异常提示 */}
-          {parse && parse.rows.length === 0 && (
-            <div className="flex items-center gap-4 border border-status-danger-foreground/40 bg-status-danger-surface px-5 py-4">
-              <Warning weight="fill" className="size-5 shrink-0 text-status-danger-foreground" />
-              <p className="font-mono text-xs text-status-danger-foreground">
-                未解析到有效数据：请确认文件包含 Station ID / StartTime / EndTime 三列，
-                且时间格式为 YYYY/M/D H:mm。
-              </p>
-            </div>
-          )}
-
-          {/* 控件行 */}
-          <div className="flex flex-wrap items-end gap-6">
-            {/* 模式切换 */}
-            <div className="flex flex-col gap-2">
-              <span className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground">
-                统计模式
-              </span>
-              <div className="inline-flex overflow-hidden rounded-md border border-border">
-                {(['percent', 'count'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMode(m)}
-                    className={`px-4 py-1.5 font-mono text-xs uppercase tracking-widest transition-colors ${
-                      mode === m
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-transparent text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {m === 'percent' ? '百分比' : 'Count'}
-                  </button>
-                ))}
+      {/* 统计口径控制 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>统计口径</CardTitle>
+          <CardDescription>选择分布口径、分箱宽度与目标机台。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-5 md:flex-row md:items-end md:gap-6">
+            <Field className="flex-1">
+              <FieldLabel>统计模式</FieldLabel>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={mode === 'percent' ? 'default' : 'outline'}
+                  onClick={() => setMode('percent')}
+                  aria-pressed={mode === 'percent'}
+                >
+                  占比 %
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={mode === 'count' ? 'default' : 'outline'}
+                  onClick={() => setMode('count')}
+                  aria-pressed={mode === 'count'}
+                >
+                  样本数 Count
+                </Button>
               </div>
-            </div>
-
-            {/* 桶宽 */}
-            <label className="flex flex-col gap-2">
-              <span className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground">
-                分箱宽度
-              </span>
-              <input
+            </Field>
+            <Field className="w-full md:w-44">
+              <FieldLabel htmlFor="tt-bin-width">分箱宽度（秒）</FieldLabel>
+              <Input
+                id="tt-bin-width"
                 type="number"
                 min="1"
                 step="1"
                 value={binWidthStr}
                 onChange={(e) => setBinWidthStr(e.target.value)}
-                className="w-40 rounded-md border border-border bg-transparent px-3 py-1.5 font-mono text-sm"
-                aria-label="分箱宽度（秒）"
               />
-            </label>
-
-            {/* 机台筛选 */}
-            <label className="flex flex-col gap-2">
-              <span className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground">
-                Station ID
-              </span>
-              <select
-                value={station}
-                onChange={(e) => setStation(e.target.value)}
-                className="max-w-72 rounded-md border border-border bg-transparent px-3 py-1.5 font-mono text-sm"
-              >
-                <option value="all">全部机台（不区分）</option>
-                {stations.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </label>
+            </Field>
+            <Field className="flex-1">
+              <FieldLabel htmlFor="tt-station">Station ID</FieldLabel>
+              <Select value={station} onValueChange={setStation}>
+                <SelectTrigger id="tt-station" aria-label="Station ID">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部机台（不区分）</SelectItem>
+                  {stations.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           </div>
+        </CardContent>
+      </Card>
 
-          {/* 主体：左总结 + 右图表 */}
-          <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
-            {/* 左侧总结 */}
-            <aside className="flex h-fit flex-col gap-5 rounded-lg border border-border bg-card p-5">
-              <p className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-primary">
-                测试时间总结
-              </p>
-              <div className="flex flex-col gap-3">
+      {/* 主体：左总结 + 右图表 */}
+      <div className="grid items-start gap-6 lg:grid-cols-[24rem_minmax(0,1fr)]">
+        {/* 左侧：统计总结 + AI */}
+        <div className="flex min-w-0 flex-col gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>测试时间总结</CardTitle>
+              <CardDescription>
+                单位：秒。分位数为线性插值（PERCENTILE.INC），保留一位小数。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <dl className="divide-y divide-border/60">
                 <StatItem label="样本数" value={stats.count} unit="" />
                 <StatItem label="最大 Max" value={stats.max} />
                 <StatItem label="最小 Min" value={stats.min} />
                 <StatItem label="Q1" value={stats.q1} />
                 <StatItem label="Q2 中位数" value={stats.q2} />
                 <StatItem label="Q3" value={stats.q3} />
-              </div>
-              <p className="border-t border-border/60 pt-3 font-mono text-[0.625rem] leading-relaxed text-muted-foreground">
-                单位：秒。分位数为线性插值（PERCENTILE.INC），保留一位小数。
-              </p>
+              </dl>
+            </CardContent>
+          </Card>
 
-              {/* AI 分析建议 */}
-              <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-primary">
-                    AI 分析建议
-                    <span className="ml-1 text-muted-foreground">本地大模型</span>
-                  </p>
-                  <button
+          <Card>
+            <CardHeader>
+              <CardTitle>AI 分析建议</CardTitle>
+              <CardDescription>本地大模型 · 需已启动 llama.cpp 服务。</CardDescription>
+              {analysisContext ? (
+                <CardAction>
+                  <Button
                     type="button"
-                    disabled={!analysisContext || adviceMutation.isPending}
-                    onClick={() => {
-                      if (analysisContext) adviceMutation.mutate(analysisContext);
-                    }}
-                    className="flex shrink-0 items-center gap-1.5 rounded-md border border-primary bg-primary px-3 py-1 font-mono text-[0.6875rem] uppercase tracking-widest text-primary-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                    size="sm"
+                    disabled={adviceMutation.isPending}
+                    onClick={() => adviceMutation.mutate(analysisContext)}
                   >
-                    <MagicWand weight="bold" className="size-3.5" />
+                    <Sparkles data-icon="inline-start" />
                     {adviceMutation.isPending ? '分析中…' : '开始分析'}
-                  </button>
+                  </Button>
+                </CardAction>
+              ) : null}
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {adviceError ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{adviceError}</AlertDescription>
+                </Alert>
+              ) : adviceMutation.data ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                    {adviceMutation.data.advice}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {adviceMutation.data.model} · 耗时 {adviceMutation.data.elapsedMs} ms
+                  </p>
                 </div>
-
-                {adviceMutation.isError && (
-                  <p className="rounded-md border border-status-danger-foreground/40 bg-status-danger-surface px-3 py-2 font-mono text-xs text-status-danger-foreground">
-                    {adviceMutation.error instanceof Error
-                      ? adviceMutation.error.message
-                      : '本地大模型不可用'}
-                  </p>
-                )}
-
-                {adviceMutation.data && adviceMutation.data.error ? (
-                  <p className="rounded-md border border-status-danger-foreground/40 bg-status-danger-surface px-3 py-2 font-mono text-xs text-status-danger-foreground">
-                    {adviceMutation.data.error}
-                  </p>
-                ) : adviceMutation.data ? (
-                  <div className="flex flex-col gap-2">
-                    <pre className="whitespace-pre-wrap break-words font-mono text-[0.6875rem] leading-relaxed text-foreground">
-                      {adviceMutation.data.advice}
-                    </pre>
-                    <p className="font-mono text-[0.625rem] text-muted-foreground">
-                      {adviceMutation.data.model} · 耗时 {adviceMutation.data.elapsedMs} ms
-                    </p>
-                  </div>
-                ) : (
-                  <p className="font-mono text-xs leading-relaxed text-muted-foreground">
-                    基于当前筛选的统计结果，调用本地大模型生成测试时间分析结论与改进建议。
-                  </p>
-                )}
-              </div>
-            </aside>
-
-            {/* 右侧图表 */}
-            <div className="flex min-w-0 flex-col gap-6">
-              <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5">
-                <p className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-primary">
-                  测试时间分布
-                  <span className="ml-2 text-muted-foreground">
-                    {mode === 'percent' ? '占比 %' : '样本数 Count'}
-                  </span>
+              ) : analysisContext ? (
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  基于当前筛选的统计结果，调用本地大模型定位异常测试时间值（长尾样本），并给出机台/程序层面的排查、解决与验证方法。
                 </p>
-                <TtHistogramChart
-                  bins={bins}
-                  mode={mode}
-                  height={460}
-                />
-              </div>
-
-              <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5">
-                <p className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-primary">
-                  累计分布曲线
-                  <span className="ml-2 text-muted-foreground">CDF</span>
+              ) : (
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  当前筛选无样本数据，无法生成分析建议。
                 </p>
-                <TtCdfChart points={cdf} />
-              </div>
-            </div>
-          </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
-      )}
+
+        {/* 右侧：图表 */}
+        <div className="flex min-w-0 flex-col gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>测试时间分布</CardTitle>
+              <CardDescription>
+                {mode === 'percent' ? '占比 %' : '样本数 Count'} · 按时间分箱
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TtHistogramChart bins={bins} mode={mode} height={460} className="w-full" />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>累计分布曲线</CardTitle>
+              <CardDescription>CDF · 测试时间(S) vs 累计占比(%)</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TtCdfChart points={cdf} className="w-full" />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 };
