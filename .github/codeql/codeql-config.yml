@@ -1,0 +1,7 @@
+name: ToolHub CodeQL
+
+# Keep default/advanced CodeQL off Swift. The only Swift in this repo is
+# scripts/ocr-image.swift, a standalone script, not an Xcode/SPM project.
+paths-ignore:
+  - "**/*.swift"
+  - "scripts/ocr-image.swift"
