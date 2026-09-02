@@ -1,16 +1,14 @@
 import axios from 'axios';
 import {
-  ArrowCounterClockwise,
-  CaretLeft,
-  CaretRight,
-  ChartBar,
-  CheckCircle,
-  DownloadSimple,
-
-  MagnifyingGlass,
-  Warning,
-} from '@phosphor-icons/react';
-import { gsap } from 'gsap';
+  AlertTriangle,
+  BarChart3,
+  ChevronLeft,
+  ChevronRight,
+  CircleCheck,
+  Download,
+  RotateCcw,
+  Search,
+} from 'lucide-react';
 import React, {
   useDeferredValue,
   useEffect,
@@ -19,9 +17,13 @@ import React, {
   useState,
 } from 'react';
 
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Spinner } from '@/components/ui/spinner';
+import { cn } from '@/lib/utils';
 import api from '../../../api/axios';
 import { LoadingSignal } from '../../../components/LoadingSignal';
-import { cn } from '../../../lib/cn';
 import FileDropZone from '../../../components/FileDropZone';
 import { formatTime, parseServerDate } from '../../../lib/format-time';
 import {
@@ -113,13 +115,13 @@ const UploadProgressRow: React.FC<{
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-4">
-        <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           {label}
         </span>
-        <span className="inline-flex items-center gap-2 font-mono text-xs tabular-nums text-foreground">
+        <span className="inline-flex items-center gap-2 text-xs tabular-nums">
           {isCompleted ? (
             <>
-              <CheckCircle weight="fill" className="size-4 text-primary" />
+              <CircleCheck className="size-4 text-primary" />
               {upload.cacheHit ? '已使用缓存' : '已完成'}
             </>
           ) : isHashing ? (
@@ -149,7 +151,7 @@ const UploadProgressRow: React.FC<{
         />
       </div>
       {upload.bytesTotal > 0 && upload.bytesAccepted > 0 && !isCompleted && (
-        <p className="mt-2 font-mono text-[0.625rem] tabular-nums text-muted-foreground">
+        <p className="mt-2 text-[0.625rem] tabular-nums text-muted-foreground">
           已确认 {formatMegabytes(upload.bytesAccepted)} /{' '}
           {formatMegabytes(upload.bytesTotal)}
         </p>
@@ -195,19 +197,17 @@ const AnalysisInProgress: React.FC<{
     uploads.some((upload) => upload.status !== 'completed');
 
   return (
-    <section className="flex min-h-96 flex-col justify-start gap-8 border-2 border-border p-6 md:p-10">
+    <section className="flex min-h-96 flex-col justify-start gap-8 rounded-xl border bg-card p-6">
       <div className="flex items-start justify-between gap-6">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">
-            [{` ${
-              step === 'processing'
-                ? '分析中'
-                : isCompletingUpload
-                  ? '完成中'
-                  : '上传中'
-            } `}]
+          <p className="text-xs text-muted-foreground">
+            {step === 'processing'
+              ? '分析中'
+              : isCompletingUpload
+                ? '完成中'
+                : '上传中'}
           </p>
-          <h2 className="mt-4 text-3xl font-bold tracking-tight md:text-5xl">
+          <h2 className="mt-1 text-lg font-medium tracking-tight">
             {step === 'processing'
               ? '正在核对通行记录'
               : isCompletingUpload
@@ -215,12 +215,12 @@ const AnalysisInProgress: React.FC<{
                 : '正在上传文件'}
           </h2>
         </div>
-        <ChartBar weight="bold" className="size-10 shrink-0 text-primary" />
+        <BarChart3 className="size-6 shrink-0 text-muted-foreground" />
       </div>
 
       <div>
         {step === 'uploading' ? (
-          <div className="mb-12 space-y-6">
+          <div className="mb-12 flex flex-col gap-6">
             <UploadProgressRow
               label="通行记录"
               upload={attendanceUpload}
@@ -229,10 +229,10 @@ const AnalysisInProgress: React.FC<{
 
             <div className="border-t border-border pt-4">
               <div className="mb-2 flex items-center justify-between">
-                <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   总体进度
                 </span>
-                <span className="font-mono text-xs tabular-nums text-foreground">
+                <span className="text-xs tabular-nums">
                   {totalProgress}%
                 </span>
               </div>
@@ -263,9 +263,9 @@ const AnalysisInProgress: React.FC<{
           />
         )}
 
-        <dl className="grid gap-5 border-t border-border pt-6 font-mono text-xs md:grid-cols-2">
+        <dl className="grid gap-5 border-t pt-6 text-xs md:grid-cols-2">
           <div className="min-w-0">
-            <dt className="uppercase tracking-[0.16em] text-muted-foreground">
+            <dt className="text-muted-foreground">
               通行记录
             </dt>
             <dd className="mt-2 break-words text-foreground">
@@ -273,7 +273,7 @@ const AnalysisInProgress: React.FC<{
             </dd>
           </div>
           <div className="min-w-0">
-            <dt className="uppercase tracking-[0.16em] text-muted-foreground">
+            <dt className="text-muted-foreground">
               班别明细
             </dt>
             <dd className="mt-2 break-words text-foreground">{shiftFile.name}</dd>
@@ -288,11 +288,11 @@ const Metric: React.FC<{ label: string; value: number }> = ({
   label,
   value,
 }) => (
-  <div className="border-t border-border pt-4">
-    <p className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground">
+  <div className="border-t pt-4">
+    <p className="text-xs text-muted-foreground">
       {label}
     </p>
-    <p className="mt-3 font-mono text-3xl font-bold tabular-nums md:text-4xl">
+    <p className="mt-2 text-2xl font-semibold tabular-nums">
       {NUMBER_FORMATTER.format(value)}
     </p>
   </div>
@@ -405,7 +405,7 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
       id="attendance-all-data"
       hidden={!isVisible}
       aria-label="全部分析数据"
-      className="mt-10 border-t-2 border-border pt-8"
+      className="mt-6 pt-2"
     >
       <div className="flex flex-col gap-6">
         <div
@@ -413,36 +413,32 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
           aria-label="选择工作表"
         >
           {analysis.sheets.map((sheet) => (
-            <button
+            <Button
               key={sheet.name}
               type="button"
+              size="sm"
+              variant={sheet.name === activeSheet?.name ? 'default' : 'outline'}
               aria-pressed={sheet.name === activeSheet?.name}
               onClick={() => setActiveSheetName(sheet.name)}
-              className={cn(
-                'min-h-11 whitespace-nowrap border px-4 py-2 font-mono text-xs transition-colors',
-                sheet.name === activeSheet?.name
-                  ? 'border-foreground bg-foreground text-background'
-                  : 'border-border text-muted-foreground hover:border-primary hover:text-foreground',
-              )}
             >
               {sheet.name} · {NUMBER_FORMATTER.format(sheet.row_count)}
-            </button>
+            </Button>
           ))}
         </div>
 
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
           <label className="block min-w-0">
-            <span className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               搜索员工或部门
             </span>
-            <span className="mt-2 flex min-h-11 items-center gap-3 border-b border-border focus-within:border-primary">
-              <MagnifyingGlass className="size-5 shrink-0 text-muted-foreground" />
-              <input
+            <span className="relative mt-2 block">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="工号、姓名、部门代码或名称"
-                className="min-w-0 flex-1 bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+                className="pl-8"
               />
             </span>
           </label>
@@ -452,20 +448,16 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
             aria-label="筛选记录"
           >
             {FILTER_OPTIONS.map((option) => (
-              <button
+              <Button
                 key={option.id}
                 type="button"
+                size="sm"
+                variant={filter === option.id ? 'default' : 'outline'}
                 aria-pressed={filter === option.id}
                 onClick={() => setFilter(option.id)}
-                className={cn(
-                  'min-h-11 whitespace-nowrap border px-4 py-2 font-mono text-xs transition-colors',
-                  filter === option.id
-                    ? 'border-primary text-primary'
-                    : 'border-border text-muted-foreground hover:text-foreground',
-                )}
               >
                 {option.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -473,25 +465,25 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
         <p
           role="status"
           aria-live="polite"
-          className="font-mono text-xs text-muted-foreground"
+          className="text-xs text-muted-foreground"
         >
           当前显示 {NUMBER_FORMATTER.format(filteredRows.length)} 条记录
         </p>
 
         {pageRows.length ? (
           <>
-            <div className="hidden max-w-full overflow-x-auto border border-border md:block">
+            <div className="hidden max-w-full overflow-x-auto rounded-xl border md:block">
               <table className="min-w-max border-collapse text-left text-xs">
                 <caption className="sr-only">
                   {activeSheet?.name}分析结果
                 </caption>
-                <thead className="sticky top-0 z-10 bg-foreground text-background">
+                <thead className="sticky top-0 z-10 bg-muted">
                   <tr>
                     {analysis.columns.map((column) => (
                       <th
                         key={column}
                         scope="col"
-                        className="whitespace-nowrap border-r border-background/20 px-4 py-3 font-mono font-medium"
+                        className="whitespace-nowrap border-r px-4 py-3 font-medium"
                       >
                         {column}
                       </th>
@@ -526,7 +518,7 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
                 <article
                   key={row.key}
                   className={cn(
-                    'border border-border p-4',
+                    'rounded-xl border p-4',
                     rowToneClass(row.tone),
                   )}
                 >
@@ -535,11 +527,11 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
                       <p className="break-words text-lg font-bold">
                         {row.values[2] || '未命名员工'}
                       </p>
-                      <p className="mt-1 font-mono text-xs opacity-70">
+                      <p className="mt-1 text-xs opacity-70">
                         {row.values[1] || '无工号'}
                       </p>
                     </div>
-                    <span className="shrink-0 font-mono text-[0.625rem] font-bold">
+                    <span className="shrink-0 text-[0.625rem] font-medium">
                       {rowStatusLabel(row)}
                     </span>
                   </div>
@@ -550,7 +542,7 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
                           key={`${row.key}-${column}`}
                           className="grid grid-cols-[minmax(6rem,0.7fr)_minmax(0,1.3fr)] gap-3"
                         >
-                          <dt className="font-mono text-[0.6875rem] opacity-65">
+                          <dt className="text-[0.6875rem] opacity-65">
                             {column}
                           </dt>
                           <dd className="min-w-0 whitespace-pre-line break-words text-sm">
@@ -565,9 +557,9 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
             </div>
           </>
         ) : (
-          <div className="border border-border px-6 py-16 text-center">
-            <MagnifyingGlass className="mx-auto size-8 text-muted-foreground" />
-            <p className="mt-4 font-bold">没有符合条件的记录</p>
+          <div className="rounded-xl border px-6 py-16 text-center">
+            <Search className="mx-auto size-8 text-muted-foreground" />
+            <p className="mt-4 font-medium">没有符合条件的记录</p>
             <p className="mt-2 text-sm text-muted-foreground">
               请调整搜索内容或筛选条件。
             </p>
@@ -575,30 +567,32 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
         )}
 
         <div className="flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
-          <p className="font-mono text-xs tabular-nums text-muted-foreground">
+          <p className="text-xs tabular-nums text-muted-foreground">
             第 {safePage} / {pageCount} 页
           </p>
           <div className="flex gap-2">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               disabled={safePage <= 1}
               onClick={() => setPage((current) => Math.max(1, current - 1))}
-              className="inline-flex min-h-11 items-center gap-2 whitespace-nowrap border border-border px-4 font-mono text-xs transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <CaretLeft weight="bold" />
+              <ChevronLeft data-icon="inline-start" />
               上一页
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               disabled={safePage >= pageCount}
               onClick={() =>
                 setPage((current) => Math.min(pageCount, current + 1))
               }
-              className="inline-flex min-h-11 items-center gap-2 whitespace-nowrap border border-border px-4 font-mono text-xs transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               下一页
-              <CaretRight weight="bold" />
-            </button>
+              <ChevronRight data-icon="inline-end" />
+            </Button>
           </div>
         </div>
       </div>
@@ -638,8 +632,6 @@ const readErrorMessage = async (error: unknown) => {
 };
 
 const AttendanceOrganizer: React.FC = () => {
-  const phaseRef = useRef<HTMLDivElement>(null);
-  const detailsRef = useRef<HTMLDivElement>(null);
   const isAnalyzingRef = useRef(false);
   const [attendanceFile, setAttendanceFile] = useState<File | null>(null);
   const [shiftFile, setShiftFile] = useState<File | null>(null);
@@ -655,37 +647,6 @@ const AttendanceOrganizer: React.FC = () => {
 
   const attUpload = useTusUpload();
   const shiftUpload = useTusUpload();
-
-  useEffect(() => {
-    if (
-      !phaseRef.current ||
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
-      return;
-    }
-
-    gsap.fromTo(
-      phaseRef.current,
-      { y: 8, opacity: 0 },
-      { y: 0, opacity: 1, duration: 0.4, ease: 'expo.out' },
-    );
-  }, [phase]);
-
-  useEffect(() => {
-    if (
-      !isDetailsVisible ||
-      !detailsRef.current ||
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
-      return;
-    }
-
-    gsap.fromTo(
-      detailsRef.current,
-      { opacity: 0 },
-      { opacity: 1, duration: 0.2, ease: 'power3.out' },
-    );
-  }, [isDetailsVisible]);
 
   useEffect(() => {
     if (!analysis) {
@@ -819,12 +780,8 @@ const AttendanceOrganizer: React.FC = () => {
   };
 
   return (
-    <div className="flex w-full flex-col pb-20 min-[80rem]:-mx-44 min-[80rem]:w-auto">
-      <p className="mb-8 max-w-2xl font-mono text-xs uppercase leading-relaxed tracking-[0.18em] text-muted-foreground md:text-sm">
-        上传通行记录与班别明细，自动识别离岗、用餐、超时及数据异常。
-      </p>
-
-      <div ref={phaseRef}>
+    <div className="flex w-full flex-col">
+      <div>
         {phase === 'upload' && (
           <>
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -846,23 +803,20 @@ const AttendanceOrganizer: React.FC = () => {
               />
             </div>
 
-            <div className="mt-8 flex flex-col gap-6 border-t-2 border-border pt-8 md:flex-row md:items-center">
-              <button
+            <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-center">
+              <Button
                 type="button"
                 onClick={handleAnalyze}
                 disabled={!attendanceFile || !shiftFile}
-                className="flex min-h-14 items-center justify-center gap-3 whitespace-nowrap bg-foreground px-8 py-4 text-lg font-bold uppercase tracking-tight text-background transition-colors hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <ChartBar weight="bold" className="size-6" />
+                <BarChart3 data-icon="inline-start" />
                 分析
-              </button>
-              <div className="min-h-12 flex-1 font-mono text-sm leading-relaxed">
-                {error && (
-                  <p role="alert" className="text-primary">
-                    [ 异常 ] {error}
-                  </p>
-                )}
-              </div>
+              </Button>
+              {error ? (
+                <Alert variant="destructive" className="flex-1">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
             </div>
           </>
         )}
@@ -879,32 +833,33 @@ const AttendanceOrganizer: React.FC = () => {
 
         {phase === 'ready' && analysis && (
           <>
-            <section className="border-2 border-border" aria-labelledby="attendance-result-title">
+            <section className="overflow-hidden rounded-xl border bg-card" aria-labelledby="attendance-result-title">
               <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-                <div className="min-w-0 p-6 md:p-8 lg:p-10">
-                  <div className="flex flex-col gap-5 border-b border-border pb-7 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 p-6">
+                  <div className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <p className="font-mono text-xs uppercase tracking-[0.2em] text-status-success-foreground">
-                        [ 分析完成 ]
+                      <p className="text-xs text-status-success-foreground">
+                        分析完成
                       </p>
                       <h2
                         id="attendance-result-title"
-                        className="mt-3 text-3xl font-bold tracking-tight md:text-4xl"
+                        className="mt-1 text-lg font-medium tracking-tight"
                       >
                         结果可以复核
                       </h2>
-                      <p className="mt-3 font-mono text-xs text-muted-foreground">
+                      <p className="mt-1 text-xs text-muted-foreground">
                         {analysis.summary.sheet_count} 个工作表 · 结果按原顺序整理
                       </p>
                     </div>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={handleReset}
-                      className="inline-flex min-h-11 items-center gap-2 self-start whitespace-nowrap font-mono text-xs text-muted-foreground transition-colors hover:text-primary"
                     >
-                      <ArrowCounterClockwise weight="bold" />
+                      <RotateCcw data-icon="inline-start" />
                       重新分析
-                    </button>
+                    </Button>
                   </div>
 
                   <div className="mt-7 grid grid-cols-2 gap-x-5 gap-y-7 xl:grid-cols-4">
@@ -938,40 +893,38 @@ const AttendanceOrganizer: React.FC = () => {
                         className="flex items-center justify-between gap-4"
                       >
                         <dt className="text-muted-foreground">{label}</dt>
-                        <dd className="font-mono font-bold tabular-nums">
+                        <dd className="font-medium tabular-nums">
                           {NUMBER_FORMATTER.format(Number(value))}
                         </dd>
                       </div>
                     ))}
                   </dl>
 
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    className="mt-6"
                     aria-expanded={isDetailsVisible}
                     aria-controls="attendance-all-data"
                     onClick={() => setIsDetailsVisible((current) => !current)}
-                    className="mt-8 inline-flex min-h-12 items-center gap-3 whitespace-nowrap border border-foreground px-5 font-bold transition-[background-color,color] hover:bg-foreground hover:text-background"
                   >
                     {isDetailsVisible ? '收起全部数据' : '查看全部数据'}
-                    <span className="font-mono text-xs font-normal opacity-65">
+                    <span className="text-xs opacity-70">
                       {NUMBER_FORMATTER.format(analysis.summary.total_records)}
                     </span>
-                  </button>
+                  </Button>
                 </div>
 
-                <aside className="flex min-w-0 flex-col justify-between border-t border-border bg-muted p-6 md:p-8 lg:border-l lg:border-t-0 lg:p-10">
+                <aside className="flex min-w-0 flex-col justify-between border-t bg-muted p-6 lg:border-l lg:border-t-0">
                   <div>
-                    <DownloadSimple
-                      weight="bold"
-                      className="size-9 text-primary"
-                    />
-                    <h3 className="mt-6 text-2xl font-bold">导出完整工作簿</h3>
-                    <p className="mt-4 break-words font-mono text-xs leading-relaxed text-muted-foreground">
+                    <Download className="size-5 text-muted-foreground" />
+                    <h3 className="mt-4 text-base font-medium">导出完整工作簿</h3>
+                    <p className="mt-2 break-words text-xs leading-relaxed text-muted-foreground">
                       {analysis.download_filename}
                     </p>
                     <p
                       className={cn(
-                        'mt-3 font-mono text-xs',
+                        'mt-3 text-xs',
                         isExpired
                           ? 'text-status-danger-foreground'
                           : 'text-muted-foreground',
@@ -983,49 +936,46 @@ const AttendanceOrganizer: React.FC = () => {
                     </p>
                   </div>
 
-                  <div className="mt-10">
-                    <button
+                  <div className="mt-8">
+                    <Button
                       type="button"
+                      className="w-full"
                       onClick={handleDownload}
                       disabled={isDownloading || isExpired}
-                      className="flex min-h-14 w-full items-center justify-center gap-3 whitespace-nowrap bg-foreground px-6 py-4 font-bold text-background transition-colors hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {isDownloading ? (
-                        <span className="size-5 animate-spin border-2 border-current border-r-transparent" />
+                        <Spinner data-icon="inline-start" />
                       ) : (
-                        <DownloadSimple weight="bold" className="size-5" />
+                        <Download data-icon="inline-start" />
                       )}
                       {isDownloading ? '正在下载' : '下载 Excel'}
-                    </button>
-                    {downloadError && (
+                    </Button>
+                    {downloadError ? (
                       <p
                         role="alert"
                         className="mt-4 flex gap-2 text-sm text-status-danger-foreground"
                       >
-                        <Warning weight="fill" className="mt-0.5 size-4 shrink-0" />
+                        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                         {downloadError}
                       </p>
-                    )}
-                    {!downloadError && !isExpired && (
+                    ) : null}
+                    {!downloadError && !isExpired ? (
                       <p className="mt-4 flex gap-2 text-xs leading-relaxed text-muted-foreground">
-                        <CheckCircle
-                          weight="fill"
+                        <CircleCheck
                           className="mt-0.5 size-4 shrink-0 text-status-success-foreground"
                         />
                         结果在有效期内可重复下载。
                       </p>
-                    )}
+                    ) : null}
                   </div>
                 </aside>
               </div>
             </section>
 
-            <div ref={detailsRef}>
-              <AttendanceDataBrowser
-                analysis={analysis}
-                isVisible={isDetailsVisible}
-              />
-            </div>
+            <AttendanceDataBrowser
+              analysis={analysis}
+              isVisible={isDetailsVisible}
+            />
           </>
         )}
       </div>

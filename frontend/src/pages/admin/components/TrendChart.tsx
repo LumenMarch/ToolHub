@@ -25,7 +25,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
 
   if (data.length === 0 || data.every((d) => d.count === 0)) {
     return (
-      <div className="h-[200px] flex items-center justify-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
+      <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
         {emptyHint}
       </div>
     );
@@ -68,7 +68,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
       <svg
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
-        className="w-full h-[200px] min-w-[400px]"
+        className="h-[200px] w-full min-w-[400px]"
         preserveAspectRatio="xMidYMid meet"
       >
         {/* Y 轴刻度值 + 水平网格线（低透明度，辅助阅读） */}
@@ -81,7 +81,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
                 y={y}
                 textAnchor="end"
                 dominantBaseline="middle"
-                className="fill-muted-foreground font-mono"
+                className="fill-muted-foreground"
                 style={{ fontSize: '10px' }}
               >
                 {tick}
@@ -124,7 +124,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
               x={p.x}
               y={p.y - 8}
               textAnchor="middle"
-              className="text-[10px] font-mono fill-muted-foreground opacity-70 transition-[fill,opacity] group-hover:fill-primary group-hover:opacity-100"
+              className="fill-muted-foreground text-[10px] opacity-70 transition-[fill,opacity] group-hover:fill-primary group-hover:opacity-100"
             >
               {p.count}
             </text>
@@ -154,7 +154,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, emptyHint = '暂无数据
               x={p.x}
               y={height - 8}
               textAnchor="middle"
-              className="fill-muted-foreground font-mono"
+              className="fill-muted-foreground"
               style={{ fontSize: '10px' }}
             >
               {dateLabel}

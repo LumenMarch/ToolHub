@@ -1,6 +1,7 @@
 // 单测试项设置面板 — 对齐 OPP theHistogramSettingsView / theCDFSettingsView / theTimeSeriesSettingsView
 // 三类图各自显示独立设置行，底部公共 Legend 设置；控件位置遵循前端布局
 import React from 'react';
+import { Input } from '@/components/ui/input';
 import { type ChartSettings, type ColumnAnalysis } from '../lib/stats';
 
 const NumInput: React.FC<{ label: string; manual: number | null; auto: number | null; onManual: (v: number | null) => void }> = ({ label, manual, auto, onManual }) => {
@@ -11,9 +12,9 @@ const NumInput: React.FC<{ label: string; manual: number | null; auto: number | 
     prevAuto.current = auto;
   }, [auto, manual]);
   return (
-    <label className="flex items-center gap-1.5 font-mono text-[0.6875rem] text-foreground">
+    <label className="flex items-center gap-1.5 text-xs">
       <span className="min-w-14">{label}</span>
-      <input
+      <Input
         type="text"
         inputMode="decimal"
         value={draft}
@@ -35,7 +36,7 @@ const NumInput: React.FC<{ label: string; manual: number | null; auto: number | 
           }
         }}
         placeholder={auto !== null ? String(auto) : '—'}
-        className="w-20 border border-border bg-background px-1.5 py-1 text-xs outline-none focus:border-foreground"
+        className="h-7 w-20 px-1.5 text-xs"
       />
     </label>
   );
@@ -52,14 +53,14 @@ interface ItemSettingsPanelProps {
 
 const ItemSettingsPanel: React.FC<ItemSettingsPanelProps> = ({ view, settings, onUpdate, activeCol }) => {
   const check = (k: keyof ChartSettings) => (
-    <label key={String(k)} className="flex cursor-pointer items-center gap-1.5 font-mono text-[0.6875rem] text-foreground">
+    <label key={String(k)} className="flex cursor-pointer items-center gap-1.5 text-xs">
       <input type="checkbox" checked={Boolean(settings[k])} onChange={(e) => onUpdate(k, e.target.checked)} className="size-3.5 accent-primary" />
       {String(k)}
     </label>
   );
 
   return (
-    <div className="flex flex-col gap-3 border border-border bg-muted/40 px-4 py-3">
+    <div className="flex flex-col gap-3 rounded-xl border bg-muted/40 px-4 py-3">
       {view === 'histogram' && (
         <>
           <div className="flex flex-wrap items-center gap-5">
@@ -82,12 +83,12 @@ const ItemSettingsPanel: React.FC<ItemSettingsPanelProps> = ({ view, settings, o
         <>
           <div className="flex flex-wrap items-center gap-5">
             {(['showTitle', 'showStats', 'showLimits', 'cdfLog', 'cdfShowHundredths', 'cdfFill'] as Array<keyof ChartSettings>).map((k) => check(k))}
-            <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
+            <label className="flex items-center gap-2 text-xs">
               CDF Type
               <select
                 value={settings.cdfType}
                 onChange={(e) => onUpdate('cdfType', e.target.value as ChartSettings['cdfType'])}
-                className="border border-border bg-background px-2 py-1 text-xs outline-none focus:border-foreground"
+                className="h-7 rounded-lg border border-input bg-transparent px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               >
                 <option value="cdf">CDF</option>
                 <option value="ccdf">CCDF</option>
@@ -110,12 +111,12 @@ const ItemSettingsPanel: React.FC<ItemSettingsPanelProps> = ({ view, settings, o
         <>
           <div className="flex flex-wrap items-center gap-5">
             {(['showTitle', 'showStats', 'showLimits', 'tsLines', 'tsFill', 'tsMean'] as Array<keyof ChartSettings>).map((k) => check(k))}
-          <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
+          <label className="flex items-center gap-2 text-xs">
             Line Width
             <select
               value={settings.lineWidth}
               onChange={(e) => onUpdate('lineWidth', e.target.value as ChartSettings['lineWidth'])}
-              className="border border-border bg-background px-2 py-1 text-xs outline-none focus:border-foreground"
+              className="h-7 rounded-lg border border-input bg-transparent px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               <option value="none">None</option>
               <option value="thin">Thin</option>
@@ -123,12 +124,12 @@ const ItemSettingsPanel: React.FC<ItemSettingsPanelProps> = ({ view, settings, o
               <option value="thick">Thick</option>
             </select>
           </label>
-          <label className="flex items-center gap-2 font-mono text-[0.6875rem] text-foreground">
+          <label className="flex items-center gap-2 text-xs">
             Data Ticks
             <select
               value={settings.dataSymbol}
               onChange={(e) => onUpdate('dataSymbol', e.target.value as ChartSettings['dataSymbol'])}
-              className="border border-border bg-background px-2 py-1 text-xs outline-none focus:border-foreground"
+              className="h-7 rounded-lg border border-input bg-transparent px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               <option value="none">None</option>
               <option value="circle">O</option>

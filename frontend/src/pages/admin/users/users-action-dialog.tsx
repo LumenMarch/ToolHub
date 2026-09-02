@@ -80,8 +80,8 @@ function UserCredentialsFields({
 }) {
   return (
     <>
-      <div className='space-y-1.5'>
-        <Label htmlFor='user-username' className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+      <div className='flex flex-col gap-1.5'>
+        <Label htmlFor='user-username' className='text-sm text-muted-foreground'>
           用户名
         </Label>
         <Input
@@ -92,14 +92,14 @@ function UserCredentialsFields({
           {...register('username')}
         />
         {errors.username && (
-          <p className='text-[11px] font-mono uppercase tracking-widest text-destructive'>
-            [ {errors.username.message} ]
+          <p className='text-sm text-destructive'>
+            {errors.username.message}
           </p>
         )}
       </div>
 
-      <div className='space-y-1.5'>
-        <Label htmlFor='user-password' className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+      <div className='flex flex-col gap-1.5'>
+        <Label htmlFor='user-password' className='text-sm text-muted-foreground'>
           密码{isEdit ? '（留空则不修改）' : ''}
         </Label>
         <Input
@@ -110,8 +110,8 @@ function UserCredentialsFields({
           {...register('password')}
         />
         {errors.password && (
-          <p className='text-[11px] font-mono uppercase tracking-widest text-destructive'>
-            [ {errors.password.message} ]
+          <p className='text-sm text-destructive'>
+            {errors.password.message}
           </p>
         )}
       </div>
@@ -142,8 +142,8 @@ function RolePicker({
   // 循环内成员查询用 Set，避免每项渲染都做数组扫描
   const valueSet = useMemo(() => new Set(value), [value])
   return (
-    <div className='space-y-1.5'>
-      <Label className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+    <div className='flex flex-col gap-1.5'>
+      <Label className='text-sm text-muted-foreground'>
         角色{disabled && '（不能修改自己的角色）'}
         {!isEdit && toolMode === 'custom' && '（必选）'}
       </Label>
@@ -152,7 +152,7 @@ function RolePicker({
           暂无自定义角色可选。
         </p>
       )}
-      <div className='space-y-1.5'>
+      <div className='flex flex-col gap-1.5'>
         {roles.map((role) => {
           const checked = valueSet.has(role.id)
           return (
@@ -172,8 +172,8 @@ function RolePicker({
                   onChange(next)
                 }}
               />
-              <span className='font-mono'>{role.name}</span>
-              <span className='ml-auto text-[11px] text-muted-foreground'>
+              <span>{role.name}</span>
+              <span className='ml-auto text-xs text-muted-foreground'>
                 {role.permission_count} 项权限
               </span>
             </label>
@@ -181,8 +181,8 @@ function RolePicker({
         })}
       </div>
       {error && (
-        <p className='text-[11px] font-mono uppercase tracking-widest text-destructive'>
-          [ {error} ]
+        <p className='text-sm text-destructive'>
+          {error}
         </p>
       )}
     </div>
@@ -208,8 +208,8 @@ function ToolPermissionPicker({
   isPending: boolean
 }) {
   return (
-    <div className='space-y-1.5 border-t border-border pt-4'>
-      <Label className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+    <div className='flex flex-col gap-1.5 border-t pt-4'>
+      <Label className='text-sm text-muted-foreground'>
         工具权限{disabled && '（不能修改自己的工具权限）'}
       </Label>
       {isPending && (
@@ -217,7 +217,7 @@ function ToolPermissionPicker({
           权限列表加载中...
         </p>
       )}
-      <div className='pt-0.5 space-y-1'>
+      <div className='flex flex-col gap-1 pt-0.5'>
         <label
           className={`flex cursor-pointer items-center gap-2 text-sm ${
             disabled ? 'cursor-not-allowed opacity-60' : ''
@@ -229,9 +229,9 @@ function ToolPermissionPicker({
             checked={toolMode === 'all'}
             disabled={disabled}
             onChange={() => onModeChange('all')}
-            className='h-4 w-4 accent-[var(--color-brand)]'
+            className='size-4 accent-primary'
           />
-          <span className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+          <span className='text-sm text-muted-foreground'>
             工具使用者（全部工具）
           </span>
         </label>
@@ -246,9 +246,9 @@ function ToolPermissionPicker({
             checked={toolMode === 'custom'}
             disabled={disabled}
             onChange={() => onModeChange('custom')}
-            className='h-4 w-4 accent-[var(--color-brand)]'
+            className='size-4 accent-primary'
           />
-          <span className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+          <span className='text-sm text-muted-foreground'>
             自定义工具权限
           </span>
         </label>
@@ -258,7 +258,7 @@ function ToolPermissionPicker({
           暂无工具权限可选。
         </p>
       )}
-      <div className='max-h-40 space-y-1.5 overflow-y-auto pr-1 pt-1'>
+      <div className='flex max-h-40 flex-col gap-1.5 overflow-y-auto pr-1 pt-1'>
         {allToolPerms.map((perm) => {
           // 「工具使用者」模式（或编辑自己）下复选框整体禁用，只能由 radio 统一授予/收回
           const checkboxDisabled = toolMode === 'all' || disabled
@@ -274,7 +274,7 @@ function ToolPermissionPicker({
                 disabled={checkboxDisabled}
                 onCheckedChange={(value) => onToggleToolId(perm.id, !!value)}
               />
-              <code className='text-[11px] font-mono text-muted-foreground'>
+              <code className='text-xs text-muted-foreground'>
                 {perm.codename}
               </code>
             </label>
@@ -301,7 +301,7 @@ function AccountStatusField({
         disabled ? 'cursor-not-allowed opacity-60' : ''
       }`}
     >
-      <span className='text-sm font-mono uppercase tracking-widest'>
+      <span className='text-sm text-muted-foreground'>
         账号启用
       </span>
       <Checkbox
@@ -656,7 +656,7 @@ export function UsersActionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form id='user-form' onSubmit={onSubmit} className='space-y-4'>
+        <form id='user-form' onSubmit={onSubmit} className='flex flex-col gap-4'>
           <UserCredentialsFields register={register} errors={errors} isEdit={isEdit} />
 
           <Controller
@@ -701,7 +701,7 @@ export function UsersActionDialog({
             />
           )}
           {isEdit && isSelf && (
-            <p className='text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60'>
+            <p className='text-sm text-muted-foreground'>
               不能停用自己的账号
             </p>
           )}

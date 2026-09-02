@@ -4,9 +4,9 @@ import { BoxplotChart, ScatterChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
 import type { EChartsOption } from 'echarts';
+import { cn } from '@/lib/utils';
 
 echarts.use([BoxplotChart, ScatterChart, GridComponent, TooltipComponent, SVGRenderer]);
-import { cn } from '../../../lib/cn';
 /** 一个分组的箱线图统计量（与后端 GroupStatModel 对应，camelCase）。 */
 export interface BoxGroup {
   name: string;
@@ -540,7 +540,7 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
     // 高度可由父容器控制，这里固定为传入 height
     return (
       <div className={cn('relative min-w-0', className)}>
-        <div className="overflow-x-auto pb-2">
+        <div className="overflow-x-auto rounded-lg">
           <div
             ref={containerRef}
             style={{ width: '100%', minWidth: chartWidth, height: height }}

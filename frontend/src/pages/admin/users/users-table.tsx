@@ -132,7 +132,7 @@ export function UsersTable() {
         ]}
       />
 
-      <div className='overflow-hidden rounded-none border border-border'>
+      <div className='overflow-hidden rounded-xl border border-border'>
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -196,7 +196,7 @@ export function UsersTable() {
                 >
                   {usersQuery.isError ? (
                     <div className='flex flex-col items-center gap-3'>
-                      <span className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+                      <span className='text-sm text-muted-foreground'>
                         加载用户列表失败
                       </span>
                       <Button
@@ -208,7 +208,7 @@ export function UsersTable() {
                       </Button>
                     </div>
                   ) : (
-                    <span className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+                    <span className='text-sm text-muted-foreground'>
                       无匹配用户
                     </span>
                   )}

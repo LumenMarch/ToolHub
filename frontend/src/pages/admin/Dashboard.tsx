@@ -1,5 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { gsap } from 'gsap';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import StatCard from './components/StatCard';
 import BarChart from './components/BarChart';
 import TrendChart from './components/TrendChart';
@@ -19,7 +34,7 @@ interface RangeOption<T extends number | null> {
   label: string;
 }
 
-/** 图表右上角的日期范围按钮组：mono 小号 uppercase，选中态 primary 高亮（对齐 Audit 筛选按钮风格）。 */
+/** 图表右上角的日期范围按钮组：选中 default，未选中 outline。 */
 function ChartRangeSelector<T extends number | null>({
   options,
   value,
@@ -34,19 +49,16 @@ function ChartRangeSelector<T extends number | null>({
       {options.map((opt) => {
         const selected = opt.value === value;
         return (
-          <button
+          <Button
             key={String(opt.value)}
             type="button"
+            size="sm"
+            variant={selected ? 'default' : 'outline'}
             aria-pressed={selected}
             onClick={() => onChange(opt.value)}
-            className={
-              selected
-                ? 'border border-primary bg-primary/10 px-2.5 py-1 font-mono text-[11px] uppercase tracking-widest text-primary'
-                : 'border border-border px-2.5 py-1 font-mono text-[11px] uppercase tracking-widest text-muted-foreground transition-colors hover:border-primary hover:text-primary'
-            }
           >
             {opt.label}
-          </button>
+          </Button>
         );
       })}
     </div>
@@ -89,7 +101,6 @@ const AdminDashboard: React.FC = () => {
   const [toolLoading, setToolLoading] = useState(true);
   const [activeLoading, setActiveLoading] = useState(true);
   const [error, setError] = useState('');
-  const containerRef = React.useRef<HTMLDivElement>(null);
 
   // 概览卡片只加载一次，不随日期范围变化。
   useEffect(() => {
@@ -171,33 +182,6 @@ const AdminDashboard: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canViewStats, activeDays]);
 
-  useEffect(() => {
-    if (
-      loading ||
-      error ||
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
-      return;
-    }
-    const ctx = gsap.context(() => {
-      gsap.from('.admin-stat-card', {
-        y: 20,
-        opacity: 0,
-        duration: 0.6,
-        stagger: 0.08,
-        ease: 'expo.out',
-      });
-      gsap.from('.admin-chart-block', {
-        opacity: 0,
-        duration: 0.8,
-        stagger: 0.1,
-        ease: 'power3.out',
-        delay: 0.3,
-      });
-    }, containerRef);
-    return () => ctx.revert();
-  }, [error, loading]);
-
   // 工具调用统计：同一工具不同操作（如 analyze/download）按 slug 归并为一个条目，
   // count 相加，label 显示中文工具名；最终按 count 降序（与后端返回排序一致）。
   const toolCallChartData = toolCalls
@@ -220,38 +204,35 @@ const AdminDashboard: React.FC = () => {
 
   if (!canViewStats) {
     return (
-      <div className="space-y-10">
-        <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
-          系统运行状态总览
-        </p>
-        <div className="text-sm font-mono text-muted-foreground p-8 border border-border text-center">
-          [ 无统计数据查看权限 — 请使用侧边栏导航 ]
-        </div>
-      </div>
+      <Empty className="border">
+        <EmptyHeader>
+          <EmptyTitle>无统计数据查看权限</EmptyTitle>
+          <EmptyDescription>请使用侧边栏导航其他页面。</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
 
   return (
-    <div ref={containerRef} className="space-y-10">
-      <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
-        系统运行状态总览
-      </p>
+    <div className="flex flex-col gap-8">
+      <p className="text-sm text-muted-foreground">系统运行状态总览</p>
 
       {error && (
-        <div className="text-sm font-mono text-primary bg-primary/10 p-4 border-l-2 border-primary uppercase tracking-widest">
-          [ 异常: {error} ]
-        </div>
+        <Alert variant="destructive">
+          <AlertTitle>加载失败</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {loading ? (
         <AdminLoadingState
           ariaLabel="正在加载后台统计数据"
-          label="[ 统计数据 · 同步中 ]"
+          label="正在加载统计数据"
           detail="等待安全聚合"
         />
       ) : !error && (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 admin-stat-card">
+          <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
             <PermissionGuard permission="user:read">
               <StatCard
                 label="总用户数"
@@ -282,70 +263,66 @@ const AdminDashboard: React.FC = () => {
             </PermissionGuard>
           </div>
 
-          <div className="space-y-6">
+          <div className="flex flex-col gap-6">
             <PermissionGuard permission="stats:read">
-              <div className="admin-chart-block border border-border p-6">
-                {/* 标题在左、日期范围按钮组在右（右上角） */}
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-bold tracking-tight mb-1">每日活跃用户</h2>
-                    <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
-                      DAILY ACTIVE USERS · 最近 {activeDays} 天
-                    </p>
-                  </div>
-                  <ChartRangeSelector
-                    options={[
-                      { value: 7, label: '7D' },
-                      { value: 14, label: '14D' },
-                      { value: 30, label: '30D' },
-                    ]}
-                    value={activeDays}
-                    onChange={setActiveDays}
-                  />
-                </div>
-                <div className="mt-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>每日活跃用户</CardTitle>
+                  <CardDescription>最近 {activeDays} 天</CardDescription>
+                  <CardAction>
+                    <ChartRangeSelector
+                      options={[
+                        { value: 7, label: '7D' },
+                        { value: 14, label: '14D' },
+                        { value: 30, label: '30D' },
+                      ]}
+                      value={activeDays}
+                      onChange={setActiveDays}
+                    />
+                  </CardAction>
+                </CardHeader>
+                <CardContent>
                   {activeLoading ? (
-                    <div className="h-[200px] flex items-center justify-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
+                    <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
                       加载中...
                     </div>
                   ) : (
                     <TrendChart data={dailyActive} emptyHint="暂无活跃数据" />
                   )}
-                </div>
-              </div>
+                </CardContent>
+              </Card>
             </PermissionGuard>
 
             <PermissionGuard permission="stats:read">
-              <div className="admin-chart-block border border-border p-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-bold tracking-tight mb-1">工具调用次数</h2>
-                    <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
-                      TOOL CALLS
-                      {toolDays ? ` · 最近 ${toolDays} 天` : ' · 全部时间'}
-                    </p>
-                  </div>
-                  <ChartRangeSelector
-                    options={[
-                      { value: 7, label: '7D' },
-                      { value: 14, label: '14D' },
-                      { value: 30, label: '30D' },
-                      { value: null, label: 'ALL' },
-                    ]}
-                    value={toolDays}
-                    onChange={setToolDays}
-                  />
-                </div>
-                <div className="mt-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>工具调用次数</CardTitle>
+                  <CardDescription>
+                    {toolDays ? `最近 ${toolDays} 天` : '全部时间'}
+                  </CardDescription>
+                  <CardAction>
+                    <ChartRangeSelector
+                      options={[
+                        { value: 7, label: '7D' },
+                        { value: 14, label: '14D' },
+                        { value: 30, label: '30D' },
+                        { value: null, label: 'ALL' },
+                      ]}
+                      value={toolDays}
+                      onChange={setToolDays}
+                    />
+                  </CardAction>
+                </CardHeader>
+                <CardContent>
                   {toolLoading ? (
-                    <div className="h-[200px] flex items-center justify-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
+                    <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
                       加载中...
                     </div>
                   ) : (
                     <BarChart data={toolCallChartData} emptyHint="暂无工具调用记录" />
                   )}
-                </div>
-              </div>
+                </CardContent>
+              </Card>
             </PermissionGuard>
           </div>
         </>

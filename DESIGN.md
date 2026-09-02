@@ -7,9 +7,8 @@
 ### 1.1. 前端架构 (Frontend)
 - **框架**: React + TypeScript + Vite
 - **路由**: React Router v7 (基于配置的动态路由与按需加载)
-- **样式**: Tailwind CSS v4
-- **动画**: 当前使用 GSAP (GreenSock Animation Platform) 编排动效；保留 `@gsap/react`，供后续 React 生命周期动画集成使用
-- **图标**: `@phosphor-icons/react`
+- **样式**: Tailwind CSS v4 + shadcn/ui `radix-nova`
+- **图标**: `lucide-react`
 - **请求处理**: Axios (配置全局拦截器处理 JWT)
 
 ### 1.2. 后端架构 (Backend)
@@ -48,55 +47,48 @@
 
 ## 3. 设计语言与审美规范 (Design Language)
 
-平台全面落实了 "Kinetic Brutalism"（动态粗野主义）风格，拒绝千篇一律的仪表盘（Anti-Dashboard）设计，具有极高视觉方差和干练的交互反馈。
+可见界面采用 shadcn/ui `radix-nova` 默认视觉，决策见 `docs/adr/0006-shadcn-nova-visual-language.md`。不再使用 Kinetic Brutalism。
 
-### 3.1. 排版优先 (Massive Typography)
-- **核心字体**: 自托管 `Noto Serif SC 700` 用于标题，`Geist Sans` 用于正文，`Geist Mono` 用于数据与系统标签。
-- **视觉层级**: 采用夸张的超大标题（如 `text-[10vw]`、`text-7xl`），配合紧凑的字距 (`tracking-tighter`) 和缩减的行高 (`leading-[0.85]`)，使文字本身成为界面的核心视觉元素。
-- **标签与微文案**: 大量使用全大写字母、宽字距的等宽字体（Mono）作为类别、状态的标识（如 `[ ID: USERNAME ]`、`OUTPUT STREAM`），营造系统层级的黑客/极客感。
+### 3.1. 排版与字标
+- **字体**: Geist Variable 用于界面；Geist Mono 用于代码与等宽数据。标题与正文同一无衬线家族。
+- **字标**: 主字「工具」（`font-semibold`），旁注「Tool」（`text-muted-foreground`）。`document.title` 用「工具」或「{页面} · 工具」。
+- **层级**: 常规标题（如 Page Header 的 `text-2xl font-semibold`），不用展示级超大标题。
 
-### 3.2. 色彩与双模式 (Dual Theme)
-平台支持明暗模式的无缝自动切换（或手动覆写）：
-- **暗黑模式 (Dark)**:
-  - 纯黑背景 (`#050505`) + 灰白文字 (`#f4f4f5`)。
-  - 强调色：极具穿透力的 **酸性黄绿 / 荧光莱姆 (`#d4ff00`)**。
-  - 噪点遮罩：全局覆盖 `4%` 透明度的胶片噪点 (Film Grain) 以增强物理质感。
-- **明亮模式 (Light)**:
-  - 纯白背景 (`#ffffff`) + 深墨色文字 (`#09090b`)。
-  - 强调色：现代蓝 (`#3b82f6`)。
-  - 噪点遮罩：降低至 `2%` 透明度，保持界面干净且不失细节。
+### 3.2. 色彩与主题
+- 使用 nova 语义 token：`background`、`foreground`、`primary`、`muted`、`border`、`sidebar`。
+- `primary` 为中性黑/白，不使用酸性黄绿或独立品牌色覆盖层。
+- 主题为 `light | dark | system` 三态，根节点 class 驱动。
+- 成功 / 危险 / 警告继续使用 `status-*` 语义 token，并伴随文字说明。
 
-### 3.3. 动态编排 (GSAP Choreography)
-拒绝软绵绵的默认淡入，强调物理感、干脆和克制：
-- **曲线设定**: 按动效职责选择缓动函数：标题切片使用 `power4.out`，内容与注册反馈使用 `expo.out`，次级淡入使用 `power3.out`，登录离场使用 `power3.inOut`，认证错误抖动使用 `elastic.out(1, 0.3)`。
-- **文本切片 (Clip-Text)**: 大标题采用带有 `overflow: hidden` 遮罩的交错上浮 (`stagger`) 动画，呈现文字从地平线拉起的磅礴感。
-- **触觉反馈**: 按控件权重采用克制的下沉反馈：主要操作使用 `active:scale-95`，图标按钮使用 `active:scale-90`，范围滑块拇指使用 `scale-75`；悬停反馈以颜色和位移变化为主。
+### 3.3. 动效
+- 只保留组件自带过渡、toast、dialog 与 focus 反馈。
+- 不为页面入场编排 GSAP 或标题切片。
 
-### 3.4. 无框化表单 (Unboxed Forms)
-- 废弃传统的输入框背景与全包围边框。
-- 采用仅保留底部细线的无框设计 (`border-bottom`)。
-- 输入框处于焦点时，底线高亮，并且上方占位符 (Label) 利用 CSS 实现流畅的上浮动画。
+### 3.4. 表单与控件
+- 表单使用 shadcn `Field` / `FieldGroup` 与标准 `Input` / `Textarea` / `Select`。
+- 主操作使用 `Button`；空状态使用 `Empty`；提示使用 `Alert`；加载使用 `Spinner` 或 `Skeleton`。
+- 图标库为 Lucide；按钮内图标用 `data-icon`，不另加尺寸 class。
 
-### 3.5. 页面结构体系 (Macrostructure Family)
-- **登录页**: 采用 Awwwards Split Canvas，以品牌叙事区与认证操作区形成左右分屏。
-- **主控台**: 采用纵向 Catalogue / Index 结构，以编号、名称、描述和状态构成可快速扫描的工具目录。
-- **工具页**: 采用 Workbench 双栏控制台结构，将参数输入与结果输出明确分区。
-- **工具页上下文**: 当前工具名称统一显示在全局页头的品牌标识右侧，工作区不重复展示大型页面标题；移动端允许工具名在品牌下方自然换行。
-- **统一原则**: 各页面不强制复用同一种宏观布局，但必须共享动态粗野主义的排版、色彩、边界、间距与动效语言。
+### 3.5. 页面结构
+- **登录 / 待审批**: 居中 `Card`，无分屏叙事区。
+- **用户区**: 顶栏启动器（字标、当前工具名、主题、通知、用户、退出）；无全站 Sidebar。
+- **主控台**: 工具 `Card` 网格。
+- **工具页**: Layout 根据 `toolsConfig` 渲染 Page Header，内容区 `p-6`；工具自行管理表单、表格与图表。
+- **Admin**: 官方 `Sidebar` + `SidebarInset`。
 
 ### 3.6. 设计令牌与样式入口 (Design Tokens)
 - `frontend/src/styles/tokens.css` 是全局样式、字体声明和原始设计值的唯一来源。
-- Tailwind CSS 的 `@theme inline` 负责将 CSS 变量映射为语义化令牌。
-- 组件优先使用 `bg-background`、`text-foreground`、`text-primary`、`border-border` 等语义化类名，不直接重复声明原始颜色或字体族。
-- 新增主题或调整视觉基础值时，应先修改 `tokens.css`，再由语义化令牌传递到组件。
+- Tailwind CSS 的 `@theme inline` 将 CSS 变量映射为语义化令牌。
+- 组件使用 `bg-background`、`text-foreground`、`text-primary`、`border-border` 等语义类名。
+- 调整视觉基础值时先改 `tokens.css`，不要在页面覆盖组件颜色或字号。
 
 ### 3.7. 响应式与无障碍 (Responsive & Accessibility)
 - **目标视口**: 至少验证 `320px`、`375px`、`414px` 和 `768px` 宽度，确保内容不产生意外的横向滚动。
-- **文本安全**: 超大标题及其容器应使用 `min-width: 0` 与 `overflow-wrap: anywhere` 等约束，避免长文本撑破布局。
-- **动效降级**: CSS 与 GSAP 动效必须响应 `prefers-reduced-motion`，在用户请求减少动态效果时关闭或简化位移、缩放与交错动画。
-- **键盘焦点**: 可交互元素必须提供清晰的 `focus-visible` 状态，不以移除 outline 作为默认处理。
-- **表单状态**: 错误信息与异步状态应通过恰当的 ARIA 属性关联和播报；视觉提示不能是唯一的信息载体。
-- **页面边界**: `html` 与 `body` 保持横向溢出裁切，组件内部仍需从根源约束尺寸与换行。
+- **文本安全**: 标题与容器使用 `min-width: 0` 与必要的截断/换行，避免长文本撑破布局。
+- **动效降级**: 过渡与动画响应 `prefers-reduced-motion`。
+- **键盘焦点**: 可交互元素必须提供清晰的 `focus-visible` 状态。
+- **表单状态**: 错误与异步状态通过 ARIA 关联；视觉提示不能是唯一信息载体。
+- **Admin 移动端**: 使用 shadcn Sidebar 自带 Sheet，不为每个工具单独做移动重排。
 
 ### 3.8. 状态工作台与结果数据 (Stateful Workbench)
 - 文件处理工具在同一工作区内依次呈现输入、处理中和结果状态，不让上传控件、等待反馈与结果内容同时竞争注意力。
@@ -112,7 +104,7 @@
 由于优秀的底层架构，添加新工具只需 3 步操作：
 
 ### 4.1. 前端：编写工具组件
-在 `frontend/src/pages/tools/` 目录下创建你的组件文件（例如 `MyTool.tsx`）。请参考 `PwdGenerator.tsx` 保持设计风格的统一（如使用 `gsap-reveal` 类进行入场动画）。
+在 `frontend/src/pages/tools/` 目录下创建组件。页面标题与描述由 Layout 从 `toolsConfig` 渲染，工具内不要再做超大 hero。控件使用 `frontend/src/components/ui` 中的 shadcn 组件。
 
 ### 4.2. 前端：注册工具配置
 打开 `frontend/src/config/tools.ts`，在 `toolsConfig` 数组中添加一项：
@@ -124,7 +116,7 @@ export const toolsConfig: ToolDefinition[] = [
   {
     id: 'my-new-tool',
     name: '我的新工具',
-    icon: Wrench, // 从 @phosphor-icons/react 导入合适的图标
+    icon: Wrench, // 从 lucide-react 导入
     path: '/tools/my-new-tool',
     description: '一句简短的关于此工具的介绍。',
     component: MyTool

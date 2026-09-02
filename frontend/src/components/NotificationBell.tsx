@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react'
-import { Bell } from '@phosphor-icons/react'
+import { Bell } from 'lucide-react'
 import { toast } from 'sonner'
+
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from '@/components/ui/empty'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import {
   useMarkAllNotificationsRead,
@@ -17,7 +26,6 @@ import {
 import type { Notification } from '@/types/notifications'
 import { parseServerDate } from '@/lib/format-time'
 
-/** 相对时间（中文）：刚刚 / N 分钟前 / N 小时前 / N 天前 / 日期。 */
 function formatRelativeTime(iso: string) {
   const time = parseServerDate(iso)?.getTime()
   if (time === undefined || Number.isNaN(time)) return ''
@@ -28,28 +36,23 @@ function formatRelativeTime(iso: string) {
   if (hours < 24) return `${hours} 小时前`
   const days = Math.floor(hours / 24)
   if (days < 7) return `${days} 天前`
-  return parseServerDate(iso)?.toLocaleDateString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }) ?? ''
+  return (
+    parseServerDate(iso)?.toLocaleDateString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }) ?? ''
+  )
 }
 
-/**
- * 通知铃铛（主站 / 控制台共用）：未读徽标 + 最近通知下拉面板。
- * 点击条目 → POST 已读 + 本地置灰；底部"全部已读"；空态与错误态。
- */
 export function NotificationBell() {
   const [open, setOpen] = useState(false)
   const listQuery = useNotifications(20)
   const unreadQuery = useUnreadCount()
   const markRead = useMarkNotificationRead()
   const markAll = useMarkAllNotificationsRead()
-
-  // 本地"已点读"集合：点击后立即置灰，不等后端往返
   const [locallyRead, setLocallyRead] = useState<Set<number>>(new Set())
 
-  // 服务端已读后从本地集合剔除，避免集合无限增长
   useEffect(() => {
     if (!listQuery.data) return
     const serverRead = new Set<number>()
@@ -70,7 +73,6 @@ export function NotificationBell() {
     setLocallyRead((prev) => new Set(prev).add(notification.id))
     markRead.mutate(notification.id, {
       onError: () => {
-        // 回滚乐观置灰：失败后可重试，且集合不会永久残留该 id
         setLocallyRead((prev) => {
           const next = new Set(prev)
           next.delete(notification.id)
@@ -92,52 +94,50 @@ export function NotificationBell() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant='ghost'
-          size='icon'
-          className='relative'
-          aria-label='通知中心'
-          title='通知中心'
+          variant="ghost"
+          size="icon"
+          className="relative"
+          aria-label="通知中心"
+          title="通知中心"
         >
-          <Bell className='size-5' />
-          {unreadCount > 0 && (
-            <span
-              className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center border border-background bg-primary px-1 font-mono text-[10px] leading-4 text-primary-foreground"
+          <Bell />
+          {unreadCount > 0 ? (
+            <Badge
+              variant="default"
+              className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px]"
               title={`${unreadCount} 条未读通知`}
             >
               {unreadCount > 99 ? '99+' : unreadCount}
-            </span>
-          )}
+            </Badge>
+          ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent
-        align='end'
-        sideOffset={8}
-        className='w-80 p-0'
-      >
-        <div className='flex items-center justify-between border-b border-border px-4 py-3'>
-          <span className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
-            通知中心
-          </span>
-          {unreadCount > 0 && (
-            <span className='font-mono text-[11px] text-primary'>
-              {unreadCount} 未读
-            </span>
-          )}
+      <PopoverContent align="end" sideOffset={8} className="w-80 p-0">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <span className="text-sm font-medium">通知中心</span>
+          {unreadCount > 0 ? (
+            <Badge variant="secondary">{unreadCount} 未读</Badge>
+          ) : null}
         </div>
-
-        <div className='max-h-80 overflow-y-auto'>
+        <div className="max-h-80 overflow-y-auto">
           {listQuery.isPending ? (
-            <div className='px-4 py-10 text-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
-              加载中...
+            <div className="flex flex-col gap-3 p-4">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
             </div>
           ) : listQuery.isError ? (
-            <div className='px-4 py-10 text-center text-[11px] font-mono uppercase tracking-widest text-destructive'>
-              通知加载失败
-            </div>
+            <Empty className="py-10">
+              <EmptyHeader>
+                <EmptyTitle>通知加载失败</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : listQuery.data.items.length === 0 ? (
-            <div className='px-4 py-10 text-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
-              [ 暂无通知 ]
-            </div>
+            <Empty className="py-10">
+              <EmptyHeader>
+                <EmptyTitle>暂无通知</EmptyTitle>
+                <EmptyDescription>新的系统通知会显示在这里。</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <ul>
               {listQuery.data.items.map((notification) => {
@@ -146,21 +146,21 @@ export function NotificationBell() {
                 return (
                   <li key={notification.id}>
                     <button
-                      type='button'
+                      type="button"
                       onClick={() => handleRead(notification)}
                       className={cn(
-                        'flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/50',
+                        'flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-muted/50',
                         isUnread && 'bg-muted/40',
                       )}
                     >
                       <span
                         className={cn(
-                          'mt-1.5 size-1.5 shrink-0',
+                          'mt-1.5 size-1.5 shrink-0 rounded-full',
                           isUnread ? 'bg-primary' : 'bg-transparent',
                         )}
-                        aria-hidden='true'
+                        aria-hidden="true"
                       />
-                      <span className='min-w-0 flex-1'>
+                      <span className="min-w-0 flex-1">
                         <span
                           className={cn(
                             'block text-sm leading-snug',
@@ -169,7 +169,7 @@ export function NotificationBell() {
                         >
                           {notification.title}
                         </span>
-                        <span className='mt-0.5 block font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70'>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
                           {formatRelativeTime(notification.created_at)}
                         </span>
                       </span>
@@ -180,12 +180,11 @@ export function NotificationBell() {
             </ul>
           )}
         </div>
-
-        <div className='border-t border-border p-2'>
+        <div className="border-t p-2">
           <Button
-            variant='outline'
-            size='sm'
-            className='w-full'
+            variant="outline"
+            size="sm"
+            className="w-full"
             onClick={handleMarkAll}
             disabled={unreadCount === 0 || markAll.isPending}
           >

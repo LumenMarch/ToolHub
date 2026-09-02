@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Check,
-  DotsSixVertical,
-  FloppyDisk,
-  PencilSimple,
+  GripVertical,
+  Pencil,
+  Save,
   X,
-} from '@phosphor-icons/react';
+} from 'lucide-react';
 import {
   DndContext,
   KeyboardSensor,
@@ -24,6 +24,12 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useQueryClient } from '@tanstack/react-query';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import { toolsConfig } from '../../config/tools';
 import AdminLoadingState from './components/AdminLoadingState';
 import { useAdminApi } from './hooks/use-admin-api';
@@ -162,48 +168,48 @@ const AdminTools: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-        <p className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
-          调整主控台中工具的显示、名称与排序
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <p className="text-sm text-muted-foreground">
+          调整主控台中工具的显示、名称与排序。
         </p>
         <div className="flex items-center gap-3">
           {savedAt && !dirtyCount && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
-              <Check className="w-3.5 h-3.5" /> 已保存
+            <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+              <Check className="size-3.5" /> 已保存
             </span>
           )}
           {dirtyCount > 0 && (
-            <span className="text-[11px] font-mono uppercase tracking-widest text-primary">
+            <span className="text-sm text-primary">
               {dirtyCount} 项未保存
             </span>
           )}
-          <button
+          <Button
             type="button"
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             disabled={!dirtyCount || saving}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-mono uppercase tracking-widest border border-border hover:border-primary hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            <FloppyDisk className="w-3.5 h-3.5" />
+            <Save />
             {saving ? '保存中...' : '保存'}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground opacity-70 border-l-2 border-border pl-4">
+      <p className="text-sm text-muted-foreground">
         拖动手柄调整顺序；名称与描述留空时使用代码默认值；禁用的工具不会出现在主控台。
-      </div>
+      </p>
 
       {error && (
-        <div className="text-sm font-mono text-primary bg-primary/10 p-4 border-l-2 border-primary uppercase tracking-widest">
-          [ 异常: {error} ]
-        </div>
+        <Alert variant="destructive">
+          <AlertTitle>操作失败</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {loading ? (
         <AdminLoadingState
           ariaLabel="正在加载后台工具配置"
-          label="[ 工具配置 · 同步中 ]"
+          label="正在加载工具配置"
           detail="等待元数据"
         />
       ) : (
@@ -216,7 +222,7 @@ const AdminTools: React.FC = () => {
             items={sortedRows.map((r) => r.tool_id)}
             strategy={verticalListSortingStrategy}
           >
-            <div className="space-y-2">
+            <div className="flex flex-col gap-2">
               {sortedRows.map((row) => (
                 <ToolRow
                   key={row.tool_id}
@@ -264,100 +270,95 @@ const ToolRow: React.FC<ToolRowProps> = ({
         transform: CSS.Transform.toString(transform),
         transition,
       }}
-      className={`border p-4 transition-[border-color,opacity,box-shadow] ${
-        row.dirty ? 'border-primary' : 'border-border'
-      } ${!row.enabled ? 'opacity-50' : ''} ${
-        isDragging
-          ? 'border-primary shadow-xl opacity-90 z-50'
-          : ''
-      }`}
+      className={cn(
+        'rounded-xl border p-4 transition-[border-color,opacity,box-shadow]',
+        row.dirty ? 'border-primary' : 'border-border',
+        !row.enabled && 'opacity-50',
+        isDragging && 'z-50 border-primary opacity-90 shadow-xl',
+      )}
       {...attributes}
     >
       <div className="flex items-center gap-4">
         {/* 拖拽手柄（仅手柄响应拖拽，避免输入框/按钮误触） */}
-        <button
+        <Button
           type="button"
-          className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-primary transition-colors shrink-0 touch-none"
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0 cursor-grab touch-none active:cursor-grabbing"
           aria-label="拖动排序"
           title="拖动调整顺序"
           {...listeners}
         >
-          <DotsSixVertical className="w-5 h-5" />
-        </button>
+          <GripVertical />
+        </Button>
 
-        {/* 启用开关 */}
-        <label className="cursor-pointer shrink-0">
-          <input
-            type="checkbox"
-            checked={row.enabled}
-            onChange={(e) => onToggleEnabled(e.target.checked)}
-            className="w-4 h-4 accent-[var(--color-brand)]"
-            aria-label={row.enabled ? '已启用' : '已禁用'}
-          />
-        </label>
+        <Checkbox
+          checked={row.enabled}
+          onCheckedChange={(checked) => onToggleEnabled(!!checked)}
+          aria-label={row.enabled ? '已启用' : '已禁用'}
+        />
 
-        {/* 名称 + 描述 */}
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           {editing ? (
-            <div className="space-y-2">
-              <input
+            <div className="flex flex-col gap-2">
+              <Input
                 type="text"
                 value={row.custom_name}
                 onChange={(e) => onNameChange(e.target.value)}
                 placeholder={row.default_name}
-                className="awwwards-input w-full font-bold"
+                className="font-medium"
                 autoFocus
               />
-              <input
+              <Input
                 type="text"
                 value={row.custom_description}
                 onChange={(e) => onDescChange(e.target.value)}
                 placeholder={row.default_description}
-                className="awwwards-input w-full text-sm"
               />
             </div>
           ) : (
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-bold tracking-tight truncate">
+                <h3 className="truncate font-medium tracking-tight">
                   {row.custom_name || row.default_name}
                 </h3>
                 {row.custom_name && (
-                  <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground opacity-60">
-                    (自定义)
-                  </span>
+                  <Badge variant="outline">自定义</Badge>
                 )}
               </div>
-              <p className="text-xs text-muted-foreground truncate">
+              <p className="truncate text-xs text-muted-foreground">
                 {row.custom_description || row.default_description}
               </p>
             </div>
           )}
         </div>
 
-        {/* 编辑/完成按钮 */}
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
           onClick={() => setEditing((v) => !v)}
-          className="p-1.5 text-muted-foreground hover:text-primary transition-colors shrink-0"
           aria-label={editing ? '完成编辑' : '编辑'}
           title={editing ? '完成' : '自定义名称/描述'}
         >
-          {editing ? <Check className="w-4 h-4" /> : <PencilSimple className="w-4 h-4" />}
-        </button>
+          {editing ? <Check /> : <Pencil />}
+        </Button>
         {editing && row.custom_name && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0"
             onClick={() => {
               onNameChange('');
               onDescChange('');
             }}
-            className="p-1.5 text-muted-foreground hover:text-primary transition-colors shrink-0"
             aria-label="恢复默认"
             title="恢复默认"
           >
-            <X className="w-4 h-4" />
-          </button>
+            <X />
+          </Button>
         )}
       </div>
     </div>

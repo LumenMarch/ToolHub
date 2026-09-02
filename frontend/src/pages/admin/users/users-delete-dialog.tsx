@@ -68,17 +68,17 @@ export function UsersDeleteDialog({
             e.preventDefault()
             void handleDelete()
           }}
-          className='space-y-4'
+          className='flex flex-col gap-4'
         >
-          <p className='mb-2'>
+          <p>
             确定要删除用户{' '}
-            <span className='font-bold'>{currentRow.username}</span> 吗？
+            <span className='font-medium'>{currentRow.username}</span> 吗？
             <br />
             此操作将永久移除该账号及其所有关联数据，无法撤销。
           </p>
 
-          <Label className='my-2 space-y-1.5'>
-            <span className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+          <Label className='flex flex-col gap-1.5'>
+            <span className='text-sm text-muted-foreground'>
               用户名（输入以确认）
             </span>
             <Input
@@ -89,7 +89,7 @@ export function UsersDeleteDialog({
             />
           </Label>
 
-          <Alert variant='destructive' className='rounded-none'>
+          <Alert variant='destructive'>
             <AlertTitle>警告</AlertTitle>
             <AlertDescription>此操作不可回滚，请谨慎操作。</AlertDescription>
           </Alert>

@@ -126,20 +126,20 @@ export function UsersApproveDialog({
           <DialogTitle>通过审批</DialogTitle>
           <DialogDescription>
             批准用户{' '}
-            <span className='font-mono font-bold text-foreground'>
+            <span className='font-medium text-foreground'>
               {currentRow.username}
             </span>{' '}
             的注册申请，并为其分配初始角色。
           </DialogDescription>
         </DialogHeader>
 
-        <form id='approve-user-form' onSubmit={onSubmit} className='space-y-4'>
+        <form id='approve-user-form' onSubmit={onSubmit} className='flex flex-col gap-4'>
           <Controller
             control={control}
             name='roleIds'
             render={({ field }) => (
-              <div className='space-y-1.5'>
-                <Label className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+              <div className='flex flex-col gap-1.5'>
+                <Label className='text-sm text-muted-foreground'>
                   分配角色（可留空）
                 </Label>
                 {rolesQuery.isPending && (
@@ -183,16 +183,16 @@ export function UsersApproveDialog({
                           field.onChange(next)
                         }}
                       />
-                      <span className='font-mono'>{role.name}</span>
-                      <span className='ml-auto text-[11px] text-muted-foreground'>
+                      <span>{role.name}</span>
+                      <span className='ml-auto text-xs text-muted-foreground'>
                         {role.permission_count} 项权限
                       </span>
                     </label>
                   )
                 })}
                 {errors.roleIds && (
-                  <p className='text-[11px] font-mono uppercase tracking-widest text-destructive'>
-                    [ {errors.roleIds.message} ]
+                  <p className='text-sm text-destructive'>
+                    {errors.roleIds.message}
                   </p>
                 )}
               </div>
@@ -200,8 +200,8 @@ export function UsersApproveDialog({
           />
 
           {/* 工具权限：二选一（工具使用者全部工具 / 自定义逐工具勾选），风格同角色编辑弹窗 */}
-          <div className='space-y-1.5 border-t border-border pt-4'>
-            <Label className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+          <div className='flex flex-col gap-1.5 border-t pt-4'>
+            <Label className='text-sm text-muted-foreground'>
               工具权限
             </Label>
             {permissionsQuery.isPending && (
@@ -209,16 +209,16 @@ export function UsersApproveDialog({
                 权限列表加载中...
               </p>
             )}
-            <div className='pt-0.5 space-y-1'>
+            <div className='flex flex-col gap-1 pt-0.5'>
               <label className='flex cursor-pointer items-center gap-2 text-sm'>
                 <input
                   type='radio'
                   name='tool-permission-mode'
                   checked={toolMode === 'all'}
                   onChange={() => handleToolModeChange('all')}
-                  className='h-4 w-4 accent-[var(--color-brand)]'
+                  className='size-4 accent-primary'
                 />
-                <span className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+                <span className='text-sm text-muted-foreground'>
                   工具使用者（全部工具）
                 </span>
               </label>
@@ -228,9 +228,9 @@ export function UsersApproveDialog({
                   name='tool-permission-mode'
                   checked={toolMode === 'custom'}
                   onChange={() => handleToolModeChange('custom')}
-                  className='h-4 w-4 accent-[var(--color-brand)]'
+                  className='size-4 accent-primary'
                 />
-                <span className='text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
+                <span className='text-sm text-muted-foreground'>
                   自定义工具权限
                 </span>
               </label>
@@ -240,7 +240,7 @@ export function UsersApproveDialog({
                 暂无工具权限可选。
               </p>
             )}
-            <div className='max-h-40 space-y-1.5 overflow-y-auto pr-1 pt-1'>
+            <div className='flex max-h-40 flex-col gap-1.5 overflow-y-auto pr-1 pt-1'>
               {allToolPerms.map((perm) => {
                 // 「工具使用者」模式下复选框整体禁用，只能由 radio 统一授予/收回
                 const disabled = toolMode === 'all'
@@ -262,7 +262,7 @@ export function UsersApproveDialog({
                         )
                       }}
                     />
-                    <code className='text-[11px] font-mono text-muted-foreground'>
+                    <code className='text-xs text-muted-foreground'>
                       {perm.codename}
                     </code>
                   </label>

@@ -1,29 +1,27 @@
-/*
- * Hallmark · genre: modern-minimal · macrostructure: Workbench
- * design-system: DESIGN.md · designed-as-app
- * pre-emit critique: P5 H5 E5 S5 R5 V4
- */
 import React, { useRef, useEffect, useState } from 'react';
-import { gsap } from 'gsap';
 import {
-  ArrowClockwise,
-  ArrowCounterClockwise,
-  CaretDown,
-  CaretLeft,
-  CaretRight,
-  CheckCircle,
-  CheckSquareOffset,
-  CircleNotch,
+  AlertTriangle,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleCheck,
+  CircleX,
   Database,
-  DownloadSimple,
-  FileArrowUp,
-  FileXls,
-  FloppyDisk,
+  Download,
+  FileSpreadsheet,
   FolderOpen,
-  MagnifyingGlass,
-  Warning,
-  XCircle,
-} from '@phosphor-icons/react';
+  Loader2,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Search,
+  SquareCheck,
+  Upload,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Spinner } from '@/components/ui/spinner';
 import api from '../../../api/axios';
 import { LoadingSignal } from '../../../components/LoadingSignal';
 import { parseServerDate } from '../../../lib/format-time';
@@ -44,20 +42,20 @@ const UnboxedFileInput: React.FC<{
   const shown = displayValue ?? (value.includes('/') ? value.split('/').pop()! : value.includes('\\') ? value.split('\\').pop()! : value);
 
   return (
-    <label className="group block min-w-0 border-b border-border py-3 focus-within:border-primary">
-      <span className="mb-1 block font-mono text-xs text-muted-foreground transition-colors group-focus-within:text-primary">
+    <label className="group block min-w-0 py-2">
+      <span className="mb-1 block text-xs text-muted-foreground">
         {label}
       </span>
-      <span className="flex min-w-0 items-center gap-2">
-        <input
+      <span className="relative flex min-w-0 items-center">
+        <Input
           type="text"
           value={shown}
           readOnly
           disabled={disabled}
-          className="min-w-0 flex-1 truncate border-none bg-transparent p-0 text-base font-medium tracking-wide text-foreground outline-none placeholder:text-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-60 md:text-sm"
+          className="min-w-0 flex-1 truncate pr-8"
           placeholder="尚未匹配"
         />
-        <FileArrowUp weight="bold" className="size-4 shrink-0 text-muted-foreground transition-colors group-focus-within:text-primary" />
+        <Upload className="pointer-events-none absolute right-2.5 size-4 shrink-0 text-muted-foreground" />
       </span>
     </label>
   );
@@ -246,7 +244,7 @@ const Badge: React.FC<{ variant: 'ok' | 'warn' | 'err' | 'info'; children: React
     info: 'border-primary/40 text-primary bg-primary/10',
   };
   return (
-    <span className={`inline-flex items-center gap-1 border px-1.5 py-0.5 font-mono text-[0.65rem] font-bold uppercase tracking-wider ${colors[variant]}`}>
+    <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[0.65rem] font-medium ${colors[variant]}`}>
       {children}
     </span>
   );
@@ -261,7 +259,7 @@ const ModuleProgressBar: React.FC<{ label: string; progress: ModuleProgress }> =
   const isConfirming = !done && sentPct >= 100 && acceptedPct < 100;
   return (
     <div className="mt-3 pt-3 border-t border-border/50">
-      <div className="flex items-center justify-between text-xs font-mono mb-1">
+      <div className="mb-1 flex items-center justify-between text-xs">
         <span className="text-muted-foreground">{label}</span>
         <span className="text-muted-foreground">
           {progress.okCount}/{progress.fileCount}
@@ -296,8 +294,6 @@ const ModuleProgressBar: React.FC<{ label: string; progress: ModuleProgress }> =
 };
 
 const AssetComparison: React.FC = () => {
-  const containerRef = useRef<HTMLDivElement>(null);
-
   const [paths, setPaths] = useState<AssetComparisonInputs>(EMPTY_INPUTS);
 
   const selectedFilesRef = useRef<File[]>([]);
@@ -371,24 +367,6 @@ const AssetComparison: React.FC = () => {
     setReviews(job.reviews);
     setIsSourcesOpen(false);
   }, [job]);
-
-  useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      return;
-    }
-
-    const ctx = gsap.context(() => {
-      gsap.from('.gsap-reveal', {
-        y: 16,
-        opacity: 0,
-        duration: 0.65,
-        stagger: 0.08,
-        ease: 'expo.out',
-        delay: 0.12
-      });
-    }, containerRef);
-    return () => ctx.revert();
-  }, []);
 
   const handleSelectFolder = () => {
     folderInputRef.current?.click();
@@ -559,7 +537,7 @@ const AssetComparison: React.FC = () => {
             <div className="flex flex-col gap-1">
               {prev}
               <span className="flex items-center gap-1 text-xs text-status-warning-foreground">
-                <Warning className="size-3.5" weight="bold" />
+                <AlertTriangle className="size-3.5" />
                 {failMsgs.length} 个文件上传失败
               </span>
             </div>
@@ -920,10 +898,7 @@ const AssetComparison: React.FC = () => {
   };
 
   return (
-    <div
-      ref={containerRef}
-      className="flex w-full min-w-0 flex-col pb-20 min-[80rem]:-mx-44 min-[80rem]:w-auto"
-    >
+    <div className="flex w-full min-w-0 flex-col gap-5">
       <input
         ref={folderInputRef}
         type="file"
@@ -934,127 +909,128 @@ const AssetComparison: React.FC = () => {
         onChange={handleFolderChange}
       />
 
-      <section className="gsap-reveal border-y border-border">
-        <div className="grid grid-cols-2 divide-x divide-y divide-border min-[60rem]:grid-cols-[minmax(18rem,1.5fr)_repeat(3,minmax(7rem,0.5fr))] min-[60rem]:divide-y-0">
+      <section className="overflow-hidden rounded-xl border bg-card">
+        <div className="grid grid-cols-2 divide-x divide-y min-[60rem]:grid-cols-[minmax(18rem,1.5fr)_repeat(3,minmax(7rem,0.5fr))] min-[60rem]:divide-y-0">
           <div className="col-span-2 min-w-0 px-4 py-4 min-[60rem]:col-span-1">
             <div className="flex min-w-0 items-start justify-between gap-4">
               <div className="min-w-0">
-                <h1 className="truncate text-lg font-bold tracking-tight">
-                  {formatTaskMonth(job?.createdAt)}资产核对
-                </h1>
-                <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                <p className="truncate text-sm font-medium">
+                  {formatTaskMonth(job?.createdAt)}核对任务
+                </p>
+                <p className="mt-1 truncate text-xs text-muted-foreground">
                   {job ? `TASK ${job.jobId.slice(0, 8).toUpperCase()}` : '尚未创建任务'}
                   <span className="mx-2 text-border">/</span>
                   {isJobActive ? '后台核对进行中' : job ? '等待审阅与归档' : '等待输入数据'}
                 </p>
               </div>
-              <span className={`mt-1 size-2 shrink-0 ${isJobActive ? 'bg-primary' : job ? 'bg-status-success-foreground' : 'bg-muted-foreground'}`} />
+              <span className={`mt-1 size-2 shrink-0 rounded-full ${isJobActive ? 'bg-primary' : job ? 'bg-status-success-foreground' : 'bg-muted-foreground'}`} />
             </div>
           </div>
           <div className="px-4 py-4">
-            <p className="font-mono text-xs text-muted-foreground">数据源</p>
-            <p className="mt-1 font-mono text-lg font-bold tabular-nums">
+            <p className="text-xs text-muted-foreground">数据源</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums">
               {matchedPathCount}<span className="text-xs text-muted-foreground"> / {TOTAL_INPUT_COUNT}</span>
             </p>
           </div>
           <div className="px-4 py-4">
-            <p className="font-mono text-xs text-muted-foreground">核对完成</p>
-            <p className="mt-1 font-mono text-lg font-bold tabular-nums">
+            <p className="text-xs text-muted-foreground">核对完成</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums">
               {comparisonCompleted}<span className="text-xs text-muted-foreground"> / {comparisonTotal}</span>
             </p>
           </div>
           <div className="px-4 py-4">
-            <p className="font-mono text-xs text-muted-foreground">待处置 / 已复核</p>
-            <p className={`mt-1 font-mono text-lg font-bold tabular-nums ${attentionCount > 0 ? 'text-primary' : ''}`}>
+            <p className="text-xs text-muted-foreground">待处置 / 已复核</p>
+            <p className={`mt-1 text-lg font-semibold tabular-nums ${attentionCount > 0 ? 'text-primary' : ''}`}>
               {attentionCount}<span className="text-xs text-muted-foreground"> / {reviewedCount}</span>
             </p>
           </div>
         </div>
       </section>
 
-      <section className="gsap-reveal border-b border-border">
-        <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 py-3">
-          <button
+      <section className="rounded-xl border bg-card">
+        <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => setIsSourcesOpen(value => !value)}
             aria-expanded={isSourcesOpen}
-            className="flex min-h-11 items-center gap-3 px-1 text-left font-bold tracking-tight text-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="h-auto justify-start px-1 text-left font-medium"
           >
             {isSourcesOpen ? (
-              <CaretDown weight="bold" className="size-4 text-primary" />
+              <ChevronDown className="size-4 text-primary" />
             ) : (
-              <CaretRight weight="bold" className="size-4 text-primary" />
+              <ChevronRight className="size-4 text-primary" />
             )}
             数据源与任务设置
-            <span className="font-mono text-xs font-normal text-muted-foreground">
+            <span className="text-xs font-normal text-muted-foreground">
               {matchedPathCount}/{TOTAL_INPUT_COUNT} READY
             </span>
-          </button>
+          </Button>
           <div className="flex flex-wrap items-center gap-2">
-            {isJobActive && (
-              <button
+            {isJobActive ? (
+              <Button
                 type="button"
+                variant="destructive"
                 onClick={handleCancelJob}
                 disabled={isCancelling || job?.status === 'cancel_requested'}
-                className="flex min-h-11 items-center justify-center gap-2 border border-status-danger-foreground/50 px-4 font-bold text-status-danger-foreground outline-none transition-colors hover:bg-status-danger-surface focus-visible:ring-2 focus-visible:ring-status-danger-foreground disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isCancelling || job?.status === 'cancel_requested' ? (
-                  <CircleNotch weight="bold" className="size-4 animate-spin" />
+                  <Spinner data-icon="inline-start" />
                 ) : (
-                  <XCircle weight="bold" className="size-4" />
+                  <CircleX data-icon="inline-start" />
                 )}
                 {job?.status === 'cancel_requested' ? '正在取消' : '取消任务'}
-              </button>
-            )}
-            <button
+              </Button>
+            ) : null}
+            <Button
               type="button"
+              variant="outline"
               onClick={handleResetPage}
               disabled={resetDisabled || !hasResettableState}
               title="清空当前页面，并删除后台任务和已生成文件"
-              className="flex min-h-11 items-center justify-center gap-2 border border-border px-4 font-bold text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               {isResettingPage ? (
-                <CircleNotch weight="bold" className="size-4 animate-spin" />
+                <Spinner data-icon="inline-start" />
               ) : (
-                <ArrowCounterClockwise weight="bold" className="size-4" />
+                <RotateCcw data-icon="inline-start" />
               )}
               {isResettingPage ? '正在重置' : '重置'}
-            </button>
+            </Button>
           </div>
         </div>
 
         {isSourcesOpen && (
-          <div className="border-t border-border py-5">
+          <div className="border-t px-4 py-5">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-              <div className="flex min-h-11 items-center border border-border bg-background px-3 font-mono text-sm text-muted-foreground">
+              <div className="flex min-h-11 items-center rounded-lg border bg-background px-3 text-sm text-muted-foreground">
                 <span className="flex size-5 shrink-0 items-center justify-center text-primary">
-                  <FolderOpen weight="bold" />
+                  <FolderOpen />
                 </span>
                 <span className="ml-2 truncate">从本机选择文件夹后点击「扫描解析」上传并匹配数据表</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
                   onClick={handleSelectFolder}
                   disabled={isScanning || isStarting || isInputLocked}
-                  className="flex min-h-11 items-center justify-center gap-2 border border-border bg-secondary px-4 font-bold text-secondary-foreground outline-none transition-colors hover:bg-secondary/80 focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <FolderOpen weight="bold" className="size-4 text-primary" />
+                  <FolderOpen data-icon="inline-start" />
                   浏览
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="outline"
                   onClick={handleScanFolder}
                   disabled={isScanning || isStarting || isInputLocked || selectedFilesRef.current.length === 0}
-                  className="flex min-h-11 items-center justify-center gap-2 border border-primary bg-primary/10 px-4 font-bold text-primary outline-none transition-colors hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {isScanning && <CircleNotch weight="bold" className="size-4 animate-spin" />}
+                  {isScanning ? <Spinner data-icon="inline-start" /> : null}
                   扫描解析
-                </button>
+                </Button>
               </div>
             </div>
 
-            <div className="mt-5 grid border-l border-t border-border md:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-5 grid overflow-hidden rounded-xl border md:grid-cols-2 xl:grid-cols-4">
               {SOURCE_GROUPS.map(group => (
                 <div key={group.key} className="min-w-0 border-b border-r border-border px-4 py-4">
                   <h2 className="mb-2 font-bold tracking-tight">{group.label}</h2>
@@ -1071,10 +1047,10 @@ const AssetComparison: React.FC = () => {
               ))}
             </div>
 
-            <div className="grid border-x border-b border-border md:grid-cols-[10rem_minmax(0,1fr)]">
-              <div className="border-b border-border px-4 py-4 md:border-b-0 md:border-r">
-                <p className="font-bold tracking-tight">配置文件</p>
-                <p className="mt-1 font-mono text-xs text-muted-foreground">映射配置</p>
+            <div className="grid overflow-hidden rounded-xl border md:grid-cols-[10rem_minmax(0,1fr)]">
+              <div className="border-b px-4 py-4 md:border-r md:border-b-0">
+                <p className="font-medium tracking-tight">配置文件</p>
+                <p className="mt-1 text-xs text-muted-foreground">映射配置</p>
               </div>
               <div className="grid min-w-0 px-4 md:grid-cols-3 md:gap-5">
                 {CONFIG_FIELDS.map(field => (
@@ -1089,20 +1065,20 @@ const AssetComparison: React.FC = () => {
             </div>
 
             <div className="mt-5 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-              <button
+              <Button
                 type="button"
+                size="lg"
                 onClick={handleCheck}
                 disabled={isScanning || isStarting || isInputLocked}
-                className="flex min-h-12 items-center justify-center gap-3 border-2 border-foreground px-7 text-base font-bold tracking-tight text-foreground outline-none transition-[background-color,color,transform] hover:bg-foreground hover:text-background focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isJobActive || isStarting ? (
-                  <CircleNotch weight="bold" className="size-5 animate-spin" />
+                  <Spinner data-icon="inline-start" />
                 ) : (
-                  <CheckSquareOffset weight="bold" className="size-5" />
+                  <SquareCheck data-icon="inline-start" />
                 )}
                 {isStarting ? '正在创建任务' : job ? '重新核对' : '开始核对'}
-              </button>
-              <p className="font-mono text-xs text-muted-foreground">
+              </Button>
+              <p className="text-xs text-muted-foreground">
                 全部 {TOTAL_INPUT_COUNT} 项输入就绪后可启动；运行中的任务会自动恢复。
               </p>
             </div>
@@ -1110,7 +1086,7 @@ const AssetComparison: React.FC = () => {
         )}
 
         {(statusMsg || job || jobError || expiredJobId) && (
-          <div className="border-t border-border bg-primary/5 px-4 py-3 font-mono text-xs" aria-live="polite">
+          <div className="border-t bg-primary/5 px-4 py-3 text-xs" aria-live="polite">
             <div className="flex flex-col gap-2">
               {statusMsg && <div>{statusMsg}</div>}
               {expiredJobId && (
@@ -1137,13 +1113,13 @@ const AssetComparison: React.FC = () => {
         )}
       </section>
 
-      <section className="gsap-reveal relative mt-5 min-w-0 bg-background">
-        <div className="grid min-w-0 border-l border-t border-border min-[80rem]:h-[min(56rem,calc(100dvh-8rem))] min-[80rem]:min-h-[42rem] min-[80rem]:grid-cols-[15rem_minmax(0,1fr)_18rem]">
+      <section className="relative min-w-0">
+        <div className="grid min-w-0 overflow-hidden rounded-xl border min-[80rem]:h-[min(56rem,calc(100dvh-8rem))] min-[80rem]:min-h-[42rem] min-[80rem]:grid-cols-[15rem_minmax(0,1fr)_18rem]">
           <aside className="flex min-w-0 flex-col border-b border-r border-border bg-card/40 min-[80rem]:min-h-0">
             <div className="shrink-0 border-b border-border px-4 py-3 min-[80rem]:py-2.5">
               <div className="flex items-baseline justify-between gap-3">
-                <h2 className="text-sm font-bold">核对模块</h2>
-                <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                <h2 className="text-sm font-medium">核对模块</h2>
+                <span className="text-xs tabular-nums text-muted-foreground">
                   {reviewedCount}/{checkResults.length || TOTAL_MODULE_COUNT} 已复核
                 </span>
               </div>
@@ -1164,7 +1140,7 @@ const AssetComparison: React.FC = () => {
                       isActive ? 'bg-primary/10' : 'hover:bg-secondary/60'
                     }`}
                   >
-                    <span className={`mt-1.5 size-2 shrink-0 ${
+                    <span className={`mt-1.5 size-2 shrink-0 rounded-full ${
                       result.status === 'failed'
                         ? 'bg-status-danger-foreground'
                         : result.status === 'pending' || result.status === 'running'
@@ -1179,10 +1155,10 @@ const AssetComparison: React.FC = () => {
                           {result.label.replace(/【|】/g, '')}
                         </span>
                         {reviewSaved && (
-                          <CheckCircle weight="fill" className="size-4 shrink-0 text-status-success-foreground" aria-label="已复核" />
+                          <CircleCheck className="size-4 shrink-0 text-status-success-foreground" aria-label="已复核" />
                         )}
                       </span>
-                      <span className="mt-1.5 flex items-center gap-3 font-mono text-xs tabular-nums min-[80rem]:mt-1">
+                      <span className="mt-1.5 flex items-center gap-3 text-xs tabular-nums min-[80rem]:mt-1">
                         <span className="text-status-success-foreground">+{counts.new}</span>
                         <span className="text-status-danger-foreground">−{counts.removed}</span>
                         <span className={counts.anomaly ? 'text-status-warning-foreground' : 'text-muted-foreground'}>!{counts.anomaly}</span>
@@ -1216,7 +1192,7 @@ const AssetComparison: React.FC = () => {
             <div className="shrink-0 border-t border-border px-4 py-4 min-[80rem]:py-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-bold">来源健康</p>
-                <span className="font-mono text-xs text-muted-foreground">{matchedPathCount}/{TOTAL_INPUT_COUNT}</span>
+                <span className="text-xs text-muted-foreground">{matchedPathCount}/{TOTAL_INPUT_COUNT}</span>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
                 {SOURCE_GROUPS.map(group => {
@@ -1224,7 +1200,7 @@ const AssetComparison: React.FC = () => {
                   return (
                     <div key={group.key} className="flex items-center justify-between gap-2 text-xs">
                       <span className="truncate text-muted-foreground">{group.label}</span>
-                      <span className={`font-mono tabular-nums ${ready === group.fields.length ? 'text-status-success-foreground' : 'text-status-warning-foreground'}`}>
+                      <span className={`tabular-nums ${ready === group.fields.length ? 'text-status-success-foreground' : 'text-status-warning-foreground'}`}>
                         {ready}/{group.fields.length}
                       </span>
                     </div>
@@ -1246,32 +1222,36 @@ const AssetComparison: React.FC = () => {
                       <p className="truncate text-base font-bold">
                         {activeResult.label.replace(/【|】/g, '')}
                       </p>
-                      <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
                         {activeResult.msg}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
-                      <button
+                      <Button
                         type="button"
+                        variant="outline"
+                        size="icon"
                         onClick={() => moveActiveResult(-1)}
                         disabled={activeResultIndex <= 0}
                         aria-label="上一个核对模块"
-                        className="flex size-11 items-center justify-center border border-border outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-35 min-[80rem]:size-9"
+                        className="size-9"
                       >
-                        <CaretLeft weight="bold" className="size-4 min-[80rem]:size-3.5" />
-                      </button>
-                      <span className="px-2 font-mono text-xs tabular-nums text-muted-foreground">
+                        <ChevronLeft />
+                      </Button>
+                      <span className="px-2 text-xs tabular-nums text-muted-foreground">
                         {activeResultIndex + 1}/{checkResults.length}
                       </span>
-                      <button
+                      <Button
                         type="button"
+                        variant="outline"
+                        size="icon"
                         onClick={() => moveActiveResult(1)}
                         disabled={activeResultIndex >= checkResults.length - 1}
                         aria-label="下一个核对模块"
-                        className="flex size-11 items-center justify-center border border-border outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-35 min-[80rem]:size-9"
+                        className="size-9"
                       >
-                        <CaretRight weight="bold" className="size-4 min-[80rem]:size-3.5" />
-                      </button>
+                        <ChevronRight />
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -1283,9 +1263,9 @@ const AssetComparison: React.FC = () => {
                       className={`min-w-0 px-4 py-3 min-[80rem]:py-2.5 ${index === 0 ? 'border-b border-border sm:border-b-0 sm:border-r' : ''}`}
                     >
                       <div className="flex min-w-0 items-start gap-3 min-[80rem]:gap-2.5">
-                        <FileXls weight="duotone" className="mt-0.5 size-5 shrink-0 text-primary min-[80rem]:size-4" />
+                        <FileSpreadsheet className="mt-0.5 size-5 shrink-0 text-primary min-[80rem]:size-4" />
                         <div className="min-w-0">
-                          <p className="font-mono text-xs text-muted-foreground">{source.label}</p>
+                          <p className="text-xs text-muted-foreground">{source.label}</p>
                           <p className="mt-1 truncate text-sm font-medium min-[80rem]:mt-0.5" title={paths[source.key]}>
                             {getFileName(paths[source.key])}
                           </p>
@@ -1297,7 +1277,7 @@ const AssetComparison: React.FC = () => {
                     </div>
                   ))}
                   {activeSources.length === 2 && (
-                    <span className="absolute left-1/2 top-1/2 hidden size-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center border border-border bg-background font-mono text-xs font-bold text-primary sm:flex">
+                    <span className="absolute top-1/2 left-1/2 hidden size-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-background text-xs font-medium text-primary sm:flex">
                       VS
                     </span>
                   )}
@@ -1331,8 +1311,8 @@ const AssetComparison: React.FC = () => {
                       ))}
                 </div>
 
-                <div className="flex shrink-0 flex-col gap-2 border-b border-border px-4 py-2 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="grid grid-cols-4 border border-border min-[60rem]:grid-cols-6">
+                <div className="flex shrink-0 flex-col gap-2 border-b px-4 py-2 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex flex-wrap gap-1">
                     {(isFinanceModule
                       ? ([
                           ['all', '全部'],
@@ -1349,26 +1329,25 @@ const AssetComparison: React.FC = () => {
                           ['removed', '减少'],
                         ] as Array<[DifferenceType, string]>)
                     ).map(([type, label]) => (
-                      <button
+                      <Button
                         key={type}
                         type="button"
+                        size="sm"
+                        variant={differenceType === type ? 'default' : 'ghost'}
                         aria-pressed={differenceType === type}
                         onClick={() => {
                           setDifferenceType(type);
                           setDifferencePage(0);
                         }}
-                        className={`min-h-11 whitespace-nowrap border-r border-border px-2.5 text-xs font-bold outline-none last:border-r-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary min-[60rem]:min-h-9 ${
-                          differenceType === type ? 'bg-foreground text-background' : 'hover:bg-secondary'
-                        }`}
                       >
                         {label}
-                      </button>
+                      </Button>
                     ))}
                   </div>
-                  <label className="flex min-h-11 min-w-0 items-center border border-border bg-background focus-within:outline focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-primary min-[60rem]:min-h-9 lg:w-56">
-                    <MagnifyingGlass className="ml-2.5 size-3.5 shrink-0 text-muted-foreground" />
+                  <label className="relative min-w-0 lg:w-56">
+                    <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
                     <span className="sr-only">搜索差异明细</span>
-                    <input
+                    <Input
                       type="search"
                       value={differenceQuery}
                       onChange={(event) => {
@@ -1376,15 +1355,15 @@ const AssetComparison: React.FC = () => {
                         setDifferencePage(0);
                       }}
                       placeholder="资产编号、名称或保管人"
-                      className="min-w-0 flex-1 bg-transparent px-2.5 text-sm outline-none placeholder:text-muted-foreground"
+                      className="pl-8"
                     />
                   </label>
                 </div>
 
                 <div className="difference-scroll min-h-[24rem] flex-1 overflow-x-auto min-[80rem]:min-h-0 min-[80rem]:overflow-y-auto">
                   {activeResult.status === 'failed' ? (
-                    <div className="m-5 border border-status-danger-foreground/50 p-5">
-                      <p className="font-bold text-status-danger-foreground">本模块核对失败</p>
+                    <div className="m-5 rounded-lg border border-status-danger-foreground/50 p-5">
+                      <p className="font-medium text-status-danger-foreground">本模块核对失败</p>
                       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                         请检查输入文件与任务状态，处理后重新启动核对。
                       </p>
@@ -1407,8 +1386,8 @@ const AssetComparison: React.FC = () => {
                       />
                     </div>
                   ) : differenceError ? (
-                    <div className="m-5 border border-status-danger-foreground/50 p-5">
-                      <p className="font-bold text-status-danger-foreground">差异明细载入失败</p>
+                    <div className="m-5 rounded-lg border border-status-danger-foreground/50 p-5">
+                      <p className="font-medium text-status-danger-foreground">差异明细载入失败</p>
                       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{differenceError}</p>
                     </div>
                   ) : differenceData && differenceData.records.length > 0 ? (
@@ -1429,7 +1408,7 @@ const AssetComparison: React.FC = () => {
                             {differenceData.records.map(record => (
                               <tr key={record.id} className="align-top hover:bg-secondary/50">
                                 <td className="px-4 py-3">
-                                  <span className={`inline-flex whitespace-nowrap px-2 py-1 font-mono text-xs font-bold ${
+                                  <span className={`inline-flex rounded-md whitespace-nowrap px-2 py-1 text-xs font-medium ${
                                     record.changeType === 'anomaly'
                                       ? 'bg-status-warning-surface text-status-warning-foreground'
                                       : record.changeType === 'new'
@@ -1439,7 +1418,7 @@ const AssetComparison: React.FC = () => {
                                     {record.changeType === 'anomaly' ? '异常' : record.changeType === 'new' ? '新增' : '减少'}
                                   </span>
                                 </td>
-                                <td className="max-w-48 px-4 py-3 font-mono font-bold break-all">{record.identifier || '—'}</td>
+                                <td className="max-w-48 px-4 py-3 font-medium break-all">{record.identifier || '—'}</td>
                                 <td className="max-w-48 px-4 py-3">{record.name || '—'}</td>
                                 <td className="max-w-40 px-4 py-3">{record.owner || '—'}</td>
                                 <td className="px-4 py-3 text-muted-foreground">{record.dimension}</td>
@@ -1454,10 +1433,10 @@ const AssetComparison: React.FC = () => {
                           <article key={record.id} className="px-4 py-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="break-all font-mono text-sm font-bold">{record.identifier || '未提供编号'}</p>
+                                <p className="break-all text-sm font-medium">{record.identifier || '未提供编号'}</p>
                                 <p className="mt-1 text-sm text-muted-foreground">{record.name || record.dimension}</p>
                               </div>
-                              <span className={`shrink-0 px-2 py-1 font-mono text-xs font-bold ${
+                              <span className={`shrink-0 rounded-md px-2 py-1 text-xs font-medium ${
                                 record.changeType === 'anomaly'
                                   ? 'bg-status-warning-surface text-status-warning-foreground'
                                   : record.changeType === 'new'
@@ -1484,8 +1463,8 @@ const AssetComparison: React.FC = () => {
                   ) : (
                     <div className="flex min-h-72 items-center justify-center px-6 text-center">
                       <div>
-                        <CheckSquareOffset weight="thin" className="mx-auto size-10 text-status-success-foreground" />
-                        <p className="mt-3 font-bold">
+                        <SquareCheck className="mx-auto size-10 text-status-success-foreground" />
+                        <p className="mt-3 font-medium">
                           {activeCounts.all === 0 ? '本模块没有差异' : '当前筛选没有匹配记录'}
                         </p>
                         <p className="mt-1 text-sm text-muted-foreground">
@@ -1493,26 +1472,27 @@ const AssetComparison: React.FC = () => {
                             ? '两侧数据已完成核对，可在右侧确认审核结论。'
                             : '清除关键词或切换差异类型后继续查看。'}
                         </p>
-                        {activeCounts.all > 0 && (
-                          <button
+                        {activeCounts.all > 0 ? (
+                          <Button
                             type="button"
+                            variant="outline"
+                            className="mt-4"
                             onClick={() => {
                               setDifferenceType('all');
                               setDifferenceQuery('');
                               setDifferencePage(0);
                             }}
-                            className="mt-4 min-h-11 border border-border px-4 font-bold outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary"
                           >
                             清除筛选
-                          </button>
-                        )}
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
                   )}
                 </div>
 
                 <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 min-[80rem]:py-2">
-                  <p className="font-mono text-xs tabular-nums text-muted-foreground" aria-live="polite">
+                  <p className="text-xs tabular-nums text-muted-foreground" aria-live="polite">
                     {isDifferenceLoading && !differenceData
                       ? '正在载入差异明细…'
                       : differenceData
@@ -1520,33 +1500,35 @@ const AssetComparison: React.FC = () => {
                         : '等待差异明细'}
                   </p>
                   <div className="flex items-center gap-2">
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
+                      size="sm"
                       onClick={() => setDifferencePage(page => Math.max(0, page - 1))}
                       disabled={differencePage <= 0}
-                      className="flex min-h-11 items-center gap-1 border border-border px-3 text-sm font-bold outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-35 min-[80rem]:min-h-9 min-[80rem]:px-2.5 min-[80rem]:text-xs"
                     >
-                      <CaretLeft className="size-4 min-[80rem]:size-3.5" /> 上一页
-                    </button>
-                    <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                      <ChevronLeft data-icon="inline-start" /> 上一页
+                    </Button>
+                    <span className="text-xs tabular-nums text-muted-foreground">
                       {differencePage + 1}/{differencePageCount}
                     </span>
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
+                      size="sm"
                       onClick={() => setDifferencePage(page => Math.min(differencePageCount - 1, page + 1))}
                       disabled={differencePage >= differencePageCount - 1}
-                      className="flex min-h-11 items-center gap-1 border border-border px-3 text-sm font-bold outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-35 min-[80rem]:min-h-9 min-[80rem]:px-2.5 min-[80rem]:text-xs"
                     >
-                      下一页 <CaretRight className="size-4 min-[80rem]:size-3.5" />
-                    </button>
+                      下一页 <ChevronRight data-icon="inline-end" />
+                    </Button>
                   </div>
                 </div>
               </>
             ) : (
               <div className="flex min-h-[32rem] flex-1 items-center justify-center px-6 text-center">
                 <div>
-                  <Database weight="thin" className="mx-auto size-12 text-muted-foreground" />
-                  <p className="mt-4 text-lg font-bold">等待核对结果</p>
+                  <Database className="mx-auto size-12 text-muted-foreground" />
+                  <p className="mt-4 text-lg font-medium">等待核对结果</p>
                   <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
                     准备数据源并启动任务后，这里会显示逐行差异证据。
                   </p>
@@ -1558,8 +1540,8 @@ const AssetComparison: React.FC = () => {
           <aside className="min-w-0 border-b border-r border-border bg-card/40 min-[80rem]:min-h-0 min-[80rem]:overflow-y-auto">
             <div className="border-b border-border px-4 py-3">
               <div className="flex items-baseline justify-between gap-3">
-                <h2 className="text-sm font-bold">处置与归档</h2>
-                <span className="font-mono text-xs text-muted-foreground">
+                <h2 className="text-sm font-medium">处置与归档</h2>
+                <span className="text-xs text-muted-foreground">
                   {activeResult ? activeResult.key.toUpperCase() : '—'}
                 </span>
               </div>
@@ -1574,7 +1556,7 @@ const AssetComparison: React.FC = () => {
                       id={`review-${activeResult.key}`}
                       value={reviews[activeResult.key] || REVIEW_OPTIONS[0]}
                       onChange={(event) => handleReviewChange(activeResult.key, event.target.value)}
-                      className="min-h-11 w-full appearance-none border border-border bg-background px-3 pr-10 text-sm font-bold outline-none transition-colors hover:border-foreground/40 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50 min-[80rem]:min-h-9"
+                      className="h-8 w-full appearance-none rounded-lg border border-input bg-transparent px-2.5 pr-8 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {REVIEW_OPTIONS.map(option => (
                         <option key={option} value={option}>
@@ -1582,10 +1564,9 @@ const AssetComparison: React.FC = () => {
                         </option>
                       ))}
                     </select>
-                    <CaretDown
+                    <ChevronDown
                       aria-hidden="true"
-                      weight="bold"
-                      className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                      className="pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 text-muted-foreground"
                     />
                   </div>
                 </fieldset>
@@ -1599,17 +1580,17 @@ const AssetComparison: React.FC = () => {
                       {activeResult.has_diff && !remarks[activeResult.key]?.trim() ? '尚未填写' : '可随时补充'}
                     </span>
                   </div>
-                  <textarea
+                  <Textarea
                     id={`remark-${activeResult.key}`}
                     value={remarks[activeResult.key] || ''}
                     onChange={(event) => handleRemarkChange(activeResult.key, event.target.value)}
                     onBlur={handleRemarkBlur}
                     disabled={activeResult.status !== 'ready'}
                     aria-required={activeResult.has_diff}
-                    className="mt-3 min-h-28 w-full resize-y border border-border bg-background p-3 text-base leading-relaxed outline-2 outline-transparent outline-offset-1 placeholder:text-muted-foreground focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                    className="mt-3 min-h-28"
                     placeholder={activeResult.has_diff ? '记录原因、责任人和后续动作' : '本模块无差异，可留空'}
                   />
-                  <p className={`mt-2 min-h-4 font-mono text-xs ${
+                  <p className={`mt-2 min-h-4 text-xs ${
                     annotationSaveStatus === 'error'
                       ? 'text-status-danger-foreground'
                       : annotationsDirty
@@ -1622,15 +1603,17 @@ const AssetComparison: React.FC = () => {
 
                 <div className="border-b border-border">
                   <div className="flex items-center gap-3 px-4 py-3">
-                    <FileXls weight="duotone" className="size-5 shrink-0 text-primary" />
+                    <FileSpreadsheet className="size-5 shrink-0 text-primary" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold">模块差异文件</p>
-                      <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                      <p className="truncate text-sm font-medium">模块差异文件</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
                         {formatBytes(activeArtifact?.sizeBytes)} · {activeArtifact?.status ?? 'blocked'}
                       </p>
                     </div>
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
+                      size="icon"
                       onClick={() => handleExportSingle(activeResult.key)}
                       disabled={
                         retryingArtifact === activeArtifactKey
@@ -1638,69 +1621,70 @@ const AssetComparison: React.FC = () => {
                       }
                       title={activeArtifact?.error}
                       aria-label={activeArtifact?.status === 'failed' ? '重新生成模块差异文件' : '下载模块差异文件'}
-                      className="flex size-11 shrink-0 items-center justify-center border border-border outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-35"
                     >
                       {retryingArtifact === activeArtifactKey || activeArtifactBusy ? (
-                        <CircleNotch className="size-4 animate-spin" />
+                        <Loader2 className="animate-spin" />
                       ) : activeArtifact?.status === 'failed' ? (
-                        <ArrowClockwise className="size-4" />
+                        <RefreshCw />
                       ) : (
-                        <DownloadSimple className="size-4" />
+                        <Download />
                       )}
-                    </button>
+                    </Button>
                   </div>
-                  <div className="flex items-center gap-3 border-t border-border px-4 py-3">
-                    <Database weight="duotone" className="size-5 shrink-0 text-primary" />
+                  <div className="flex items-center gap-3 border-t px-4 py-3">
+                    <Database className="size-5 shrink-0 text-primary" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold">原始数据汇总</p>
-                      <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                      <p className="truncate text-sm font-medium">原始数据汇总</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
                         {formatBytes(rawArtifact?.sizeBytes)} · {rawArtifact?.status ?? 'blocked'}
                       </p>
                     </div>
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
+                      size="icon"
                       onClick={() => download('raw_data_xlsx')}
                       disabled={rawArtifact?.status !== 'ready'}
                       aria-label="下载原始数据汇总"
-                      className="flex size-11 shrink-0 items-center justify-center border border-border outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-35"
                     >
                       {rawArtifact?.status === 'building' ? (
-                        <CircleNotch className="size-4 animate-spin" />
+                        <Loader2 className="animate-spin" />
                       ) : (
-                        <DownloadSimple className="size-4" />
+                        <Download />
                       )}
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
                 <div className="border-b border-border px-4 py-4">
                   <div className="flex items-center justify-between gap-3 text-xs">
                     <span className="font-bold">复核进度</span>
-                    <span className="font-mono tabular-nums text-muted-foreground">{reviewedCount}/{checkResults.length}</span>
+                    <span className="tabular-nums text-muted-foreground">{reviewedCount}/{checkResults.length}</span>
                   </div>
-                  <div className="mt-3 h-1.5 bg-border">
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-border">
                     <div
                       className="h-full bg-primary"
                       style={{ width: `${checkResults.length ? (reviewedCount / checkResults.length) * 100 : 0}%` }}
                     />
                   </div>
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    className="mt-4 w-full"
                     onMouseDown={(event) => {
                       // 避免 textarea blur 触发的 saving 状态在 click 前禁用本按钮
                       event.preventDefault();
                     }}
                     onClick={handleSaveAndNext}
                     disabled={!job || activeResult.status !== 'ready' || annotationSaveStatus === 'saving'}
-                    className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 border border-foreground px-4 text-sm font-bold outline-none transition-[background-color,color,transform] hover:bg-foreground hover:text-background focus-visible:ring-2 focus-visible:ring-primary active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {annotationSaveStatus === 'saving' ? (
-                      <CircleNotch className="size-4 animate-spin" />
+                      <Spinner data-icon="inline-start" />
                     ) : (
-                      <FloppyDisk className="size-4" />
+                      <Save data-icon="inline-start" />
                     )}
                     {activeResultIndex < checkResults.length - 1 ? '保存并下一项' : '保存当前复核'}
-                  </button>
+                  </Button>
                 </div>
               </>
             ) : (
@@ -1713,27 +1697,27 @@ const AssetComparison: React.FC = () => {
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-bold">完整归档包</p>
                 {localMissingRemarks.length > 0 && (
-                  <span className="font-mono text-xs text-status-warning-foreground">{localMissingRemarks.length} 项待补</span>
+                  <span className="text-xs text-status-warning-foreground">{localMissingRemarks.length} 项待补</span>
                 )}
               </div>
-              <button
+              <Button
                 type="button"
+                className="mt-3 w-full"
                 onClick={handleSaveAll}
                 disabled={finalButtonDisabled}
                 title={finalArtifact?.error}
-                className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 bg-primary px-4 text-sm font-bold text-primary-foreground outline-none transition-[background-color,transform] hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {finalIsBuilding ? (
-                  <CircleNotch weight="bold" className="size-5 shrink-0 animate-spin" />
+                  <Spinner data-icon="inline-start" />
                 ) : finalButtonIsDownload ? (
-                  <DownloadSimple weight="bold" className="size-5 shrink-0" />
+                  <Download data-icon="inline-start" />
                 ) : finalArtifact?.status === 'failed' ? (
-                  <ArrowClockwise weight="bold" className="size-5 shrink-0" />
+                  <RefreshCw data-icon="inline-start" />
                 ) : (
-                  <FloppyDisk weight="bold" className="size-5 shrink-0" />
+                  <Save data-icon="inline-start" />
                 )}
                 <span className="truncate">{finalButtonLabel}</span>
-              </button>
+              </Button>
             </div>
           </aside>
         </div>

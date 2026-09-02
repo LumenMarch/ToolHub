@@ -1,152 +1,113 @@
-import React, { useContext, useEffect, useRef } from 'react';
-import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
-import { toolsConfig } from '../config/tools';
-import { ThemeToggle } from './ThemeToggle';
-import { NotificationBell } from './NotificationBell';
-import { gsap } from 'gsap';
-import { cn } from '../lib/cn';
-import { useVisibleTools } from '../hooks/useToolsMeta';
-import { ADMIN_PERMISSIONS } from '../hooks/use-permission';
-import { LoadingSignal } from './LoadingSignal';
+import { useContext, useEffect } from 'react'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { LogOut, Shield } from 'lucide-react'
+
+import { BrandMark } from '@/components/BrandMark'
+import { NotificationBell } from '@/components/NotificationBell'
+import { PageHeader } from '@/components/PageHeader'
+import { ThemeToggle } from '@/components/ThemeToggle'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
+import { toolsConfig } from '@/config/tools'
+import { AuthContext } from '@/context/AuthContext'
+import { ADMIN_PERMISSIONS } from '@/hooks/use-permission'
+import { useVisibleTools } from '@/hooks/useToolsMeta'
+import { pageTitle } from '@/lib/title'
 
 const Layout: React.FC = () => {
-  const { user, logout } = useContext(AuthContext);
-  const navigate = useNavigate();
-  const location = useLocation();
-  const navRef = useRef<HTMLElement>(null);
-
-  const { visibleTools } = useVisibleTools();
+  const { user, logout } = useContext(AuthContext)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { visibleTools } = useVisibleTools()
 
   const activeTool = visibleTools.find(
     (tool) =>
       location.pathname === tool.path ||
       location.pathname.startsWith(`${tool.path}/`),
-  );
+  )
   const isToolRoute = toolsConfig.some(
     (tool) =>
       location.pathname === tool.path ||
       location.pathname.startsWith(`${tool.path}/`),
-  );
+  )
 
-  // 动态浏览器标题 — 首页 "工具枢纽"，工具页 "{工具名} · 工具枢纽"
   useEffect(() => {
-    if (activeTool) {
-      document.title = `${activeTool.name} · 工具枢纽`;
-    } else {
-      document.title = '工具枢纽';
-    }
+    document.title = pageTitle(activeTool?.name)
     return () => {
-      document.title = '工具枢纽';
-    };
-  }, [activeTool]);
+      document.title = pageTitle()
+    }
+  }, [activeTool])
 
   const handleLogout = async () => {
     try {
-      await logout();
+      await logout()
     } finally {
-      navigate('/login');
+      navigate('/login')
     }
-  };
+  }
 
-  // 导航只在用户允许动态效果时执行入场动画。
-  useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      return;
-    }
-
-    gsap.fromTo(navRef.current,
-      { y: -20, opacity: 0 },
-      { y: 0, opacity: 1, duration: 1, ease: 'expo.out', delay: 0.2 }
-    );
-  }, []);
+  const canOpenAdmin = Boolean(
+    user?.permissions.some((permission) => ADMIN_PERMISSIONS.includes(permission)),
+  )
 
   return (
-    <div className="relative flex min-h-dvh flex-col bg-background">
-      <div className="grain-overlay" />
-
-      {/* 工具页使用上下文页头，主控台保留浮动页头。 */}
-      <header
-        ref={navRef}
-        className={cn(
-          'left-0 top-0 z-50 grid w-full grid-cols-[minmax(0,1fr)_auto] gap-4 pointer-events-none',
-          isToolRoute
-            ? 'sticky items-start border-b border-border bg-background px-6 py-4 md:items-center md:px-10 md:py-5'
-            : 'fixed items-center p-6 md:p-10',
-        )}
-      >
-        <div
-          className={cn(
-            'min-w-0 pointer-events-auto',
-            isToolRoute && 'flex flex-col gap-1 md:flex-row md:items-center md:gap-5',
-          )}
-        >
-          <Link
-            to="/"
-            className="inline-block whitespace-nowrap text-xl font-bold uppercase tracking-tighter md:text-2xl"
-          >
-            工具<span className="text-primary">枢纽</span>.
+    <div className="flex min-h-dvh flex-col bg-background">
+      <header className="sticky top-0 z-50 border-b bg-background">
+        <div className="flex h-14 items-center gap-3 px-4">
+          <Link to="/" className="shrink-0">
+            <BrandMark />
           </Link>
-          {isToolRoute && (
+          {isToolRoute && activeTool ? (
             <>
-              <span
-                aria-hidden="true"
-                className="hidden h-6 w-px shrink-0 bg-border md:block"
-              />
-              {activeTool ? (
-                <h1 className="min-w-0 text-base font-bold leading-tight tracking-tight md:text-2xl">
-                  {activeTool.name}
-                </h1>
-              ) : (
-                <LoadingSignal
-                  ariaLabel="正在加载工具名称"
-                  label="[ 工具同步中 ]"
-                  compact
-                  className="w-32"
-                />
-              )}
+              <Separator orientation="vertical" className="hidden h-4 sm:block" />
+              <span className="hidden truncate text-sm font-medium sm:inline">
+                {activeTool.name}
+              </span>
             </>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3 pointer-events-auto md:gap-8">
-          <ThemeToggle />
-          <NotificationBell />
-          <span className="hidden text-[0.8125rem] font-mono tracking-widest uppercase opacity-50 lg:block">
-            [ 用户: {user?.username} ]
-          </span>
-          {user &&
-            user.permissions.some((p) => ADMIN_PERMISSIONS.includes(p)) && (
-            <Link
-              to="/admin"
-              className="group relative inline-flex min-h-11 items-center overflow-hidden whitespace-nowrap px-1 text-[0.8125rem] font-mono uppercase tracking-widest transition-colors hover:text-primary active:translate-y-px"
-            >
-              <span className="relative z-10">控制台</span>
-              <div className="absolute bottom-0 left-0 w-full h-[1px] bg-primary -translate-x-[101%] group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
-            </Link>
-          )}
-          <button
-            type="button"
-            onClick={() => void handleLogout()}
-            className="group relative inline-flex min-h-11 items-center overflow-hidden whitespace-nowrap px-1 text-[0.8125rem] font-mono uppercase tracking-widest transition-colors hover:text-primary active:translate-y-px"
-          >
-            <span className="relative z-10">退出登录</span>
-            <div className="absolute bottom-0 left-0 w-full h-[1px] bg-primary -translate-x-[101%] group-hover:translate-x-0 transition-transform duration-500 ease-out"></div>
-          </button>
+          ) : null}
+          <div className="ml-auto flex items-center gap-1">
+            <ThemeToggle />
+            <NotificationBell />
+            {user?.username ? (
+              <span className="hidden px-2 text-sm text-muted-foreground lg:inline">
+                {user.username}
+              </span>
+            ) : null}
+            {canOpenAdmin ? (
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/admin">
+                  <Shield data-icon="inline-start" />
+                  控制台
+                </Link>
+              </Button>
+            ) : null}
+            <Button variant="outline" size="sm" onClick={() => void handleLogout()}>
+              <LogOut data-icon="inline-start" />
+              退出
+            </Button>
+          </div>
         </div>
       </header>
 
-      {/* 工具页紧随粘性页头，主控台沿用原有顶部留白。 */}
-      <main
-        className={cn(
-          'relative z-10 mx-auto flex w-full max-w-[1400px] flex-1 flex-col px-6 pb-20 md:px-24 lg:px-48',
-          isToolRoute ? 'pt-8 md:pt-12' : 'pt-32 md:pt-48',
+      <main className="flex flex-1 flex-col">
+        {isToolRoute ? (
+          <div className="flex flex-1 flex-col gap-6 p-6">
+            {activeTool ? (
+              <PageHeader
+                title={activeTool.name}
+                description={activeTool.description}
+              />
+            ) : null}
+            <Outlet />
+          </div>
+        ) : (
+          <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col p-6">
+            <Outlet />
+          </div>
         )}
-      >
-        <Outlet />
       </main>
     </div>
-  );
-};
+  )
+}
 
-export default Layout;
+export default Layout

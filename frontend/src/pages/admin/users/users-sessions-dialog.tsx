@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { MonitorUp } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -142,26 +143,26 @@ export function UsersSessionsDialog({
             <DialogTitle>登录会话</DialogTitle>
             <DialogDescription>
               用户{' '}
-              <span className='font-mono font-bold text-foreground'>
+              <span className='font-medium text-foreground'>
                 {currentRow.username}
               </span>{' '}
               的登录设备列表，可强制下线指定会话。
             </DialogDescription>
           </DialogHeader>
 
-          <div className='max-h-80 space-y-2 overflow-y-auto'>
+          <div className='flex max-h-80 flex-col gap-2 overflow-y-auto'>
             {sessionsQuery.isPending ? (
-              <div className='space-y-2'>
+              <div className='flex flex-col gap-2'>
                 <Skeleton className='h-16 w-full' />
                 <Skeleton className='h-16 w-full' />
               </div>
             ) : sessionsQuery.isError ? (
-              <p className='py-8 text-center text-[11px] font-mono uppercase tracking-widest text-destructive'>
+              <p className='py-8 text-center text-sm text-destructive'>
                 会话列表加载失败
               </p>
             ) : sortedSessions.length === 0 ? (
-              <p className='py-8 text-center text-[11px] font-mono uppercase tracking-widest text-muted-foreground'>
-                [ 暂无会话 ]
+              <p className='py-8 text-center text-sm text-muted-foreground'>
+                暂无会话
               </p>
             ) : (
               sortedSessions.map((session) => {
@@ -169,24 +170,26 @@ export function UsersSessionsDialog({
                 const online = isSessionOnline(session)
                 const statusText = revoked ? '已下线' : online ? '在线' : '离线'
                 const statusClass = revoked
-                  ? 'border border-status-danger-foreground/30 bg-status-danger-surface px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-status-danger-foreground'
+                  ? 'border-status-danger-foreground/30 bg-status-danger-surface text-status-danger-foreground'
                   : online
-                    ? 'border border-status-success-foreground/30 bg-status-success-surface px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-status-success-foreground'
-                    : 'border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground'
+                    ? 'border-status-success-foreground/30 bg-status-success-surface text-status-success-foreground'
+                    : ''
                 return (
                   <div
                     key={session.id}
-                    className='flex items-center gap-3 border border-border p-3'
+                    className='flex items-center gap-3 rounded-xl border p-3'
                   >
-                    <div className='min-w-0 flex-1 space-y-0.5'>
+                    <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
                       <div className='flex items-center gap-2'>
                         <MonitorUp className='size-4 shrink-0 text-muted-foreground' />
                         <span className='truncate text-sm font-medium'>
                           {summarizeUserAgent(session.user_agent)}
                         </span>
-                        <span className={statusClass}>{statusText}</span>
+                        <Badge variant='outline' className={statusClass}>
+                          {statusText}
+                        </Badge>
                       </div>
-                      <p className='font-mono text-[11px] text-muted-foreground'>
+                      <p className='text-xs text-muted-foreground'>
                         IP {session.ip ?? '—'} · 创建 {formatSessionDate(session.created_at)} · 最后活跃{' '}
                         {formatSessionDate(session.last_seen_at)}
                       </p>
