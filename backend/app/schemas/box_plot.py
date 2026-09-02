@@ -18,8 +18,8 @@ class BoxPlotAnalyzeRequest(BaseModel):
     value_col: str = Field(..., min_length=1, description="数值列名")
     group_col: str | None = Field(default=None, description="分组列名，缺省不分组")
     quartile_method: Literal["R7", "JMP"] = Field(
-        default="R7",
-        description="分位算法：R7 对齐 Excel/numpy；JMP 对齐 JMP Distribution Type 6",
+        default="JMP",
+        description="分位算法：默认 JMP Type 6；R7 对齐 Excel/numpy",
     )
     group_values: list[str] | None = Field(
         default=None,
@@ -92,7 +92,7 @@ class AnalyzeResponse(BaseModel):
     value_column: str
     group_column: str | None
     # 分位数算法约定（Hyndman-Fan R7，与 numpy / Excel QUARTILE.INC 一致）
-    quartile_method: str = "R7 (linear)"
+    quartile_method: str = "JMP Type 6"
     # 后端按 Tukey fences 计算；前端可切换 min-max 仅影响渲染
     whisker: str = "tukey"
     total_rows: int

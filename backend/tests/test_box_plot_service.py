@@ -139,10 +139,10 @@ def test_compute_groups_jmp_type6_matches_jmp_help_example():
 
 
 def test_compute_groups_r7_default_differs_from_jmp_on_quartiles():
-    """默认 R7 必须保持原行为，且与 JMP Type 6 的四分位不同。"""
+    """默认 JMP Type 6；R7 仍可选且四分位不同。"""
     df = pl.DataFrame({"value": list(range(1, 16))})
-    r7, _, _ = compute_groups(df, "value")
-    jmp, _, _ = compute_groups(df, "value", quartile_method="JMP")
+    r7, _, _ = compute_groups(df, "value", quartile_method="R7")
+    jmp, _, _ = compute_groups(df, "value")
 
     assert r7[0].q1 == pytest.approx(4.5)
     assert r7[0].q3 == pytest.approx(11.5)

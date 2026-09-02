@@ -142,7 +142,7 @@ const BoxPlotTool: React.FC = () => {
   const [selectedGroupValues, setSelectedGroupValues] = useState<string[]>([])
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null)
   const [whiskerMode, setWhiskerMode] = useState<WhiskerMode>('tukey')
-  const [quartileMethod, setQuartileMethod] = useState<QuartileMethod>('R7')
+  const [quartileMethod, setQuartileMethod] = useState<QuartileMethod>('JMP')
   const [showFences, setShowFences] = useState(false)
   const [showValues, setShowValues] = useState(false)
   const [error, setError] = useState('')
@@ -616,8 +616,8 @@ const BoxPlotTool: React.FC = () => {
                         }}
                         aria-labelledby="boxplot-quartile"
                       >
-                        <ToggleGroupItem value="R7">R7（Excel）</ToggleGroupItem>
                         <ToggleGroupItem value="JMP">JMP Type 6</ToggleGroupItem>
+                        <ToggleGroupItem value="R7">R7（Excel）</ToggleGroupItem>
                       </ToggleGroup>
                     </Field>
                     <Separator orientation="vertical" className="hidden h-10 sm:block" />

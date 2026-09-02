@@ -3,9 +3,9 @@
 输入已解析的表格（polars DataFrame），输出各分组的五数概括
 （min / Q1 / median / Q3 / max）、IQR、Tukey fences 与离群点。
 
-分位数约定：默认 Hyndman-Fan R7（线性插值），与 numpy.percentile 默认、
+分位数约定：默认 JMP Type 6（r=(n+1)p），与 JMP Distribution 官方公式对齐。
+可选 Hyndman-Fan R7（线性插值），与 numpy.percentile 默认、
 Excel QUARTILE.INC 以及 polars quantile(interpolation="linear") 一致。
-可选 JMP Type 6（r=(n+1)p），与 JMP Distribution 官方公式对齐。
 须线始终为 Tukey 1.5×IQR。
 """
 
@@ -22,7 +22,7 @@ import polars as pl
 IQR_FACTOR = 1.5
 # R7：Hyndman-Fan type 7（numpy / Excel QUARTILE.INC / polars linear）
 # JMP：Hyndman-Fan type 6，r=(n+1)p，与 JMP Distribution 官方公式一致
-QUARTILE_METHODS = ("R7", "JMP")
+QUARTILE_METHODS = ("JMP", "R7")
 QUARTILE_METHOD_LABELS = {
     "R7": "R7 (linear)",
     "JMP": "JMP Type 6",
@@ -312,14 +312,14 @@ def compute_groups(
     df: pl.DataFrame,
     value_col: str,
     group_col: str | None = None,
-    quartile_method: str = "R7",
+    quartile_method: str = "JMP",
     group_values: list[str] | None = None,
 ) -> tuple[list[GroupStat], int, int]:
     """计算箱线图统计量。
 
     返回 (每组统计, 有效数值行数, 跳过行数)。数值列中的空值、无法解析
     为数字的文本以及 NaN / ±inf 等非有限值均视为无效并计入跳过。
-    quartile_method 为 R7（默认）或 JMP（Type 6）；须线始终按 Tukey 1.5×IQR。
+    quartile_method 为 JMP（默认 Type 6）或 R7；须线始终按 Tukey 1.5×IQR。
     """
     method = quartile_method.strip().upper()
     if method not in QUARTILE_METHODS:
