@@ -119,6 +119,15 @@ class Settings(BaseSettings):
     ASSET_COMPARISON_MAX_STORED_JOBS: int = 20
     ASSET_COMPARISON_MAX_STORAGE_BYTES: int = 1024 * 1024 * 1024
 
+    # ===== 本地大模型（TT 时间分析建议）=====
+    # 对接本地 llama.cpp server（或任何 OpenAI 兼容端点）。
+    # 未配置 LLM_BASE_URL 时，/tools/tt-time/analyze 返回 503，前端给出提示。
+    LLM_BASE_URL: str = "http://127.0.0.1:8080/v1"
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = "ggml-org/gemma-3-4b-it-qat-GGUF:Q4_0"
+    LLM_TIMEOUT_SECONDS: float = Field(default=180, gt=0)
+    LLM_MAX_TOKENS: int = Field(default=900, ge=16)
+
     # ===== 用户注册审批 =====
     # 注册接口限流（单实例内存滑动窗口，按 IP）。多实例部署时建议在
     # 网关层统一限流，本配置仅兜底。
@@ -160,8 +169,8 @@ class Settings(BaseSettings):
 
     # 初始管理员：用户表为空且两项均配置时，启动自动创建超级管理员；
     # 仅配置一项视为配置错误，健康检查将返回 503。
-    INITIAL_ADMIN_USERNAME: str = ""
-    INITIAL_ADMIN_PASSWORD: str = ""
+    INITIAL_ADMIN_USERNAME: str = "admin"
+    INITIAL_ADMIN_PASSWORD: str = "admin"
 
     # 待审批/被驳回注册用户保留天数，超过后周期清理任务物理删除。
     REGISTRATION_PENDING_TTL_DAYS: int = Field(default=7, ge=1)

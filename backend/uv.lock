@@ -42,6 +42,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "fastexcel" },
     { name = "fpdf" },
+    { name = "httpx" },
     { name = "loguru" },
     { name = "lunar-python" },
     { name = "numbers-parser" },
@@ -75,7 +76,6 @@ redis = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -87,6 +87,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.140.0" },
     { name = "fastexcel", specifier = ">=0.20.2" },
     { name = "fpdf", specifier = ">=1.7.2" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "lunar-python", specifier = ">=1.4.8" },
     { name = "numbers-parser", specifier = ">=4.18.3" },
@@ -117,7 +118,6 @@ provides-extras = ["redis"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "ruff", specifier = ">=0.16.0" },
 ]
