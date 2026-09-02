@@ -1,8 +1,8 @@
 """箱线图（box-plot）端点。
 
 流程：tus 上传数据文件（CSV / Excel）→ POST /columns 获取列类型 →
-POST /analyze 同步返回各组统计量（毫秒级，无 job 轮询）；图表渲染与
-SVG/PNG 导出均在客户端完成，统计量载荷即全部产物。
+可选 POST /group-values 列出分组水平 → POST /analyze 同步返回各组统计量
+（毫秒级，无 job 轮询）；图表渲染与 SVG/PNG 导出均在客户端完成。
 
 路由前缀由 api_router 设置为 /tools/box-plot。
 """
@@ -22,17 +22,21 @@ from app.schemas.box_plot import (
     AnalyzeResponse,
     BoxPlotAnalyzeRequest,
     BoxPlotColumnsRequest,
+    BoxPlotGroupValuesRequest,
     ColumnMeta,
     ColumnsResponse,
     GroupStatModel,
+    GroupValuesResponse,
 )
 from app.services.audit import log_action
 from app.services.boxplot.service import (
     PREVIEW_ROWS,
+    QUARTILE_METHOD_LABELS,
     SAMPLE_ROWS,
     BoxPlotValidationError,
     compute_groups,
     exclude_atlas_meta_rows,
+    list_group_values,
     read_tabular,
     scan_columns,
 )
@@ -120,6 +124,26 @@ def preview_columns(
     )
 
 
+@router.post("/group-values", response_model=GroupValuesResponse)
+def preview_group_values(
+    req: BoxPlotGroupValuesRequest,
+    current_user: User = Depends(require_tool_permission("box-plot")),
+) -> GroupValuesResponse:
+    """读取分组列的唯一值，供列配置筛选。"""
+    path, filename = _get_owned_file_path(req.upload_id, current_user.id)
+    try:
+        df = read_tabular(path, filename)
+    except BoxPlotValidationError as exc:
+        raise _parse_or_400(exc) from exc
+
+    df, _ = exclude_atlas_meta_rows(df)
+    try:
+        values, total, truncated = list_group_values(df, req.group_col)
+    except BoxPlotValidationError as exc:
+        raise _parse_or_400(exc) from exc
+    return GroupValuesResponse(values=values, total=total, truncated=truncated)
+
+
 @router.post("/analyze", response_model=AnalyzeResponse)
 def analyze_box_plot(
     req: BoxPlotAnalyzeRequest,
@@ -138,7 +162,11 @@ def analyze_box_plot(
 
     try:
         stats, used_rows, skipped_rows = compute_groups(
-            df, req.value_col, req.group_col
+            df,
+            req.value_col,
+            req.group_col,
+            quartile_method=req.quartile_method,
+            group_values=req.group_values,
         )
     except BoxPlotValidationError as exc:
         raise _parse_or_400(exc) from exc
@@ -154,6 +182,7 @@ def analyze_box_plot(
             "filename": filename,
             "value_column": req.value_col,
             "group_column": req.group_col,
+            "quartile_method": req.quartile_method,
             "groups": len(stats),
             "used_rows": used_rows,
         },
@@ -167,6 +196,7 @@ def analyze_box_plot(
         filename=filename,
         value_column=req.value_col,
         group_column=req.group_col,
+        quartile_method=QUARTILE_METHOD_LABELS[req.quartile_method],
         total_rows=df.height,
         used_rows=used_rows,
         skipped_rows=skipped_rows,

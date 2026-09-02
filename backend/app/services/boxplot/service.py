@@ -3,9 +3,10 @@
 输入已解析的表格（polars DataFrame），输出各分组的五数概括
 （min / Q1 / median / Q3 / max）、IQR、Tukey fences 与离群点。
 
-分位数约定：Hyndman-Fan R7（线性插值），与 numpy.percentile 默认、
-Excel QUARTILE.INC 以及 polars quantile(interpolation="linear") 完全一致，
-避免用户对照主流工具产生差异。
+分位数约定：默认 Hyndman-Fan R7（线性插值），与 numpy.percentile 默认、
+Excel QUARTILE.INC 以及 polars quantile(interpolation="linear") 一致。
+可选 JMP Type 6（r=(n+1)p），与 JMP Distribution 官方公式对齐。
+须线始终为 Tukey 1.5×IQR。
 """
 
 from __future__ import annotations
@@ -19,12 +20,22 @@ import polars as pl
 
 # Tukey fences 的 IQR 乘数（1.5×IQR），业界标准
 IQR_FACTOR = 1.5
+# R7：Hyndman-Fan type 7（numpy / Excel QUARTILE.INC / polars linear）
+# JMP：Hyndman-Fan type 6，r=(n+1)p，与 JMP Distribution 官方公式一致
+QUARTILE_METHODS = ("R7", "JMP")
+QUARTILE_METHOD_LABELS = {
+    "R7": "R7 (linear)",
+    "JMP": "JMP Type 6",
+}
 # 每组回传的离群点上限：仅用于渲染，超出部分只计入 outlier_count
 MAX_OUTLIERS_PER_GROUP = 500
 # 分组上限：防止基数过大的分组列把响应与渲染撑爆。
 # 测试系统导出按机台/工位分组常达数十至上百组（如 Keysight 导出按
 # Station ID 分组），故放宽；离群点另有 MAX_OUTLIERS_PER_GROUP 兜底。
 MAX_GROUPS = 200
+# 分组值下拉上限：超过则截断，前端用筛选把分析集压到 MAX_GROUPS 以内
+MAX_GROUP_VALUE_OPTIONS = 500
+NULL_GROUP_LABEL = "(无值)"
 # 列类型推断的采样行数（columns 接口）
 SAMPLE_ROWS = 10_000
 # 数据预览返回的行数（columns 接口，供用户确认选列）
@@ -283,16 +294,38 @@ def scan_columns(df: pl.DataFrame) -> list[ColumnInfo]:
     return infos
 
 
+def list_group_values(df: pl.DataFrame, group_col: str) -> tuple[list[str], int, bool]:
+    """列出分组列的唯一值（含空值占位），供前端筛选。
+
+    返回 (选项, 唯一值总数, 是否因上限截断)。
+    """
+    if group_col not in df.columns:
+        raise BoxPlotValidationError(f"分组列 '{group_col}' 不存在")
+    keys = df[group_col].cast(pl.Utf8).fill_null(NULL_GROUP_LABEL)
+    unique = [str(value) for value in keys.unique().sort().to_list()]
+    total = len(unique)
+    truncated = total > MAX_GROUP_VALUE_OPTIONS
+    return unique[:MAX_GROUP_VALUE_OPTIONS], total, truncated
+
+
 def compute_groups(
     df: pl.DataFrame,
     value_col: str,
     group_col: str | None = None,
+    quartile_method: str = "R7",
+    group_values: list[str] | None = None,
 ) -> tuple[list[GroupStat], int, int]:
     """计算箱线图统计量。
 
     返回 (每组统计, 有效数值行数, 跳过行数)。数值列中的空值、无法解析
     为数字的文本以及 NaN / ±inf 等非有限值均视为无效并计入跳过。
+    quartile_method 为 R7（默认）或 JMP（Type 6）；须线始终按 Tukey 1.5×IQR。
     """
+    method = quartile_method.strip().upper()
+    if method not in QUARTILE_METHODS:
+        raise BoxPlotValidationError(
+            f"分位算法 '{quartile_method}' 无效，可选 {', '.join(QUARTILE_METHODS)}"
+        )
     if value_col not in df.columns:
         raise BoxPlotValidationError(f"数值列 '{value_col}' 不存在")
     if group_col is not None:
@@ -315,20 +348,23 @@ def compute_groups(
         .to_series()
     )
     total_rows = df.height
-    used_rows = values.len() - values.null_count()
 
     if group_col is None:
-        stat = _summarize(values, "(全部)")
+        used_rows = values.len() - values.null_count()
+        stat = _summarize(values, "(全部)", method)
         if stat is None:
             raise BoxPlotValidationError(f"数值列 '{value_col}' 不含有效数值")
         return [stat], used_rows, total_rows - used_rows
 
-    keys = df[group_col].cast(pl.Utf8).fill_null("(无值)")
+    keys = df[group_col].cast(pl.Utf8).fill_null(NULL_GROUP_LABEL)
     frame = pl.DataFrame({"_key": keys, "_value": values})
+    if group_values:
+        frame = frame.filter(pl.col("_key").is_in(group_values))
 
     # 仅对含有效数值的分组计数与迭代：全无效值的分组既不应触发
     # MAX_GROUPS 上限，也不会出现在响应里。
     usable = frame.filter(pl.col("_value").is_not_null())
+    used_rows = usable.height
     if usable.height == 0:
         raise BoxPlotValidationError(f"数值列 '{value_col}' 不含有效数值")
 
@@ -339,13 +375,39 @@ def compute_groups(
         )
 
     stats = [
-        _summarize(usable.filter(pl.col("_key") == key)["_value"], str(key))
+        _summarize(usable.filter(pl.col("_key") == key)["_value"], str(key), method)
         for key in key_counts["_key"].to_list()
     ]
     return stats, used_rows, total_rows - used_rows
 
 
-def _summarize(values: pl.Series, name: str) -> GroupStat | None:
+def _quantile(sorted_values: pl.Series, p: float, method: str) -> float:
+    """在已排序序列上取分位。R7 走 polars linear；JMP 用官方 Type 6 公式。"""
+    if method == "JMP":
+        return _quantile_jmp_type6(sorted_values, p)
+    return float(sorted_values.quantile(p, interpolation="linear"))
+
+
+def _quantile_jmp_type6(sorted_values: pl.Series, p: float) -> float:
+    """JMP Distribution 分位：r=(n+1)p，整数秩取该观测，否则相邻秩线性插值。"""
+    n = sorted_values.len()
+    if n == 1:
+        return float(sorted_values[0])
+    rank = (n + 1) * p
+    if rank >= n:
+        return float(sorted_values[n - 1])
+    if rank <= 1:
+        return float(sorted_values[0])
+    index = int(rank)
+    fraction = rank - index
+    if fraction == 0:
+        return float(sorted_values[index - 1])
+    lower = float(sorted_values[index - 1])
+    upper = float(sorted_values[index])
+    return (1 - fraction) * lower + fraction * upper
+
+
+def _summarize(values: pl.Series, name: str, method: str) -> GroupStat | None:
     """计算单组五数概括。有效样本为 0 时返回 None（组被跳过）。"""
     valid = values.drop_nulls()
     count = valid.len()
@@ -355,9 +417,9 @@ def _summarize(values: pl.Series, name: str) -> GroupStat | None:
     valid = valid.sort()
     min_value = float(valid[0])
     max_value = float(valid[-1])
-    q1 = float(valid.quantile(0.25, interpolation="linear"))
-    median = float(valid.quantile(0.5, interpolation="linear"))
-    q3 = float(valid.quantile(0.75, interpolation="linear"))
+    q1 = _quantile(valid, 0.25, method)
+    median = _quantile(valid, 0.5, method)
+    q3 = _quantile(valid, 0.75, method)
     iqr = q3 - q1
     fence_low = q1 - IQR_FACTOR * iqr
     fence_high = q3 + IQR_FACTOR * iqr

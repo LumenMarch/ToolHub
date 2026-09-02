@@ -17,6 +17,29 @@ class BoxPlotAnalyzeRequest(BaseModel):
     upload_id: str = Field(..., min_length=1, description="数据文件上传 ID")
     value_col: str = Field(..., min_length=1, description="数值列名")
     group_col: str | None = Field(default=None, description="分组列名，缺省不分组")
+    quartile_method: Literal["R7", "JMP"] = Field(
+        default="R7",
+        description="分位算法：R7 对齐 Excel/numpy；JMP 对齐 JMP Distribution Type 6",
+    )
+    group_values: list[str] | None = Field(
+        default=None,
+        description="限定分析的分组值；空或省略表示该列全部水平",
+    )
+
+
+class BoxPlotGroupValuesRequest(BaseModel):
+    """分组列唯一值请求，供列配置里筛选。"""
+
+    upload_id: str = Field(..., min_length=1, description="数据文件上传 ID")
+    group_col: str = Field(..., min_length=1, description="分组列名")
+
+
+class GroupValuesResponse(BaseModel):
+    """分组列唯一值。"""
+
+    values: list[str]
+    total: int
+    truncated: bool
 
 
 class ColumnMeta(BaseModel):
