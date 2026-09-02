@@ -87,17 +87,8 @@ interface HistogramProps {
   height?: number;
 }
 
-/** 横向分布柱状图：Y = 测试时间分箱，X = 占比/Count，柱顶标注占比 */
-export const TtHistogramChart: React.FC<HistogramProps> = ({
-  bins,
-  mode,
-  className,
-  height = 360,
-}) => {
-  const { resolvedTheme } = useTheme();
-  const p = resolvedTheme === 'dark' ? DARK : LIGHT;
-
-  // --- 自适应：图大小固定，柱宽与字号随桶数变化 ---
+/** 横向柱状图自适应：柱宽与字号随桶数变化 */
+const layoutFor = (bins: Bin[], height: number) => {
   const n = bins.length;
   // 每类的可用垂直空间（px）
   const perCat = height / Math.max(n, 1);
@@ -109,75 +100,95 @@ export const TtHistogramChart: React.FC<HistogramProps> = ({
   const axisLabelFont = n <= 15 ? 12 : n <= 30 ? 11 : 10;
   // 桶特别多时隐藏柱顶文字，避免互相重叠看不清
   const showBarLabel = n <= 40;
+  return { barWidth, barLabelFont, axisLabelFont, showBarLabel };
+};
 
-  const option = useEchart(
-    bins.length === 0
-      ? null
-      : {
-          animation: false,
-          grid: { left: 8, right: 8, top: 8, bottom: 8, containLabel: true },
-          tooltip: {
-            trigger: 'item',
-            confine: true,
-            backgroundColor: p.card,
-            borderColor: p.border,
-            borderWidth: 1,
-            textStyle: { color: p.foreground, fontSize: 12 },
-            formatter: (params: unknown) => {
-              const i = (params as { dataIndex: number }).dataIndex;
-              const b = bins[i];
-              if (!b) return '';
-              return (
-                `<b>${b.label}</b><br/>` +
-                `样本数：${b.count}<br/>` +
-                `占比：${b.percent.toFixed(1)}%`
-              );
-            },
+/** 构造分布柱状图的 ECharts option（纯函数） */
+const buildHistogramOption = (
+  bins: Bin[],
+  mode: HistogramMode,
+  height: number,
+  p: Palette,
+): EChartsOption | null => {
+  if (bins.length === 0) return null;
+  const { barWidth, barLabelFont, axisLabelFont, showBarLabel } = layoutFor(bins, height);
+  return {
+    animation: false,
+    grid: { left: 8, right: 8, top: 8, bottom: 8, containLabel: true },
+    tooltip: {
+      trigger: 'item',
+      confine: true,
+      backgroundColor: p.card,
+      borderColor: p.border,
+      borderWidth: 1,
+      textStyle: { color: p.foreground, fontSize: 12 },
+      formatter: (params: unknown) => {
+        const i = (params as { dataIndex: number }).dataIndex;
+        const b = bins[i];
+        if (!b) return '';
+        return (
+          `<b>${b.label}</b><br/>` +
+          `样本数：${b.count}<br/>` +
+          `占比：${b.percent.toFixed(1)}%`
+        );
+      },
+    },
+    xAxis: {
+      type: 'value',
+      name: mode === 'percent' ? '占比 (%)' : '样本数',
+      nameTextStyle: { color: p.muted },
+      ...axisStyle(p),
+      axisLabel: {
+        color: p.muted,
+        formatter: (v: number) => (mode === 'percent' ? `${v.toFixed(0)}%` : String(v)),
+      },
+    },
+    yAxis: {
+      type: 'category',
+      data: bins.map((b) => b.label),
+      ...axisStyle(p),
+      axisLabel: { color: p.muted, fontSize: axisLabelFont },
+    },
+    series: [
+      {
+        type: 'bar',
+        data: bins.map((b) => (mode === 'percent' ? b.percent : b.count)),
+        barMaxWidth: 34,
+        barWidth,
+        itemStyle: { color: p.primary, borderRadius: [0, 4, 4, 0] },
+        label: {
+          show: showBarLabel,
+          position: 'right',
+          color: p.foreground,
+          fontSize: barLabelFont,
+          formatter: (params: unknown) => {
+            const i = (params as { dataIndex: number }).dataIndex;
+            const b = bins[i];
+            if (!b) return '';
+            return mode === 'percent'
+              ? `${b.percent.toFixed(1)}%`
+              : `${b.count} (${b.percent.toFixed(1)}%)`;
           },
-          xAxis: {
-            type: 'value',
-            name: mode === 'percent' ? '占比 (%)' : '样本数',
-            nameTextStyle: { color: p.muted },
-            ...axisStyle(p),
-            axisLabel: {
-              color: p.muted,
-              formatter: (v: number) =>
-                mode === 'percent' ? `${v.toFixed(0)}%` : String(v),
-            },
-          },
-          yAxis: {
-            type: 'category',
-            data: bins.map((b) => b.label),
-            ...axisStyle(p),
-            axisLabel: { color: p.muted, fontSize: axisLabelFont },
-          },
-          series: [
-            {
-              type: 'bar',
-              data: bins.map((b) => (mode === 'percent' ? b.percent : b.count)),
-              barMaxWidth: 34,
-              barWidth,
-              itemStyle: { color: p.primary, borderRadius: [0, 4, 4, 0] },
-              label: {
-                show: showBarLabel,
-                position: 'right',
-                color: p.foreground,
-                fontSize: barLabelFont,
-                formatter: (params: unknown) => {
-                  const i = (params as { dataIndex: number }).dataIndex;
-                  const b = bins[i];
-                  if (!b) return '';
-                  return mode === 'percent'
-                    ? `${b.percent.toFixed(1)}%`
-                    : `${b.count} (${b.percent.toFixed(1)}%)`;
-                },
-              },
-            },
-          ],
-        } as EChartsOption,
-    [bins, mode, resolvedTheme],
-  );
+        },
+      },
+    ],
+  } as EChartsOption;
+};
 
+/** 横向分布柱状图：Y = 测试时间分箱，X = 占比/Count，柱顶标注占比 */
+export const TtHistogramChart: React.FC<HistogramProps> = ({
+  bins,
+  mode,
+  className,
+  height = 360,
+}) => {
+  const { resolvedTheme } = useTheme();
+  const p = resolvedTheme === 'dark' ? DARK : LIGHT;
+  const option = useEchart(buildHistogramOption(bins, mode, height, p), [
+    bins,
+    mode,
+    resolvedTheme,
+  ]);
   return <div ref={option} className={className} style={{ height }} />;
 };
 
@@ -187,6 +198,65 @@ interface CdfProps {
   height?: number;
 }
 
+/** 构造累计分布曲线的 ECharts option（纯函数） */
+const buildCdfOption = (
+  points: CdfPoint[],
+  p: Palette,
+): EChartsOption | null => {
+  if (points.length === 0) return null;
+  return {
+    animation: false,
+    grid: { left: 8, right: 8, top: 8, bottom: 8, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      backgroundColor: p.card,
+      borderColor: p.border,
+      borderWidth: 1,
+      textStyle: { color: p.foreground, fontSize: 12 },
+    },
+    xAxis: {
+      type: 'value',
+      name: '测试时间 (S)',
+      nameTextStyle: { color: p.muted },
+      ...axisStyle(p),
+      axisLabel: { color: p.muted },
+    },
+    yAxis: {
+      type: 'value',
+      name: '累计占比 (%)',
+      nameTextStyle: { color: p.muted },
+      min: 0,
+      max: 100,
+      ...axisStyle(p),
+      axisLabel: { color: p.muted, formatter: (v: number) => `${v}%` },
+    },
+    series: [
+      {
+        type: 'line',
+        data: points.map((pt) => [pt.x, pt.y]),
+        step: 'end',
+        symbol: 'none',
+        lineStyle: { color: p.primary, width: 2 },
+        itemStyle: { color: p.primary },
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(37,99,235,0.25)' },
+              { offset: 1, color: 'rgba(37,99,235,0.02)' },
+            ],
+          },
+        },
+      },
+    ],
+  } as EChartsOption;
+};
+
 /** 累计分布曲线：X = 测试时间(S)，Y = 累计占比(%) */
 export const TtCdfChart: React.FC<CdfProps> = ({
   points,
@@ -195,63 +265,6 @@ export const TtCdfChart: React.FC<CdfProps> = ({
 }) => {
   const { resolvedTheme } = useTheme();
   const p = resolvedTheme === 'dark' ? DARK : LIGHT;
-
-  const option = useEchart(
-    points.length === 0
-      ? null
-      : {
-          animation: false,
-          grid: { left: 8, right: 8, top: 8, bottom: 8, containLabel: true },
-          tooltip: {
-            trigger: 'axis',
-            confine: true,
-            backgroundColor: p.card,
-            borderColor: p.border,
-            borderWidth: 1,
-            textStyle: { color: p.foreground, fontSize: 12 },
-          },
-          xAxis: {
-            type: 'value',
-            name: '测试时间 (S)',
-            nameTextStyle: { color: p.muted },
-            ...axisStyle(p),
-            axisLabel: { color: p.muted },
-          },
-          yAxis: {
-            type: 'value',
-            name: '累计占比 (%)',
-            nameTextStyle: { color: p.muted },
-            min: 0,
-            max: 100,
-            ...axisStyle(p),
-            axisLabel: { color: p.muted, formatter: (v: number) => `${v}%` },
-          },
-          series: [
-            {
-              type: 'line',
-              data: points.map((pt) => [pt.x, pt.y]),
-              step: 'end',
-              symbol: 'none',
-              lineStyle: { color: p.primary, width: 2 },
-              itemStyle: { color: p.primary },
-              areaStyle: {
-                color: {
-                  type: 'linear',
-                  x: 0,
-                  y: 0,
-                  x2: 0,
-                  y2: 1,
-                  colorStops: [
-                    { offset: 0, color: 'rgba(37,99,235,0.25)' },
-                    { offset: 1, color: 'rgba(37,99,235,0.02)' },
-                  ],
-                },
-              },
-            },
-          ],
-        } as EChartsOption,
-    [points, resolvedTheme],
-  );
-
+  const option = useEchart(buildCdfOption(points, p), [points, resolvedTheme]);
   return <div ref={option} className={className} style={{ height }} />;
 };

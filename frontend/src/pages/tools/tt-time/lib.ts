@@ -140,7 +140,7 @@ export const computeStats = (tts: number[]): Stats => {
   if (tts.length === 0) {
     return { count: 0, min: NaN, max: NaN, q1: NaN, q2: NaN, q3: NaN };
   }
-  const sorted = [...tts].sort((a, b) => a - b);
+  const sorted = tts.toSorted((a, b) => a - b);
   const round3 = (v: number): number => Number(v.toFixed(3));
   return {
     count: tts.length,
@@ -202,7 +202,7 @@ export interface CdfPoint {
 /** 累计分布曲线（CDF）：x = 测试时间，y = 小于等于 x 的累计占比 */
 export const cdfPoints = (tts: number[]): CdfPoint[] => {
   if (tts.length === 0) return [];
-  const sorted = [...tts].sort((a, b) => a - b);
+  const sorted = tts.toSorted((a, b) => a - b);
   const n = sorted.length;
   const points: CdfPoint[] = [];
   // 起点：最小值之前累计为 0（阶梯线从 0 抬升）
@@ -258,19 +258,18 @@ export const buildAnalysisContext = (args: {
   stationTtMap?: Record<string, number[]>;
 }): AnalysisContext => {
   const { fileName, stationFilter, tts, stats, bins, stations } = args;
-  const sorted = [...tts].sort((a, b) => a - b);
+  const sorted = tts.toSorted((a, b) => a - b);
   const pct = (p: number) => {
     if (sorted.length === 0) return 0;
     const v = percentile(sorted, p);
     return Number.isFinite(v) ? Number(v.toFixed(1)) : 0;
   };
 
-  const stationCounts: AnalysisStationCount[] = stations
-    .map((id) => {
-      const list = args.stationTtMap?.[id] ?? [];
-      return { id, count: list.length };
-    })
-    .filter((s) => s.count > 0);
+  const stationCounts: AnalysisStationCount[] = [];
+  for (const id of stations) {
+    const list = args.stationTtMap?.[id] ?? [];
+    if (list.length > 0) stationCounts.push({ id, count: list.length });
+  }
 
   // 基于真实样本计算长尾统计：超过 Q3+1.5×IQR 的样本条数与占比
   // 由前端从原始 tts 精确算出，模型据此引用，避免 4B 自行拆分区间、编造占比。
