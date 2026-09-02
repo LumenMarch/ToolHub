@@ -34,6 +34,7 @@ dependencies = [
     "brotli>=1.2.0",
     "qrcode[pil]>=8.2",
     "lunar-python>=1.4.8",
+    "httpx>=0.28.0",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +44,6 @@ redis = [
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.0",
     "pytest>=8.0.0",
     "ruff>=0.16.0",
 ]

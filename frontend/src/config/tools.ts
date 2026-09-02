@@ -7,6 +7,7 @@ import {
   Images,
   QrCode,
   Search,
+  Timer,
   Upload,
   type LucideIcon,
 } from 'lucide-react'
@@ -32,6 +33,7 @@ const CpkCharts = React.lazy(() => import('../pages/tools/cpk-charts/index'))
 const ImageToPdf = React.lazy(() => import('../pages/tools/image-to-pdf/index'))
 const BoxPlot = React.lazy(() => import('../pages/tools/box-plot/index'))
 const CalendarTool = React.lazy(() => import('../pages/tools/calendar/index'))
+const TtTime = React.lazy(() => import('../pages/tools/tt-time/index'))
 
 export const toolsConfig: ToolDefinition[] = [
   {
@@ -105,5 +107,14 @@ export const toolsConfig: ToolDefinition[] = [
     path: '/tools/box-plot',
     description: '上传 CSV/Excel 数据，按分组对比五数分布与离群点。',
     component: BoxPlot,
+  },
+  {
+    id: 'tt-time',
+    permission: 'tool:tt-time:use',
+    name: 'TT时间计算',
+    icon: Timer,
+    path: '/tools/tt-time',
+    description: '上传测试日志 CSV，按机台统计测试时间分布、占比与累计曲线。',
+    component: TtTime,
   },
 ]

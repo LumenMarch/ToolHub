@@ -24,6 +24,7 @@ TOOL_PERMISSIONS = [
     ("tool:calendar:use", "使用日历工具"),
     ("tool:image-to-pdf:use", "使用图片转PDF工具"),
     ("tool:box-plot:use", "使用箱线图工具"),
+    ("tool:tt-time:use", "使用TT时间计算工具"),
 ]
 
 TOOL_PERMISSION_CODENAMES = [codename for codename, _ in TOOL_PERMISSIONS]
