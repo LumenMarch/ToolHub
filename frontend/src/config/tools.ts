@@ -6,6 +6,7 @@ import {
   FolderTree,
   Images,
   QrCode,
+  RotateCcw,
   Search,
   Timer,
   Upload,
@@ -34,6 +35,7 @@ const ImageToPdf = React.lazy(() => import('../pages/tools/image-to-pdf/index'))
 const BoxPlot = React.lazy(() => import('../pages/tools/box-plot/index'))
 const CalendarTool = React.lazy(() => import('../pages/tools/calendar/index'))
 const TtTime = React.lazy(() => import('../pages/tools/tt-time/index'))
+const RetestRate = React.lazy(() => import('../pages/tools/retest-rate/index'))
 
 export const toolsConfig: ToolDefinition[] = [
   {
@@ -116,5 +118,14 @@ export const toolsConfig: ToolDefinition[] = [
     path: '/tools/tt-time',
     description: '上传测试日志 CSV，按机台统计测试时间分布、占比与累计曲线。',
     component: TtTime,
+  },
+  {
+    id: 'retest-rate',
+    permission: 'tool:retest-rate:use',
+    name: '重测率统计',
+    icon: RotateCcw,
+    path: '/tools/retest-rate',
+    description: '汇总 insight/DCR/Atlas/Summary/Unit Archive 测试 CSV，按 SN 统计重测率、不良率与明细。',
+    component: RetestRate,
   },
 ]
