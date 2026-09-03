@@ -113,10 +113,10 @@ export const toolsConfig: ToolDefinition[] = [
   {
     id: 'tt-time',
     permission: 'tool:tt-time:use',
-    name: 'TT时间计算',
+    name: '测试时间分析',
     icon: Timer,
     path: '/tools/tt-time',
-    description: '上传测试日志 CSV，按机台统计测试时间分布、占比与累计曲线。',
+    description: '测试日志时间分析：包含测试时间分布、机台箱线图与各机台数据对比。',
     component: TtTime,
   },
   {

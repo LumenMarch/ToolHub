@@ -1,4 +1,4 @@
-"""tt-time 分析建议接口模型。"""
+"""tt-time 分析建议与高速计算接口模型。"""
 
 from pydantic import BaseModel, Field
 
@@ -30,7 +30,7 @@ class TtTimeStationCount(BaseModel):
 
 
 class TtTimeTail(BaseModel):
-    """基于真实样本的长尾统计（由前端精确算出）。"""
+    """基于真实样本的长尾统计。"""
 
     iqrThreshold: float = 0
     outlierCount: int = 0
@@ -38,7 +38,7 @@ class TtTimeTail(BaseModel):
 
 
 class TtTimeAnalyzeRequest(BaseModel):
-    """分析请求：前端在当前筛选下算好的统计结构（不传原始 CSV）。"""
+    """分析请求：前端在当前筛选下算好的统计结构。"""
 
     fileName: str = Field(default="", description="源文件名")
     stationFilter: str = Field(default="all", description="当前筛选机台，all 表示全部")
@@ -57,3 +57,67 @@ class TtTimeAnalyzeResponse(BaseModel):
     model: str
     elapsedMs: int
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# 后端高速计算服务 Schema
+# ---------------------------------------------------------------------------
+
+
+class HistogramBinModel(BaseModel):
+    label: str
+    lo: float
+    hi: float
+    count: int
+    percent: float
+
+
+class CdfPointModel(BaseModel):
+    x: float
+    y: float
+
+
+class StationBoxGroupModel(BaseModel):
+    stationId: str
+    stationNumeric: str
+    count: int
+    min: float
+    q1: float
+    median: float
+    q3: float
+    max: float
+    iqr: float
+    whiskerLow: float
+    whiskerHigh: float
+    outliers: list[float]
+
+
+class StationComparisonRowModel(BaseModel):
+    label: str
+    values: dict[str, float]
+
+
+class StationComparisonTableModel(BaseModel):
+    stations: list[str]
+    stationNumerics: list[str]
+    rows: list[StationComparisonRowModel]
+
+
+class TtTimeProcessRequest(BaseModel):
+    upload_id: str = Field(description="Tus 上传文件 ID")
+    bin_width: float = Field(default=10.0, description="分箱宽度（秒）")
+    station_filter: str = Field(default="all", description="机台筛选")
+    exclude_fail: bool = Field(default=True, description="是否过滤不良品")
+
+
+class TtTimeProcessResponse(BaseModel):
+    filename: str
+    totalRows: int
+    filteredRows: int
+    stations: list[str]
+    stats: TtTimeStats
+    bins: list[HistogramBinModel]
+    cdf: list[CdfPointModel]
+    stationBoxGroups: list[StationBoxGroupModel]
+    comparisonTable: StationComparisonTableModel
+    elapsedMs: int
