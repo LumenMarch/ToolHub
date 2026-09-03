@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
@@ -17,18 +18,147 @@ from app.core.auth import require_tool_permission
 from app.core.config import settings
 from app.models.user import User
 from app.schemas.tt_time import (
+    CdfPointModel,
+    HistogramBinModel,
+    StationBoxGroupModel,
+    StationComparisonRowModel,
+    StationComparisonTableModel,
     TtTimeAnalyzeRequest,
     TtTimeAnalyzeResponse,
+    TtTimeProcessRequest,
+    TtTimeProcessResponse,
+    TtTimeStats,
 )
 from app.services.audit import log_action
+from app.services.tt_time.service import (
+    TtTimeValidationError,
+    calculate_tt_summary,
+    load_tt_dataframe,
+)
 from app.services.tt_time_llm import (
     LLM_UNAVAILABLE_STATUS,
     LlmUnavailableError,
     build_analysis_prompt,
     call_llama,
 )
+from app.services.upload.store import (
+    UploadNotCompleteError,
+    UploadNotFoundError,
+    UploadOwnershipError,
+    UploadStore,
+)
 
 router = APIRouter()
+
+store = UploadStore()
+
+
+def _get_owned_file_path(upload_id: str, user_id: int) -> tuple[Path, str]:
+    """校验上传归属并返回 (文件路径, 原始文件名)。"""
+    try:
+        info = store.get_owned_info(upload_id, user_id)
+    except UploadOwnershipError as exc:
+        raise HTTPException(status_code=403, detail="无权访问此上传") from exc
+    except UploadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="上传不存在") from exc
+    except UploadNotCompleteError as exc:
+        raise HTTPException(status_code=409, detail="上传尚未完成") from exc
+    return store.get_owned_file_path(upload_id, user_id), info.get("filename", "")
+
+
+@router.post("/process", response_model=TtTimeProcessResponse)
+def process_tt_time(
+    req: TtTimeProcessRequest,
+    request: Request,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("tt-time")),
+) -> TtTimeProcessResponse:
+    """基于 Tus 上传的原始日志文件，使用 Polars 高性能多线程计算测试时间统计。"""
+    file_path, filename = _get_owned_file_path(req.upload_id, current_user.id)
+
+    started = time.monotonic()
+    try:
+        df = load_tt_dataframe(file_path, filename)
+        summary = calculate_tt_summary(
+            df,
+            bin_width=req.bin_width,
+            station_filter=req.station_filter,
+            exclude_fail=req.exclude_fail,
+        )
+    except TtTimeValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("tt-time process failed: {}", exc)
+        raise HTTPException(status_code=500, detail=f"计算服务异常: {exc}") from exc
+
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+
+    log_action(
+        db,
+        request=request,
+        user=current_user,
+        action="tool.tt_time.process",
+        target_type="tool",
+        target_id="tt-time",
+        detail={
+            "ok": True,
+            "total": summary.total_rows,
+            "filtered": summary.filtered_rows,
+            "elapsed_ms": elapsed_ms,
+        },
+    )
+
+    return TtTimeProcessResponse(
+        filename=filename,
+        totalRows=summary.total_rows,
+        filteredRows=summary.filtered_rows,
+        stations=summary.stations,
+        stats=TtTimeStats(
+            count=summary.stats.count,
+            min=summary.stats.min,
+            max=summary.stats.max,
+            q1=summary.stats.q1,
+            q2=summary.stats.q2,
+            q3=summary.stats.q3,
+        ),
+        bins=[
+            HistogramBinModel(
+                label=b.label,
+                lo=b.lo,
+                hi=b.hi,
+                count=b.count,
+                percent=b.percent,
+            )
+            for b in summary.bins
+        ],
+        cdf=[CdfPointModel(x=p.x, y=p.y) for p in summary.cdf],
+        stationBoxGroups=[
+            StationBoxGroupModel(
+                stationId=g.station_id,
+                stationNumeric=g.station_numeric,
+                count=g.count,
+                min=g.min,
+                q1=g.q1,
+                median=g.median,
+                q3=g.q3,
+                max=g.max,
+                iqr=g.iqr,
+                whiskerLow=g.whisker_low,
+                whiskerHigh=g.whisker_high,
+                outliers=g.outliers,
+            )
+            for g in summary.station_box_groups
+        ],
+        comparisonTable=StationComparisonTableModel(
+            stations=summary.comparison_table.stations,
+            stationNumerics=summary.comparison_table.station_numerics,
+            rows=[
+                StationComparisonRowModel(label=r.label, values=r.values)
+                for r in summary.comparison_table.rows
+            ],
+        ),
+        elapsedMs=elapsed_ms,
+    )
 
 
 @router.post("/analyze", response_model=TtTimeAnalyzeResponse)

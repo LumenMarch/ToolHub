@@ -4,7 +4,7 @@
     "target": "es2023",
     "lib": ["ES2024", "DOM"],
     "module": "esnext",
-    "types": ["vite/client"],
+    "types": ["vite/client", "@types/bun"],
     "allowArbitraryExtensions": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
