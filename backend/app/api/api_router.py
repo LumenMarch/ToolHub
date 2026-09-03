@@ -16,6 +16,7 @@ from app.api.endpoints import (
     notifications,
     qrcode_tools,
     realtime,
+    retest_rate,
     sixty_seconds,
     tools_meta,
     tt_time,
@@ -63,6 +64,9 @@ api_router.include_router(
 )
 api_router.include_router(box_plot.router, prefix="/tools/box-plot", tags=["box_plot"])
 api_router.include_router(tt_time.router, prefix="/tools/tt-time", tags=["tt_time"])
+api_router.include_router(
+    retest_rate.router, prefix="/tools/retest-rate", tags=["retest_rate"]
+)
 
 # 工具元数据（已登录用户可读，主控台用）
 api_router.include_router(tools_meta.router, prefix="/tools-meta", tags=["tools_meta"])
