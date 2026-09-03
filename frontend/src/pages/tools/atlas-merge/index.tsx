@@ -20,6 +20,13 @@ import React, {
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import api from '../../../api/axios';
@@ -89,6 +96,9 @@ type AtlasMergeJobResponse =
   | AtlasMergeJobError;
 
 type Phase = 'upload' | 'analyzing' | 'ready';
+
+/** 导出格式：pivot_to_wide 兼容既有脚本；insight 为 HILO Export-ID 标准布局 */
+type ExportFormat = 'pivot_to_wide' | 'insight';
 type AnalyzeStep = 'packing' | 'uploading' | 'processing';
 
 /** 合并进度轮询间隔（ms）。 */
@@ -541,6 +551,7 @@ const AtlasMerge: React.FC = () => {
   const [analysis, setAnalysis] = useState<AtlasMergeAnalysis | null>(null);
   const [error, setError] = useState('');
   const [downloadError, setDownloadError] = useState('');
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('pivot_to_wide');
   const [isDownloading, setIsDownloading] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [isExpired, setIsExpired] = useState(false);
@@ -698,7 +709,7 @@ const AtlasMerge: React.FC = () => {
       setAnalyzeStep('processing');
       const response = await api.post<{ job_id: string }>(
         '/tools/atlas-merge/analyze',
-        { upload_id: uploadId },
+        { upload_id: uploadId, export_format: exportFormat },
       );
       setJobId(response.data.job_id);
       setJobProgress({ status: 'queued', done: 0, total: 0 });
@@ -933,6 +944,33 @@ const AtlasMerge: React.FC = () => {
             </section>
 
             <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-center">
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="atlas-merge-export-format"
+                  className="whitespace-nowrap text-sm text-muted-foreground"
+                >
+                  导出格式
+                </label>
+                <Select
+                  value={exportFormat}
+                  onValueChange={(value) => setExportFormat(value as ExportFormat)}
+                >
+                  <SelectTrigger
+                    id="atlas-merge-export-format"
+                    className="w-64"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pivot_to_wide">
+                      pivot_to_wide（脚本兼容）
+                    </SelectItem>
+                    <SelectItem value="insight">
+                      insight / Export-ID（标准）
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 type="button"
                 onClick={handleAnalyze}

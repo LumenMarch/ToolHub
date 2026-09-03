@@ -219,7 +219,8 @@ def analyze_files(
                 filtered.append(line)
         lines = filtered
 
-        # 站名：DCR/Insight 从首行提取，Atlas/Summary/unit_archive 从数据列回退
+        # 站名：DCR/Insight 从首行提取，Atlas/Summary/unit_archive 从数据列回退。
+        # 行 0 用字符串级 split（与原实现一致）；输出带引号时剥除包裹引号
         if (
             lines
             and lines[0].strip()
@@ -227,7 +228,8 @@ def analyze_files(
             and not is_header_first_row
             and csv_format != "summary"
         ):
-            station_names.add(lines[0].split(",")[0].strip())
+            station = lines[0].split(",")[0].strip().strip('"')
+            station_names.add(station)
 
         # Summary 格式列名标准化（字符串级替换，与原实现一致）
         if len(lines) > 1:
@@ -746,7 +748,9 @@ def parse_spec_limits(
         upper_row = need(4)
         lower_row = need(5)
         unit_row = need(6)
-        start_col = 11
+        # 桌面版原生布局测试项固定从列 11 起；HILO Export-ID 导出的
+        # List of Failing Tests 在列 11、测试项从 12 起，按表头动态定位
+        start_col = failing_tests_col(headers, default=11)
 
     entries: list[tuple[str, int]] = []
     for col_idx in range(start_col, len(headers)):

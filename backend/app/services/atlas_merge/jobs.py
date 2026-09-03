@@ -35,7 +35,7 @@ from app.services.atlas_merge.cache import (
     CachedAtlasMergeResult,
     atlas_merge_result_cache,
 )
-from app.services.atlas_merge.exporter import csv_text
+from app.services.atlas_merge.exporter import csv_text, insight_csv_text
 from app.services.atlas_merge.merge_engine import merge
 from app.services.atlas_merge.models import MergedReport, MetaColumn
 from app.services.audit import log_action
@@ -76,6 +76,8 @@ class JobEntry:
     job_id: str
     user_id: int
     upload_id: str
+    # 导出格式（issue #75）：pivot_to_wide（默认）或 insight
+    export_format: str = "pivot_to_wide"
     status: str = STATUS_QUEUED
     done: int = 0
     total: int = 0
@@ -103,6 +105,7 @@ class AtlasMergeJobRegistry:
         *,
         user_id: int,
         upload_id: str,
+        export_format: str = "pivot_to_wide",
         request: Request | None = None,
     ) -> str:
         """创建 queued job 并提交后台执行，返回 job_id。"""
@@ -111,6 +114,7 @@ class AtlasMergeJobRegistry:
             job_id=job_id,
             user_id=user_id,
             upload_id=upload_id,
+            export_format=export_format,
             request=request,
         )
         with self._lock:
@@ -158,9 +162,13 @@ class AtlasMergeJobRegistry:
             content = self._read_upload(entry)
             archive_root = extract_archive_zip(content, tmp_dir / "archive")
             report = merge(archive_root, progress=self._make_progress(entry))
-            output = csv_text(report).encode("utf-8")
             timestamp = datetime.now().strftime("%Y%m%d")
-            filename = f"unit_archive_merged_{timestamp}.csv"
+            if entry.export_format == "insight":
+                output = insight_csv_text(report).encode("utf-8")
+                filename = f"unit_archive_merged_insight_{timestamp}.csv"
+            else:
+                output = csv_text(report).encode("utf-8")
+                filename = f"unit_archive_merged_{timestamp}.csv"
             cached = atlas_merge_result_cache.put(
                 user_id=entry.user_id,
                 filename=filename,
