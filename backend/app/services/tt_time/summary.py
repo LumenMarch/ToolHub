@@ -1,4 +1,5 @@
 """TT-time summary statistics (mean / percentiles / Tukey tail)."""
+
 from __future__ import annotations
 
 import math
