@@ -119,6 +119,11 @@ def _strip_code_fence(text: str) -> str:
     # 思考标记（如 K2 的 </ifm|think_faster>、<|im_start|think>）以 <..|..> 或 <|..|> 形式出现在正文，
     # 只影响可读性，安全剔除。
     cleaned = re.sub(r"<[^<>]*\|[^<>]*>", "", text)
+    # 再剔除 <think>...</think> 块与孤立的 </?think> 标签（大小写不敏感）
+    cleaned = re.sub(
+        r"<think\b[^>]*>[\s\S]*?</think>", "", cleaned, flags=re.IGNORECASE
+    )
+    cleaned = re.sub(r"</?think\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
     stripped = cleaned.strip()
     if stripped.startswith("```"):
         lines = stripped.splitlines()
