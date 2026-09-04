@@ -1,4 +1,5 @@
 """TT-time dataclasses."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
