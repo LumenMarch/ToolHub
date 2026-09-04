@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/select';
 import { useTusUpload } from '@/hooks/useTusUpload';
 import { LoadingSignal } from '@/components/LoadingSignal';
+import { Markdown } from '@/components/ui/markdown';
 import {
   TtHistogramChart,
   TtPercentCurveChart,
@@ -603,9 +604,9 @@ const TtTimeTool: React.FC = () => {
                     </Alert>
                   ) : adviceMutation.data ? (
                     <div className="flex flex-col gap-2">
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                      <Markdown className="leading-relaxed">
                         {adviceMutation.data.advice}
-                      </p>
+                      </Markdown>
                       <p className="text-xs text-muted-foreground">
                         {adviceMutation.data.model} · 耗时 {adviceMutation.data.elapsedMs} ms
                       </p>

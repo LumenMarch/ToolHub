@@ -127,6 +127,12 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "ggml-org/gemma-3-4b-it-qat-GGUF:Q4_0"
     LLM_TIMEOUT_SECONDS: float = Field(default=180, gt=0)
     LLM_MAX_TOKENS: int = Field(default=900, ge=16)
+    # OpenAI 兼容端点的思考强度（high/medium/low/max/none）。
+    # 置空字符串时不发送该字段（思考类模型保持默认思考；不识别此参数的
+    # llama.cpp 等端点也不受影响）。思考类小模型注意把 LLM_MAX_TOKENS 调大，
+    # 并把服务端上下文（Ollama: OLLAMA_CONTEXT_LENGTH；llama.cpp: --ctx-size）
+    # 一起放大，否则推理会先耗尽上下文预算，导致 content 为空。
+    LLM_REASONING_EFFORT: str = ""
 
     # ===== 用户注册审批 =====
     # 注册接口限流（单实例内存滑动窗口，按 IP）。多实例部署时建议在

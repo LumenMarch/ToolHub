@@ -1,20 +1,19 @@
-"""TT 时间分析建议 — 对接本地 llama.cpp 生成中文结论。
+"""TT 时间分析建议 — 对接本地大模型生成中文诊断结论。
 
-纯服务层：接收前端传来的统计结构，构造一份\"足够详细、面向 4B 小模型\"的
-提示词，再经 OpenAI 兼容的 /v1/chat/completions 调用本地 llama.cpp server，
-返回模型生成的结论文本。
+纯服务层：接收前端传来的统计结构，构造一段面向本地大模型的简洁中文提示词，
+再经 OpenAI 兼容的 /v1/chat/completions 调用本地模型端点（Ollama / llama.cpp
+server），返回模型生成的诊断文本。
 
 设计约束：
-- 提示词必须显式区分\"样本数（测试条数）\"与\"测试时间（秒）\"，避免 4B 模型把
-  机台条目数误当成时间。
-- 显式声明\"数据可得范围\"：机台维度只有条数、没有各机台耗时(秒)，禁止模型用
-  条数推断机台耗时瓶颈。
-- 给 4B 模型提供客观离群判据（max 与 Q3 的差距），避免其臆造\"长尾\"。
-- 输出要求结构化，便于前端直接展示。
+- 只给模型"测试时间(秒)"的客观统计（样本量/五数/均值/长尾），并把"样本量=条数"
+  与"测试时间=秒"的语义显式讲清，避免小模型把测试条数当成耗时。
+- 输出要求结构化为 Markdown 短结构（1 整体水平 / 2 正常范围 / 3 分布形态 /
+  4 改善方案），前端组件直接按 Markdown 渲染。
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
@@ -42,159 +41,97 @@ def _fmt(v: float | int | None) -> str:
 
 
 def build_analysis_prompt(data: dict[str, Any]) -> str:
-    """把统计结构加工成一份适合 4B 模型的详细中文提示词。"""
+    """把统计结构加工成一段简洁的概览诊断提示词。"""
 
     stats = data.get("stats") or {}
-    dist = data.get("distribution") or []
-    pcts = data.get("percentiles") or {}
-    stations = data.get("stations") or []
+    tail = data.get("tail") or {}
     total_rows = int(data.get("totalRows") or 0)
 
-    # ---- 1. 字段语义说明（消歧义，关键）----
-    semantic = (
-        "字段语义约定：\n"
-        '  - 样本数(count) = 该范围内的测试条数，单位是"条"，不是秒。\n'
-        '  - 测试时间(TT) = 单条测试耗时，单位一律是"秒(s)"。\n'
-        "  - min/Q1/Q2/Q3/max 都是测试时间(秒)，Q2 即中位数。\n"
-        '  请严格区分"条数"和"秒"，不要把机台的测试条数当成它的测试时间。'
-    )
+    station_filter = str(data.get("stationFilter") or "all")
+    station_desc = "全部机台" if station_filter in ("", "all") else station_filter
+    file_label = str(data.get("fileName") or "当前数据") or "当前数据"
 
-    # ---- 2. 范围 ----
-    scope = (
-        f"\n分析范围：{data.get('fileName', '')!r}"
-        f" | 筛选机台：{data.get('stationFilter', '')}"
-        f" | 样本数：{total_rows} 条"
-    )
+    lines = [
+        f"- 样本量：{total_rows} 条",
+        f"- 最小值/最大值：{_fmt(stats.get('min'))} 秒 / {_fmt(stats.get('max'))} 秒",
+        (
+            "- 四分位数（Q1 / 中值 / Q3）："
+            f"{_fmt(stats.get('q1'))} / {_fmt(stats.get('q2'))} / "
+            f"{_fmt(stats.get('q3'))} 秒"
+        ),
+    ]
+    mean = stats.get("mean")
+    if mean is not None:
+        lines.append(f"- 平均值：{_fmt(mean)} 秒")
 
-    # ---- 3. 五数 + 百分位 ----
-    summary = (
-        "\n测试时间(秒)五数概括："
-        f" min={_fmt(stats.get('min'))}, Q1={_fmt(stats.get('q1'))},"
-        f" Q2(中位)={_fmt(stats.get('q2'))}, Q3={_fmt(stats.get('q3'))},"
-        f" max={_fmt(stats.get('max'))}"
-    )
-    tail = ""
-    if total_rows:
-        gap = None
-        iqr = None
-        try:
-            q3 = float(stats.get("q3"))
-            q1 = float(stats.get("q1"))
-            mx = float(stats.get("max"))
-            gap = mx - q3
-            iqr = q3 - q1
-        except (TypeError, ValueError):
-            gap = None
-        tail = (
-            "\n分布特征："
-            f" p50={_fmt(pcts.get('p50'))}, p90={_fmt(pcts.get('p90'))},"
-            f" p95={_fmt(pcts.get('p95'))}, p99={_fmt(pcts.get('p99'))}。"
-            f" max-Q3={_fmt(gap)} 秒，Q3-Q1={_fmt(iqr)} 秒。"
-        )
-
-    # ---- 4. 分箱分布 ----
-    dist_block = (
-        "\n测试时间分箱占比（以下区间与占比是唯一权威数据，不可自行拆分或改名）：\n"
-    )
-    if dist:
-        dist_block += "\n".join(
-            f"  - {b.get('label')}: {b.get('count')} 条 ({b.get('percent', 0):.1f}%)"
-            for b in dist[:15]
-        )
-    else:
-        dist_block += "  - （无数据）"
-
-    # ---- 4.1 长尾真实统计（前端从原始样本精确算出，模型只引用不计算）----
-    tail_block = ""
-    tail_stats = data.get("tail") or {}
     try:
-        thr = float(tail_stats.get("iqrThreshold") or 0)
-        oc = int(tail_stats.get("outlierCount") or 0)
-        op = float(tail_stats.get("outlierPercent") or 0)
+        thr = float(tail.get("iqrThreshold") or 0)
+        oc = int(tail.get("outlierCount") or 0)
+        op = float(tail.get("outlierPercent") or 0)
     except (TypeError, ValueError):
         thr, oc, op = 0, 0, 0
-    if total_rows and thr > 0:
-        tail_block = (
-            "\n长尾阈值（已算好，请直接引用）：超过 Q3+1.5*(Q3-Q1) = "
-            f"{_fmt(thr)} 秒的样本视为长尾/异常。\n"
-            f"该阈值以上的真实异常样本：{oc} 条（占比 {op:.1f}%）。\n"
-            "这些百分比是已核实的真实数字，不要自行改写或另算区间占比。"
+    extra = ""
+    if total_rows and thr > 0 and oc > 0:
+        extra = (
+            f"\n补充：超过 Q3+1.5×(Q3-Q1) = {_fmt(thr)} 秒的异常样本 "
+            f"{oc} 条（占比 {op:.1f}%）。"
         )
-
-    # ---- 5. 机台对比（仅全部机台时，只给条数）----
-    station_block = ""
-    if stations and total_rows and str(data.get("stationFilter", "")) == "all":
-        top_stations = sorted(stations, key=lambda s: s.get("count", 0), reverse=True)[
-            :8
-        ]
-        station_block = (
-            "\n机台样本条数（前 8，仅反映该机台产出的测试条数，与每条耗时长短无关）：\n"
-            + "\n".join(f"  - {s.get('id')}: {s.get('count')} 条" for s in top_stations)
-        )
-
-    # ---- 6. 业务场景说明（纯测试时间，无上下料等动作）----
-    # 注意：TT = EndTime - StartTime，纯测试环节时间，不含上下料/扫码等过程细分。
-    # 异常原因只能归因于机台状态或测试程序本身，不得臆造上下料等环节。
-    factory = (
-        "\n\n业务背景（工厂测试工站单机测试）：这里 TT = EndTime - StartTime，是单条"
-        " 测试在工站上的纯测试时间（秒）。这段时长不包含任何上下料/装夹/扫码/取放等动作，"
-        " 只反映机台执行测试与测试程序运行所花的时间。因此本批数据里的异常测试时间，"
-        " 其根因只可能来自两类：机台问题（执行机构、信号/接口、工装状态、校准等）"
-        " 或测试程序/测试项问题（某步骤耗时、重复测试、程序分支卡滞等）。"
-    )
-
-    # ---- 7. 数据可得范围（防 4B 臆造机台耗时）----
-    availability = (
-        "\n\n数据可得范围（重要）：本轮只提供总体统计（五数、百分位、长尾阈值与占比、分箱占比），"
-        " 没有各机台耗时(秒)，也没有测试项/程序步骤级明细。因此：不得用机台条数推断耗时；"
-        " 归因只能落到机台状态或测试程序这两个方向并给出排查切入点，"
-        " 不要臆造本提示里没有的工序细节。"
-    )
-
-    # ---- 8. 任务指令与输出格式（只分析异常值 + 应对/解决/验证）----
-    instructions = (
-        "\n\n你的任务：只针对这批测试时间里的异常值做分析，并给出机台/程序层面的应对、"
-        " 解决与验证方法。不要泛谈整体集中性，也不要涉及上下料等环节（本批数据无此环节）。要求：\n"
-        "  一、异常判定（先给结论，引用已给数字）：\n"
-        "     1) 用长尾阈值（{阈值} 秒）判定是否存在异常测试时间：max 是否超出阈值、超出多少秒。\n"
-        "     2) 若存在异常：引用异常样本 {条数} 条（占比 {占比}%），并结合分箱区间说明"
-        "        异常主要落在哪个高耗时档位（高于阈值的那一档）。\n"
-        '     3) 若 max 与阈值差距小或不存在长尾：写"分布正常，无显著异常测试时间"即可结束，'
-        "        不要硬造问题。\n"
-        "  二、应对 / 解决 / 验证（仅当存在异常时给出，按机台、程序两类排查）：\n"
-        "     每条给出三项：\n"
-        "       - 排查切入点：机台层面（如执行机构/信号接口/工装状态/校准偏移）或程序层面"
-        "         （如某测试步骤耗时/重复测试/程序分支卡滞），必须对应上面判定的异常档位与数据。\n"
-        "       - 解决动作：具体处置方式（校准或检修相关部件、核对测试程序参数、复查重复测试逻辑等）。\n"
-        "       - 验证方法：如何确认已解决（如复查同型号后续批次的 max / 长尾真实占比是否回落到正常档位）。\n"
-        "  铁律（违反即视为错误）：\n"
-        "    - 只能引用本提示里实际出现的数字（min/Q1/Q2/Q3/max、p50-p99、长尾"
-        "      {阈值}/{条数}/{占比}、分箱里的 label/count/percent），禁止编造或改写任何条数、百分比、区间。\n"
-        "    - 全程只分析纯测试时间(秒)；机台条数只描述样本量，绝不当作耗时依据。\n"
-        "    - 异常只归因机台问题或测试程序问题，绝不归因上下料/扫码/治具/换线等本批数据"
-        "      不存在的环节；不提及数据里没有的指标（单机台平均耗时、规格、良率）。\n"
-        "  输出用简体中文，结构：一、异常判定；二、应对/解决/验证。整个输出不超过 400 字。"
-    )
 
     return (
-        "你是一名资深测试工站生产数据分析工程师。下面是一批产品的测试时间(TT)统计。"
-        + scope
-        + "\n\n"
-        + semantic
-        + "\n"
-        + summary
-        + tail
-        + tail_block
-        + dist_block
-        + station_block
-        + factory
-        + availability
-        + instructions
+        "你是一名工厂数据分析专家，擅长基于测试时间统计指标给出严谨、简洁的诊断。"
+        f"\n请基于以下统计结果，对【{file_label}】（机台：{station_desc}）"
+        "的测试时间(TT)进行概览分析：\n\n"
+        + "\n".join(lines)
+        + extra
+        + "\n\n【业务场景（重要，据此归因）】\n"
+        "这是工厂测试工站的多机台测试场景：一个测试工站内有多台测试机（机台）并行执行"
+        "单条测试。TT = EndTime - StartTime，是单条测试在某台测试机上的纯测试时间（秒），"
+        "不包含人工上下料、装夹、扫码、取放等任何过程动作。因此异常根因只可能来自两类——"
+        "某台测试机（机台）问题（执行机构、信号/接口、工装状态、校准偏移等）或"
+        "测试程序/测试项问题（某测试步骤耗时、重复测试、程序分支卡滞等）；"
+        "不要归因于上下料、人工、扫码、治具、换线等本批数据不存在的环节。\n\n"
+        "【术语定义（严格按此理解，勿混淆）】\n"
+        "- TT 是单条测试的纯测试时间，单位一律为秒(s)；样本量是“测试条数”，"
+        "不是时间。\n"
+        "- Q1 / 中值(Q2) / Q3 分别指第 25 / 50 / 75 百分位；IQR = Q3 - Q1。\n"
+        "- 长尾阈值 = Q3 + 1.5 × IQR（即 5.5s 这类的数），它只用于判定异常样本；"
+        "它【不是】Q3，不要把它当成 Q3 或最大最小值使用。\n"
+        "- 异常值判定按国际标准（Tukey 箱线图法）：超过 Q3 + 1.5 × IQR（长尾阈值）"
+        "的样本记为异常。\n"
+        "- 右偏判定：平均值明显大于中值(Q2)即右偏，说明长尾样本拉高了均值。\n\n"
+        "【输出要求（简体中文，Markdown 结构，≤280 字，不要代码围栏）】\n"
+        "1. **整体水平**：以中值(Q2)为准给一句结论，写明“X 秒”；若数据右偏或存在异常，"
+        "一并说明，不要只写“平稳”。\n"
+        "2. **正常波动范围**：写明“Q1=…秒 ~ Q3=…秒”，只引用上面的数值，禁止自创区间。\n"
+        "3. **分布形态**：比较平均值与中值，判定是否右偏，并援引“异常样本占比/长尾阈值”"
+        "说明依据。\n"
+        "4. **改善方案**：仅当右偏明显或存在异常样本时给出，用“建议：……”句式写明"
+        "具体动作；从两类切入——机台状态（执行机构、信号/接口、工装、校准偏移）或"
+        "测试程序（某测试步骤耗时、重复测试、程序分支卡滞），结合“长尾阈值、异常占比、"
+        "最大值”给出 1~2 条可执行动作；若分布正常，写“无显著异常，无需干预”。\n"
+        "【铁律】只能引用上面实际出现的数字；禁止编造任何数值、百分比或区间；"
+        "不提及数据里没有的指标（单机台耗时、规格、良率）。"
     )
+
+
+def _strip_code_fence(text: str) -> str:
+    """去掉模型给正文包上的 ```markdown/``` 围栏，及思考模型泄漏的标记 token。"""
+    # 思考标记（如 K2 的 </ifm|think_faster>、<|im_start|think>）以 <..|..> 或 <|..|> 形式出现在正文，
+    # 只影响可读性，安全剔除。
+    cleaned = re.sub(r"<[^<>]*\|[^<>]*>", "", text)
+    stripped = cleaned.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        while lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    return stripped
 
 
 def call_llama(user_text: str) -> str:
-    """调用本地 llama.cpp 的 OpenAI 兼容端点，返回模型生成的文本。"""
+    """调用本地模型的 OpenAI 兼容端点，返回模型生成的文本。"""
     base_url = settings.LLM_BASE_URL.rstrip("/")
     model = settings.LLM_MODEL
     api_key = settings.LLM_API_KEY
@@ -215,6 +152,12 @@ def call_llama(user_text: str) -> str:
         "max_tokens": settings.LLM_MAX_TOKENS,
         "stream": False,
     }
+    # 思考强度：置空则交由模型默认（开启思考的模型保持默认思考）。
+    if settings.LLM_REASONING_EFFORT:
+        payload["reasoning_effort"] = settings.LLM_REASONING_EFFORT
+    # 注：上下文窗口(num_ctx)无法在 OpenAI 兼容端点逐请求设置，
+    # 需在服务端放大（Ollama: OLLAMA_CONTEXT_LENGTH；llama.cpp: --ctx-size）。
+
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -240,4 +183,4 @@ def call_llama(user_text: str) -> str:
     if not content or not content.strip():
         raise LlmUnavailableError("本地大模型返回空内容")
 
-    return content.strip()
+    return _strip_code_fence(content)
