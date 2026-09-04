@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class TtTimeStats(BaseModel):
-    """测试时间五数概括（单位：秒）。"""
+    """测试时间统计概括（单位：秒）。"""
 
     count: int = 0
     min: float | None = None
@@ -12,6 +12,7 @@ class TtTimeStats(BaseModel):
     q1: float | None = None
     q2: float | None = None
     q3: float | None = None
+    mean: float | None = None
 
 
 class TtTimeBin(BaseModel):

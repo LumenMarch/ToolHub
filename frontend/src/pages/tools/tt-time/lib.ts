@@ -406,7 +406,7 @@ export interface AnalysisContext {
   fileName: string;
   stationFilter: string;
   totalRows: number;
-  stats: Stats;
+  stats: Stats & { mean: number };
   distribution: { label: string; count: number; percent: number }[];
   percentiles: { p50: number; p90: number; p95: number; p99: number };
   /** 基于真实样本算出的长尾统计（Q3+1.5×IQR 阈值与超过它的真实占比） */
@@ -445,6 +445,11 @@ export const buildAnalysisContext = (args: {
     if (list.length > 0) stationCounts.push({ id, count: list.length });
   }
 
+  const mean =
+    tts.length > 0
+      ? Number((tts.reduce((sum, t) => sum + t, 0) / tts.length).toFixed(3))
+      : 0;
+
   // 基于真实样本计算长尾统计：超过 Q3+1.5×IQR 的样本条数与占比
   // 由前端从原始 tts 精确算出，模型据此引用，避免 4B 自行拆分区间、编造占比。
   let iqrThreshold = 0;
@@ -461,7 +466,7 @@ export const buildAnalysisContext = (args: {
     fileName,
     stationFilter,
     totalRows: tts.length,
-    stats,
+    stats: { ...stats, mean },
     distribution: bins.map((b) => ({
       label: b.label,
       count: b.count,
