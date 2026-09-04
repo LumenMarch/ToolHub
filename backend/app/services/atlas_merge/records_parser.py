@@ -38,6 +38,10 @@ def _shanghai_tz() -> ZoneInfo:
     return ZoneInfo("Asia/Shanghai")
 
 
+# 公开别名：insight 导出（exporter）构造绝对时间时复用同一时区约定
+shanghai_tz = _shanghai_tz
+
+
 # records.csv 列索引
 _COL_TEST_NAME = 2
 _COL_SUB_TEST_NAME = 3

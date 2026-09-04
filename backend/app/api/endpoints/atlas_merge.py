@@ -10,6 +10,7 @@ GET jobs/{job_id} 轮询进度（done 时带完整结果载荷）→ download/de
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -47,6 +48,13 @@ class AtlasMergeAnalyzeRequest(BaseModel):
     """测试日志合并分析请求，引用已完成的 tus 上传（unit-archive zip）。"""
 
     upload_id: str = Field(..., min_length=1, description="unit-archive zip 上传 ID")
+    export_format: Literal["pivot_to_wide", "insight"] = Field(
+        "pivot_to_wide",
+        description=(
+            "导出格式：pivot_to_wide（默认，兼容既有 pivot_to_wide.py 脚本）"
+            "或 insight（HILO Export-ID 标准布局，供 retest-rate/tt-time 直接消费）"
+        ),
+    )
 
 
 def _build_download_file_response(file_path: Path, filename: str) -> FileResponse:
@@ -84,6 +92,7 @@ def analyze_atlas_merge(
     job_id = atlas_merge_jobs.submit(
         user_id=current_user.id,
         upload_id=req.upload_id,
+        export_format=req.export_format,
         request=request,
     )
     logger.info(f"atlas-merge analyze 已提交 job_id={job_id}")

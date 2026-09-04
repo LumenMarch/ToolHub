@@ -21,10 +21,10 @@ from app.services.retest_rate.service import (
     parse_spec_limits,
 )
 
-# insight 布局：0-10 列为元数据列，11+ 为测试项（Voltage / Current）
+# insight 布局：0-10 列为元数据列（List of Failing Tests 在列 10），11+ 为测试项
 _INSIGHT_HEADER = (
     "Station,Num,Station ID,Slot ID,SerialNumber,Test Pass/Fail Status,"
-    "List of Failing Tests,StartTime,EndTime,Version,Extra,Voltage,Current"
+    "StartTime,EndTime,Version,Extra,List of Failing Tests,Voltage,Current"
 )
 
 _TIME_A = "2026/06/01 10:00:00"
@@ -71,10 +71,10 @@ def _row(
     fields[3] = slot
     fields[4] = sn
     fields[5] = status
-    fields[6] = failing
-    fields[7] = start
-    fields[8] = end
-    fields[9] = version
+    fields[6] = start
+    fields[7] = end
+    fields[8] = version
+    fields[10] = failing
     fields[11] = voltage
     fields[12] = current
     return ",".join(fields)
