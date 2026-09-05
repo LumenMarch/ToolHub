@@ -52,6 +52,17 @@ FLDG_FQ3-4FT-01B_2_HILO1,2024-05-01 10:00:00,2024-05-01 10:00:50,FAIL
     assert st15.min == 20.0
     assert st15.max == 30.0
 
+    # 真实 all_tts=[10,20,30]：mean / percentiles / Tukey 上尾
+    assert summary.stats.mean == 20.0
+    assert summary.percentiles["p50"] == 20.0
+    assert summary.percentiles["p90"] == 28.0
+    assert summary.percentiles["p95"] == 29.0
+    assert summary.percentiles["p99"] == 29.8
+    # Q1=15, Q3=25, IQR=10 → threshold=40；无样本超过阈值
+    assert summary.tail.iqr_threshold == 40.0
+    assert summary.tail.outlier_count == 0
+    assert summary.tail.outlier_percent == 0.0
+
     # 2. 不过滤不良品 (exclude_fail=False)
     summary_all = calculate_tt_summary(
         df,

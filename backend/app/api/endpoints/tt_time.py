@@ -28,6 +28,7 @@ from app.schemas.tt_time import (
     TtTimeProcessRequest,
     TtTimeProcessResponse,
     TtTimeStats,
+    TtTimeTail,
 )
 from app.services.audit import log_action
 from app.services.tt_time.service import (
@@ -120,6 +121,7 @@ def process_tt_time(
             q1=summary.stats.q1,
             q2=summary.stats.q2,
             q3=summary.stats.q3,
+            mean=summary.stats.mean,
         ),
         bins=[
             HistogramBinModel(
@@ -156,6 +158,12 @@ def process_tt_time(
                 StationComparisonRowModel(label=r.label, values=r.values)
                 for r in summary.comparison_table.rows
             ],
+        ),
+        percentiles=summary.percentiles,
+        tail=TtTimeTail(
+            iqrThreshold=summary.tail.iqr_threshold,
+            outlierCount=summary.tail.outlier_count,
+            outlierPercent=summary.tail.outlier_percent,
         ),
         elapsedMs=elapsed_ms,
     )

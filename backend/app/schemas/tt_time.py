@@ -121,4 +121,6 @@ class TtTimeProcessResponse(BaseModel):
     cdf: list[CdfPointModel]
     stationBoxGroups: list[StationBoxGroupModel]
     comparisonTable: StationComparisonTableModel
+    percentiles: dict[str, float] = Field(default_factory=dict)
+    tail: TtTimeTail = Field(default_factory=TtTimeTail)
     elapsedMs: int
