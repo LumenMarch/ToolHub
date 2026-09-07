@@ -4,6 +4,7 @@ import React from 'react';
 import {
   type ChartSettings,
   type ColumnAnalysis,
+  formatHistogramTopLabel,
   formatIndex,
   formatTick,
   formatValue,
@@ -178,9 +179,11 @@ const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
             <rect x={x} y={y} width={Math.max(1, binW)} height={h} fill="currentColor" opacity={1} stroke={s.showOutlines ? 'currentColor' : 'none'} strokeWidth={s.showOutlines ? 0.75 : 0}>
               <title>{`${formatTick(b.x0)} ~ ${formatTick(b.x1)}: ${b.count} (${b.percent.toFixed(2)}%)`}</title>
             </rect>
-            {s.showCounts && h > 0 && (
-              // Percentage 模式柱顶显示占比百分数（整数），Count 模式显示样本数
-              <text x={x + binW / 2} y={y - 4} textAnchor="middle" fontSize={8} fontWeight={600} fill="currentColor">{s.showPercentage ? Math.round(b.percent) : b.count}</text>
+            {s.showCounts && h > 0 && formatHistogramTopLabel(b.count, b.percent, s.showPercentage) !== '' && (
+              // Percentage 模式柱顶显示占比百分数（整数，0 不显示），Count 模式显示样本数
+              <text x={x + binW / 2} y={y - 4} textAnchor="middle" fontSize={8} fontWeight={600} fill="currentColor">
+                {formatHistogramTopLabel(b.count, b.percent, s.showPercentage)}
+              </text>
             )}
           </g>
         );

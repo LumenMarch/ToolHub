@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ParsedDataset } from '../lib/csv';
-import { parseTestCsv } from '../lib/csv';
+import { getEffectiveRawRows, parseTestCsv, type ParsedDataset } from '../lib/csv';
 import { analyzeColumn, analyzeColumnPair, DEFAULT_CHART_SETTINGS, type ChartSettings, type ColumnAnalysis } from '../lib/stats';
 import type { CorrelationPair } from '../components/CorrelationChart';
 import { shortName } from '../lib/stats';
@@ -34,6 +33,7 @@ interface OppState {
   corrYName: string;
   chartType: ChartType;
   settings: ChartSettings;
+  excludeFail: boolean;
 }
 
 interface OppActions {
@@ -53,6 +53,7 @@ interface OppActions {
   setChartType: (v: ChartType) => void;
   updateSetting: <K extends keyof ChartSettings>(key: K, value: ChartSettings[K]) => void;
   setSettings: (s: ChartSettings) => void;
+  setExcludeFail: (v: boolean) => void;
   /** 迁移自 index.tsx 的 handleFileA/B */
   loadFileA: (file: File) => Promise<void>;
   loadFileB: (file: File) => Promise<void>;
@@ -155,6 +156,7 @@ const initialState: OppState = {
   corrYName: '',
   chartType: 'histogram',
   settings: { ...DEFAULT_CHART_SETTINGS },
+  excludeFail: true,
 };
 
 export const useOppStore = create<OppStore>()(
@@ -188,6 +190,7 @@ export const useOppStore = create<OppStore>()(
       setChartType: (v) => set({ chartType: v }),
       updateSetting: (key, value) => set((s) => ({ settings: { ...s.settings, [key]: value } })),
       setSettings: (s) => set({ settings: s }),
+      setExcludeFail: (v) => set({ excludeFail: v }),
       loadFileA: async (file: File) => {
         set({ error: '', fileA: file, loading: true, progress: 0, fileNameA: file.name });
         try {
@@ -231,6 +234,7 @@ export const useOppStore = create<OppStore>()(
         selectedName: state.selectedName,
         corrYName: state.corrYName,
         compareMode: state.compareMode,
+        excludeFail: state.excludeFail,
       }),
     },
   ),
@@ -346,6 +350,7 @@ export function getActive(
   dataset: ParsedDataset | null,
   selectedName: string,
   settings: ChartSettings,
+  excludeFail?: boolean,
 ): { index: number; analysis: ColumnAnalysis } | null {
   if (!dataset || !selectedName) return null;
   const idx = dataset.columns.findIndex((c) => c.name === selectedName);
@@ -356,7 +361,7 @@ export function getActive(
     upper: settings.upperLimit !== null ? settings.upperLimit : column.upper,
     lower: settings.lowerLimit !== null ? settings.lowerLimit : column.lower,
   };
-  const raw = dataset.rows.map((r) => r[idx] ?? 'NA');
+  const raw = getEffectiveRawRows(dataset, idx, excludeFail);
   return { index: idx, analysis: analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits) };
 }
 
@@ -365,6 +370,7 @@ export function getCorrPair(
   selectedName: string,
   corrYName: string,
   settings: ChartSettings,
+  excludeFail?: boolean,
 ): CorrelationPair | null {
   if (!dataset || !selectedName || !corrYName || corrYName === selectedName) return null;
   const ix = dataset.columns.findIndex((c) => c.name === selectedName);
@@ -373,8 +379,8 @@ export function getCorrPair(
   return {
     xName: shortName(selectedName),
     yName: shortName(corrYName),
-    rawX: dataset.rows.map((row) => row[ix] ?? 'NA'),
-    rawY: dataset.rows.map((row) => row[iy] ?? 'NA'),
+    rawX: getEffectiveRawRows(dataset, ix, excludeFail),
+    rawY: getEffectiveRawRows(dataset, iy, excludeFail),
     xUpper: settings.upperLimit !== null ? settings.upperLimit : dataset.columns[ix].upper,
     xLower: settings.lowerLimit !== null ? settings.lowerLimit : dataset.columns[ix].lower,
     yUpper: dataset.columns[iy].upper,
@@ -391,8 +397,8 @@ export function getSharedPair(state: OppState): { idxA: number; idxB: number; pa
   const colB = state.datasetB.columns[idxB];
   const effA = { ...colA, upper: state.settings.upperLimit !== null ? state.settings.upperLimit : colA.upper, lower: state.settings.lowerLimit !== null ? state.settings.lowerLimit : colA.lower };
   const effB = { ...colB, upper: state.settings.upperLimit !== null ? state.settings.upperLimit : colB.upper, lower: state.settings.lowerLimit !== null ? state.settings.lowerLimit : colB.lower };
-  const rawA = state.datasetA.rows.map((r) => r[idxA] ?? 'NA');
-  const rawB = state.datasetB.rows.map((r) => r[idxB] ?? 'NA');
+  const rawA = getEffectiveRawRows(state.datasetA, idxA, state.excludeFail);
+  const rawB = getEffectiveRawRows(state.datasetB, idxB, state.excludeFail);
   const pair = analyzeColumnPair(effA, rawA, effB, rawB, state.settings.binCount, state.settings.lowerRange, state.settings.upperRange, state.settings.showLimits);
   return { idxA, idxB, pair };
 }

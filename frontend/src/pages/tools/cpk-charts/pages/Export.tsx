@@ -28,9 +28,9 @@ const Export: React.FC = () => {
   const fileNameA = useOppStore((s) => s.fileNameA);
   const fileNameB = useOppStore((s) => s.fileNameB);
   const compareMode = useOppStore((s) => s.compareMode);
+  const excludeFail = useOppStore((s) => s.excludeFail);
   const setError = useOppStore((s) => s.setError);
   const merged = useOppStore(useShallow((s) => getMerged(s)));
-
   const [exporting, setExporting] = useState<ExportState>(null);
   const [exportQuery, setExportQuery] = useState('');
   const [exportChecked, setExportChecked] = useState<Set<string>>(() => new Set(merged.map((m) => m.name)));
@@ -46,15 +46,15 @@ const Export: React.FC = () => {
     return !!((a && (a.upper !== null || a.lower !== null)) || (b && (b.upper !== null || b.lower !== null)));
   };
 
-  const shared = getSharedPair({ datasetA, datasetB, compareMode, selectedName, settings } as never);
+  const shared = getSharedPair({ datasetA, datasetB, compareMode, selectedName, settings, excludeFail } as never);
   const activeA = useMemo(() => {
     if (shared) return { index: shared.idxA, analysis: shared.pair.a };
-    return getActive(datasetA, selectedName, settings);
-  }, [shared, datasetA, selectedName, settings]);
+    return getActive(datasetA, selectedName, settings, excludeFail);
+  }, [shared, datasetA, selectedName, settings, excludeFail]);
   const activeB = useMemo(() => {
     if (shared) return { index: shared.idxB, analysis: shared.pair.b };
-    return getActive(datasetB, selectedName, settings);
-  }, [shared, datasetB, selectedName, settings]);
+    return getActive(datasetB, selectedName, settings, excludeFail);
+  }, [shared, datasetB, selectedName, settings, excludeFail]);
 
   const handleExportCurrent = async () => {
     if (!activeA && !activeB) return;
@@ -71,7 +71,7 @@ const Export: React.FC = () => {
   };
 
   const handleExportCorrelation = async () => {
-    const pair = getCorrPair(datasetA, selectedName, corrYName, settings) ?? getCorrPair(datasetB, selectedName, corrYName, settings);
+    const pair = getCorrPair(datasetA, selectedName, corrYName, settings, excludeFail) ?? getCorrPair(datasetB, selectedName, corrYName, settings, excludeFail);
     if (!pair) return;
     setExporting({ kind: 'single' });
     try {
@@ -96,7 +96,7 @@ const Export: React.FC = () => {
     setExporting({ kind: 'all', done: 0, total: names.length });
     try {
       // 同名 Item 在双数据源下会产出多个文件：total 以导出器实际值为准，避免 2/1 之类的显示
-      await exportComparedByName(sources, names, settings, (done, total) => setExporting({ kind: 'all', done, total }));
+      await exportComparedByName(sources, names, settings, (done, total) => setExporting({ kind: 'all', done, total }), excludeFail);
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量导出失败');
     } finally {
@@ -114,7 +114,7 @@ const Export: React.FC = () => {
       const view = chartType === 'cdf' || chartType === 'timeseries' ? chartType : 'histogram';
       const onProgress = (done: number) => setExporting({ kind: 'itemCheck', done, total: names.length });
       if (scope === 'B') {
-        const { imagesB } = await buildItemCheckImages(null, datasetB, names, settings, onProgress, view);
+        const { imagesB } = await buildItemCheckImages(null, datasetB, names, settings, onProgress, view, excludeFail);
         await exportItemCheckReport({
           items: names,
           fileNameA: fileNameB || datasetB?.title || '数据 B',
@@ -129,6 +129,7 @@ const Export: React.FC = () => {
         settings,
         onProgress,
         view,
+        excludeFail,
       );
       if (scope === 'A') {
         await exportItemCheckReport({

@@ -369,7 +369,7 @@ const buildStationBoxPlotOption = (
   }
   const span = maxY - minY || 10;
   const yMin = Math.floor(Math.max(0, minY - span * 0.1));
-  const yMax = Math.ceil(maxY + span * 0.25); // 给顶部留出文字空间
+  const yMax = Math.ceil(maxY + span * 0.25); // 给顶部留出适度空间
   return {
     animation: false,
     grid: { left: 160, right: 35, top: 130, bottom: 55, containLabel: false },
@@ -510,7 +510,7 @@ const buildStationBoxPlotOption = (
         label: {
           show: true,
           position: 'insideBottom',
-          offset: [0, 8],
+          offset: [0, 0],
           color: p.muted,
           fontSize: 10,
           lineHeight: 14,
