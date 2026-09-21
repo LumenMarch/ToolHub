@@ -23,6 +23,7 @@ import {
   analyzeColumnPair,
   computeCdf,
   DEFAULT_CHART_SETTINGS,
+  formatHistogramTopLabel,
   formatIndex,
   formatTick,
   formatValue,
@@ -30,7 +31,7 @@ import {
   type ChartSettings,
   type ColumnAnalysis,
 } from './stats';
-import type { ParsedDataset } from './csv';
+import { getEffectiveRawRows, type ParsedDataset } from './csv';
 import type { CorrelationPair } from '../components/CorrelationChart';
 import { pow10Interval } from './layout';
 
@@ -147,9 +148,11 @@ export function renderHistogramSvg(analysis: ColumnAnalysis, settings: ChartSett
     const sw = s.showOutlines ? ' stroke="' + TEXT_COLOR + '" stroke-width="0.75"' : '';
     parts.push(`<rect x="${x}" y="${y}" width="${Math.max(1, binW)}" height="${h}" fill="${TEXT_COLOR}" opacity="1"${sw} />`);
     if (s.showCounts) {
-      // Percentage 模式柱顶显示占比百分数（整数），Count 模式显示样本数
-      const topLabel = s.showPercentage ? Math.round(b.percent) : b.count;
-      parts.push(`<text x="${x + binW / 2}" y="${y - 3}" text-anchor="middle" font-size="8" font-weight="600" fill="${TEXT_COLOR}">${topLabel}</text>`);
+      // Percentage 模式柱顶显示占比百分数（整数，0 不显示），Count 模式显示样本数
+      const topLabel = formatHistogramTopLabel(b.count, b.percent, s.showPercentage);
+      if (topLabel !== '') {
+        parts.push(`<text x="${x + binW / 2}" y="${y - 3}" text-anchor="middle" font-size="8" font-weight="600" fill="${TEXT_COLOR}">${topLabel}</text>`);
+      }
     }
   });
   parts.push('</g>');
@@ -535,6 +538,7 @@ export async function exportComparedByName(
   names: string[],
   settings: ChartSettings,
   onProgress: (done: number, total: number) => void,
+  excludeFail?: boolean,
 ): Promise<string> {
   // 当双源且同名 Item 同时存在时，使用共享 X 轴域，保证两图刻度完全一致
   const canShare = sources.length === 2;
@@ -549,7 +553,7 @@ export async function exportComparedByName(
         const effUpper = settings.upperLimit !== null ? settings.upperLimit : col.upper;
         const effLower = settings.lowerLimit !== null ? settings.lowerLimit : col.lower;
         const columnEff = { ...col, upper: effUpper, lower: effLower };
-        const raw = src.dataset.rows.map((r) => r[idx] ?? 'NA');
+        const raw = getEffectiveRawRows(src.dataset, idx, excludeFail);
         entries.push({ src, idx, effUpper, effLower, raw, columnEff });
       }
     }

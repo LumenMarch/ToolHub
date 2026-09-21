@@ -80,32 +80,32 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
   const corrYName = useOppStore((s) => s.corrYName);
   const setCorrYName = useOppStore((s) => s.setCorrYName);
   const compareMode = useOppStore((s) => s.compareMode);
+  const excludeFail = useOppStore((s) => s.excludeFail);
   const settings = useOppStore((s) => s.settings);
   const updateSetting = useOppStore((s) => s.updateSetting);
   const setError = useOppStore((s) => s.setError);
-
   const [zoom, setZoom] = useState<'A' | 'B' | null>(null);
 
   // ---- Correlation 数据处理 ----
-  const pairA = useMemo(() => (view === 'correlation' ? getCorrPair(datasetA, selectedName, corrYName, settings) : null), [datasetA, selectedName, corrYName, settings, view]);
-  const pairB = useMemo(() => (view === 'correlation' ? getCorrPair(datasetB, selectedName, corrYName, settings) : null), [datasetB, selectedName, corrYName, settings, view]);
+  const pairA = useMemo(() => (view === 'correlation' ? getCorrPair(datasetA, selectedName, corrYName, settings, excludeFail) : null), [datasetA, selectedName, corrYName, settings, excludeFail, view]);
+  const pairB = useMemo(() => (view === 'correlation' ? getCorrPair(datasetB, selectedName, corrYName, settings, excludeFail) : null), [datasetB, selectedName, corrYName, settings, excludeFail, view]);
   const statA = pairA ? corrStatsOf(pairA) : null;
   const statB = pairB ? corrStatsOf(pairB) : null;
 
   // ---- Histogram / CDF / TimeSeries 数据处理 ----
   // 对比配对：派生自原始字段（zustand v5 selector 必须返回稳定引用，用 useMemo 缓存）
   const shared = useMemo(
-    () => getSharedPair({ datasetA, datasetB, selectedName, compareMode, settings } as never),
-    [datasetA, datasetB, selectedName, compareMode, settings],
+    () => getSharedPair({ datasetA, datasetB, selectedName, compareMode, settings, excludeFail } as never),
+    [datasetA, datasetB, selectedName, compareMode, settings, excludeFail],
   );
   const activeA = useMemo(() => {
     if (shared) return { index: shared.idxA, analysis: shared.pair.a };
-    return getActive(datasetA, selectedName, settings);
-  }, [shared, datasetA, selectedName, settings]);
+    return getActive(datasetA, selectedName, settings, excludeFail);
+  }, [shared, datasetA, selectedName, settings, excludeFail]);
   const activeB = useMemo(() => {
     if (shared) return { index: shared.idxB, analysis: shared.pair.b };
-    return getActive(datasetB, selectedName, settings);
-  }, [shared, datasetB, selectedName, settings]);
+    return getActive(datasetB, selectedName, settings, excludeFail);
+  }, [shared, datasetB, selectedName, settings, excludeFail]);
   const activeCol = activeA?.analysis ?? activeB?.analysis ?? null;
 
   const isCorr = view === 'correlation';

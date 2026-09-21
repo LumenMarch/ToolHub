@@ -631,3 +631,20 @@ export const DEFAULT_CHART_SETTINGS: ChartSettings = {
   corrHighlightOutliers: false,
   corrOutlierSigma: 3,
 };
+
+/**
+ * 直方图柱顶标签格式化：
+ * - 百分比模式 (showPercentage=true)：四舍五入为整数，若为 0 则返回空串（不显示在柱子上）；
+ * - 数量模式 (showPercentage=false)：显示样本实际数量。
+ */
+export function formatHistogramTopLabel(
+  count: number,
+  percent: number,
+  showPercentage: boolean,
+): string {
+  if (showPercentage) {
+    const p = Math.round(percent);
+    return p > 0 ? String(p) : '';
+  }
+  return String(count);
+}

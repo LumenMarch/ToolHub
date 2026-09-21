@@ -38,7 +38,7 @@ const TestItemList: React.FC = () => {
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-background">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded-lg border bg-background [scrollbar-width:thin] [scrollbar-color:hsl(var(--muted-foreground)/0.35)_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-muted-foreground/35 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/60">
         {filtered.length === 0 ? (
           <p className="p-4 text-xs text-muted-foreground">无匹配测试项</p>
         ) : null}

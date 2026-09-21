@@ -3,7 +3,7 @@ import type { AxiosResponse } from 'axios';
 import api from '../../../../api/axios';
 import { analyzeColumn, analyzeColumnPair, type ChartSettings } from './stats';
 import { renderCdfSvg, renderHistogramSvg, renderTimeSeriesSvg, svgToPng } from './export';
-import type { ParsedDataset } from './csv';
+import { getEffectiveRawRows, type ParsedDataset } from './csv';
 
 const CONCURRENCY = 4;
 
@@ -41,6 +41,7 @@ export async function buildItemCheckImages(
   settings: ChartSettings,
   onProgress?: (done: number, total: number) => void,
   view: ReportView = 'histogram',
+  excludeFail?: boolean,
 ): Promise<{ imagesA: string[]; imagesB: string[] }> {
   const total = names.length;
   const imagesA: string[] = new Array(total).fill('');
@@ -62,8 +63,8 @@ export async function buildItemCheckImages(
           const colB0 = datasetB.columns[idxB];
           const effA = { ...colA0, upper: settings.upperLimit !== null ? settings.upperLimit : colA0.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : colA0.lower };
           const effB = { ...colB0, upper: settings.upperLimit !== null ? settings.upperLimit : colB0.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : colB0.lower };
-          const rawA = datasetA.rows.map((r) => r[idxA] ?? 'NA');
-          const rawB = datasetB.rows.map((r) => r[idxB] ?? 'NA');
+          const rawA = getEffectiveRawRows(datasetA, idxA, excludeFail);
+          const rawB = getEffectiveRawRows(datasetB, idxB, excludeFail);
           const pair = analyzeColumnPair(effA, rawA, effB, rawB, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
           const svgA = renderSvgFor(pair.a, settings, view);
           const svgB = renderSvgFor(pair.b, settings, view);
@@ -76,7 +77,7 @@ export async function buildItemCheckImages(
         if (hasA && datasetA) {
           const col = datasetA.columns[idxA];
           const eff = { ...col, upper: settings.upperLimit !== null ? settings.upperLimit : col.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : col.lower };
-          const raw = datasetA.rows.map((r) => r[idxA] ?? 'NA');
+          const raw = getEffectiveRawRows(datasetA, idxA, excludeFail);
           const analysis = analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
           const svg = renderSvgFor(analysis, settings, view);
           const png = await svgToPng(svg);
@@ -85,7 +86,7 @@ export async function buildItemCheckImages(
         if (hasB && datasetB) {
           const col = datasetB.columns[idxB];
           const eff = { ...col, upper: settings.upperLimit !== null ? settings.upperLimit : col.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : col.lower };
-          const raw = datasetB.rows.map((r) => r[idxB] ?? 'NA');
+          const raw = getEffectiveRawRows(datasetB, idxB, excludeFail);
           const analysis = analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
           const svg = renderSvgFor(analysis, settings, view);
           const png = await svgToPng(svg);

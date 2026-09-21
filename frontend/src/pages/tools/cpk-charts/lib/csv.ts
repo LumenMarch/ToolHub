@@ -12,6 +12,12 @@ export interface ParsedDataset {
   skippedColumns: string[];
   /** 完整表头列名（按表格顺序，含数值与文本列） */
   allColumns: string[];
+  /** 每行测试记录对应的 Test Pass/Fail Status 状态 */
+  statusList?: string[];
+  /** 状态列在原始表头中的索引 */
+  statusColumn?: number;
+  /** 是否存在非 PASS 状态的不良品记录 */
+  hasFailRecords?: boolean;
   /** 扩展元数据：对齐 DataController */
   headerRowIndex?: number;
   dataStartRow?: number;
@@ -125,17 +131,29 @@ function findLimitRows(rows: string[][], headerIdx: number): { lower: number; up
   return { lower, upper };
 }
 
-function findColumnIndices(headerRow: string[]): { sn: number; startTime: number; endTime: number } {
+function findColumnIndices(headerRow: string[]): {
+  sn: number;
+  startTime: number;
+  endTime: number;
+  status: number;
+} {
   let sn = -1;
   let startTime = -1;
   let endTime = -1;
+  let status = -1;
   for (let i = 0; i < headerRow.length; i += 1) {
     const h = headerRow[i].trim();
     if (sn < 0 && /Serial\s*Number/i.test(h)) sn = i;
     if (startTime < 0 && /Start\s*Time/i.test(h)) startTime = i;
     if (endTime < 0 && /End\s*Time/i.test(h)) endTime = i;
+    if (
+      status < 0 &&
+      /(?:Test\s*)?Pass\s*\/\s*Fail\s*Status|Test\s*Status|^Status$/i.test(h)
+    ) {
+      status = i;
+    }
   }
-  return { sn, startTime, endTime };
+  return { sn, startTime, endTime, status };
 }
 
 /**
@@ -204,7 +222,12 @@ export function parseTestCsv(text: string, fileName?: string): ParsedDataset {
   const upperRow = upperRowIdx >= 0 ? rows[upperRowIdx] : null;
   const lowerRow = lowerRowIdx >= 0 ? rows[lowerRowIdx] : null;
 
-  const { sn: snCol, startTime: stCol, endTime: etCol } = findColumnIndices(headerRow);
+  const {
+    sn: snCol,
+    startTime: stCol,
+    endTime: etCol,
+    status: statusCol,
+  } = findColumnIndices(headerRow);
 
   const columns: TestColumn[] = [];
   const keptIdx: number[] = [];
@@ -259,10 +282,17 @@ export function parseTestCsv(text: string, fileName?: string): ParsedDataset {
   }
 
   const dataRows: string[][] = [];
+  const statusList: string[] = [];
+  let hasFail = false;
   for (const row of rawDataRows) {
     dataRows.push(keptIdx.map((i) => normalizeCell(row[i] || '')));
+    const st = statusCol >= 0 ? (row[statusCol] || '').trim() : 'PASS';
+    const normalizedStatus = st ? st.toUpperCase() : 'PASS';
+    statusList.push(normalizedStatus);
+    if (normalizedStatus !== 'PASS') {
+      hasFail = true;
+    }
   }
-
   return {
     title,
     records: dataRows.length,
@@ -278,8 +308,31 @@ export function parseTestCsv(text: string, fileName?: string): ParsedDataset {
     snColumn: snCol >= 0 ? snCol : undefined,
     startTimeColumn: stCol >= 0 ? stCol : undefined,
     endTimeColumn: etCol >= 0 ? etCol : undefined,
+    statusColumn: statusCol >= 0 ? statusCol : undefined,
+    statusList,
+    hasFailRecords: hasFail,
     lowerLimitRow: lowerRowIdx >= 0 ? lowerRowIdx : undefined,
     upperLimitRow: upperRowIdx >= 0 ? upperRowIdx : undefined,
     unitRow: unitRowIdx >= 0 ? unitRowIdx : undefined,
   };
+}
+
+/** 提取指定列数据；若开启 excludeFail 且存在 statusList，则仅提取 Test Pass/Fail Status 为 PASS 的行 */
+export function getEffectiveRawRows(
+  dataset: ParsedDataset,
+  colIdx: number,
+  excludeFail?: boolean,
+): string[] {
+  if (!excludeFail || !dataset.statusList) {
+    return dataset.rows.map((r) => r[colIdx] ?? 'NA');
+  }
+  const statusList = dataset.statusList;
+  const filtered: string[] = [];
+  for (let i = 0; i < dataset.rows.length; i += 1) {
+    const st = statusList[i];
+    if (!st || st.toUpperCase() === 'PASS') {
+      filtered.push(dataset.rows[i][colIdx] ?? 'NA');
+    }
+  }
+  return filtered;
 }

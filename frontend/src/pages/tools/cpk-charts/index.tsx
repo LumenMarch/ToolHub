@@ -6,6 +6,7 @@ import { Database } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import useOppStore from './store/useOppStore';
 import LoadingOverlay from './components/LoadingOverlay';
 import TestItemList from './components/TestItemList';
@@ -30,6 +31,8 @@ const CpkChartsTool: React.FC = () => {
   const setCompareMode = useOppStore((s) => s.setCompareMode);
   const datasetB = useOppStore((s) => s.datasetB);
   const datasetA = useOppStore((s) => s.datasetA);
+  const excludeFail = useOppStore((s) => s.excludeFail);
+  const setExcludeFail = useOppStore((s) => s.setExcludeFail);
   const fileA = useOppStore((s) => s.fileA);
   const fileB = useOppStore((s) => s.fileB);
   const loadFileA = useOppStore((s) => s.loadFileA);
@@ -40,7 +43,6 @@ const CpkChartsTool: React.FC = () => {
   const progress = useOppStore((s) => s.progress);
   const error = useOppStore((s) => s.error);
   const clearError = useOppStore((s) => s.setError);
-
   const hasB = datasetB !== null && datasetB.columns.length > 0;
 
   // /export 子路由：渲染导出页
@@ -76,13 +78,18 @@ const CpkChartsTool: React.FC = () => {
       ) : null}
 
       {datasetA ? (
-        <p className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-          <Database className="size-4 shrink-0" />
-          <span className="truncate">{datasetA.title}</span>
-          <span className="shrink-0 tabular-nums">
-            {datasetA.records} 条 / {datasetA.columns.length} 项
-          </span>
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+          <p className="flex min-w-0 items-center gap-2">
+            <Database className="size-4 shrink-0" />
+            <span className="truncate">{datasetA.title}</span>
+            <span className="shrink-0 tabular-nums">
+              {excludeFail && datasetA.statusList && datasetA.hasFailRecords
+                ? `合格品 ${datasetA.statusList.filter((s) => !s || s.toUpperCase() === 'PASS').length} / ${datasetA.records} 条`
+                : `${datasetA.records} 条`}{' '}
+              / {datasetA.columns.length} 项
+            </span>
+          </p>
+        </div>
       ) : null}
 
       <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
@@ -132,30 +139,45 @@ const CpkChartsTool: React.FC = () => {
             </Button>
           ))}
         </div>
-        {hasB ? (
-          <div className="flex items-center gap-1 rounded-lg border p-1">
-            <Button
-              type="button"
-              size="sm"
-              variant={!compareMode ? 'default' : 'ghost'}
-              onClick={() => setCompareMode(false)}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 px-1">
+            <Checkbox
+              id="cpk-exclude-fail"
+              checked={excludeFail}
+              onCheckedChange={(checked) => setExcludeFail(Boolean(checked))}
+            />
+            <label
+              htmlFor="cpk-exclude-fail"
+              className="cursor-pointer text-xs font-medium leading-none select-none text-muted-foreground transition-colors hover:text-foreground"
             >
-              单文件
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={compareMode ? 'default' : 'ghost'}
-              onClick={() => setCompareMode(true)}
-            >
-              对比
-            </Button>
+              去除不良 (Test Pass/Fail Status != PASS)
+            </label>
           </div>
-        ) : null}
+          {hasB ? (
+            <div className="flex items-center gap-1 rounded-lg border p-1">
+              <Button
+                type="button"
+                size="sm"
+                variant={!compareMode ? 'default' : 'ghost'}
+                onClick={() => setCompareMode(false)}
+              >
+                单文件
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={compareMode ? 'default' : 'ghost'}
+                onClick={() => setCompareMode(true)}
+              >
+                对比
+              </Button>
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <div className="grid min-h-0 items-stretch gap-5 lg:grid-cols-[minmax(15rem,18rem)_1fr]">
-        <div className="relative min-h-0 overflow-hidden rounded-xl border bg-card">
+      <div className="grid min-h-0 items-stretch gap-5 lg:grid-cols-[minmax(16rem,20rem)_1fr]">
+        <div className="relative min-h-[500px] overflow-hidden rounded-xl border bg-card shadow-xs lg:min-h-0">
           <div className="absolute inset-0 p-3">
             <TestItemList />
           </div>
