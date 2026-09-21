@@ -16,14 +16,14 @@ from unicodedata import east_asian_width  # noqa: E402, I001, UP015, F401
 from xml.sax.saxutils import escape  # noqa: E402, I001, UP015, F401
 
 import openpyxl  # noqa: E402, I001, UP015, F401
-from PyPDF2 import PdfMerger  # noqa: E402, I001, UP015, F401
+from pypdf import PdfWriter  # noqa: E402, I001, UP015, F401
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT  # noqa: E402, I001, UP015, F401
 from reportlab.pdfbase import pdfmetrics  # noqa: E402, I001, UP015, F401
 from reportlab.pdfbase.ttfonts import TTFont  # noqa: E402, I001, UP015, F401
 
 # 新增：从原始数据生成PDF的库
 try:
-    from PyPDF2 import PdfMerger  # noqa: E402, I001, UP015, F401
+    from pypdf import PdfWriter  # noqa: E402, I001, UP015, F401
     from reportlab.lib import colors  # noqa: E402, I001, UP015, F401
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT  # noqa: E402, I001, UP015, F401
     from reportlab.lib.pagesizes import (  # noqa: E402, I001, UP015, F401
@@ -421,13 +421,13 @@ class RawDataToPDFConverter:
                 logging.error("没有PDF文件路径提供")
                 return False
 
-            merger = PdfMerger()
+            writer = PdfWriter()
             valid_pdfs = []
 
             for pdf_path in pdf_paths:
                 if os.path.exists(pdf_path):
                     try:
-                        merger.append(pdf_path)
+                        writer.append(pdf_path)
                         valid_pdfs.append(pdf_path)
                         logging.info(f"添加PDF文件: {pdf_path}")
                     except Exception as e:
@@ -439,8 +439,9 @@ class RawDataToPDFConverter:
                 logging.error("没有有效的PDF文件可以合并")
                 return False
 
-            merger.write(output_path)
-            merger.close()
+            with open(output_path, "wb") as merged_pdf:
+                writer.write(merged_pdf)
+            writer.close()
 
             logging.info(f"PDF文件合并成功: {output_path}")
             return True
