@@ -28,7 +28,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field
-from PyPDF2 import PdfMerger
+from pypdf import PdfWriter
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -88,7 +88,7 @@ try:
 except ImportError:
     pass
 try:
-    from PyPDF2 import PdfMerger
+    from pypdf import PdfWriter
 except ImportError:
     pass
 
@@ -2256,15 +2256,16 @@ def _build_complete_export(
                 if not detail_ok or not os.path.exists(detail_pdf_path):
                     raise RuntimeError("明细 PDF 生成失败")
 
-                merger = PdfMerger()
+                writer = PdfWriter()
                 try:
-                    merger.append(summary_pdf_path)  # 差异总结
-                    merger.append(detail_pdf_path)  # 详细差异
-                    merger.write(save_pdf_path)
+                    writer.append(summary_pdf_path)  # 差异总结
+                    writer.append(detail_pdf_path)  # 详细差异
+                    with open(save_pdf_path, "wb") as merged_pdf:
+                        writer.write(merged_pdf)
                 except Exception as merge_e:
                     raise RuntimeError("PDF 合并失败") from merge_e
                 finally:
-                    merger.close()
+                    writer.close()
             else:
                 shutil.copy2(summary_pdf_path, save_pdf_path)
 
