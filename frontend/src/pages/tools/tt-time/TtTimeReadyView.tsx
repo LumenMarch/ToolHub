@@ -96,6 +96,38 @@ const ModuleTabs: React.FC<{
   </div>
 );
 
+function adviceErrorOf(
+  mutation: UseMutationResult<AnalysisResult, Error, AnalysisContext, unknown>,
+): string | null {
+  if (mutation.isError && mutation.error instanceof Error) {
+    return mutation.error.message;
+  }
+  return mutation.data?.error ?? null;
+}
+
+/** 落款行：完成时署名，进行中转圈；失败后两者都不显示，失败信息由告警承担。 */
+const AdviceFooter: React.FC<{
+  adviceMutation: UseMutationResult<AnalysisResult, Error, AnalysisContext, unknown>;
+}> = ({ adviceMutation }) => {
+  const done = adviceMutation.data;
+  if (done) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        {done.model} · 耗时 {done.elapsedMs} ms
+      </p>
+    );
+  }
+  // 只有请求还挂着才显示“思考中”：流内 error 之后 mutation 已失败，
+  // 再转圈就是在骗用户
+  if (!adviceMutation.isPending) return null;
+  return (
+    <p className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Spinner className="size-3" />
+      模型思考中，正文逐字输出…
+    </p>
+  );
+};
+
 interface AdviceCardProps {
   analysisContext: AnalysisContext | null;
   adviceMutation: UseMutationResult<AnalysisResult, Error, AnalysisContext, unknown>;
@@ -110,10 +142,7 @@ const TtTimeAdviceCard: React.FC<AdviceCardProps> = ({
   streamingAdvice,
   llmBlockedReason,
 }) => {
-  const adviceError =
-    adviceMutation.isError && adviceMutation.error instanceof Error
-      ? adviceMutation.error.message
-      : adviceMutation.data?.error ?? null;
+  const adviceError = adviceErrorOf(adviceMutation);
   // 先取完整结果，没结果时用流式片段；这样“正文逐字出现”与“完成后带署名”不冲突
   const renderedAdvice = adviceMutation.data?.advice || streamingAdvice || null;
 
@@ -147,18 +176,7 @@ const TtTimeAdviceCard: React.FC<AdviceCardProps> = ({
         {renderedAdvice ? (
           <div className="flex flex-col gap-2">
             <Markdown className="leading-relaxed">{renderedAdvice}</Markdown>
-            {adviceMutation.data ? (
-              <p className="text-xs text-muted-foreground">
-                {adviceMutation.data.model} · 耗时 {adviceMutation.data.elapsedMs} ms
-              </p>
-            ) : adviceMutation.isPending ? (
-              // 只有请求还挂着才显示“思考中”：流内 error 之后 mutation 已失败，
-              // 再转圈就是在骗用户
-              <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Spinner className="size-3" />
-                模型思考中，正文逐字输出…
-              </p>
-            ) : null}
+            <AdviceFooter adviceMutation={adviceMutation} />
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
