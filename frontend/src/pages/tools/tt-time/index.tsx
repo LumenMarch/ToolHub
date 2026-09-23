@@ -7,11 +7,13 @@ import FileDropZone from '@/components/FileDropZone';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTusUpload } from '@/hooks/useTusUpload';
+import { llmUnavailableReason, useLlmStatus } from '@/hooks/useLlmStatus';
 import { LoadingSignal } from '@/components/LoadingSignal';
 import type { HistogramMode } from './charts';
 import type { AnalysisContext, Bin, Stats } from './lib';
 import { makeAnalysisContext } from './analysisWiring';
-import type { ActiveModule, AnalysisResult, BackendProcessResponse, Phase } from './types';
+import { streamTtTimeAnalysis } from './analysisStream';
+import type { ActiveModule, BackendProcessResponse, Phase } from './types';
 import { TtTimeReadyView } from './TtTimeReadyView';
 
 const DEFAULT_BIN_WIDTH = 10;
@@ -27,6 +29,8 @@ const TtTimeTool: React.FC = () => {
   const [binWidthStr, setBinWidthStr] = useState(String(DEFAULT_BIN_WIDTH));
   const [station, setStation] = useState('all');
   const [excludeFail, setExcludeFail] = useState(true);
+  // 流式过程中已到达的正文
+  const [streamingAdvice, setStreamingAdvice] = useState('');
   const processGenRef = useRef(0);
 
   const binWidth = useMemo(() => {
@@ -126,9 +130,20 @@ const TtTimeTool: React.FC = () => {
   );
 
   const adviceMutation = useMutation({
+    // 流式消费：思考类模型要先思考几百 token 才吐正文，一次性等就是十几秒空白。
+    // onDelta 直接把正文片段追到 streamingAdvice，边生成边渲染。
     mutationFn: (ctx: AnalysisContext) =>
-      api.post<AnalysisResult>('/tools/tt-time/analyze', ctx).then((r) => r.data),
+      streamTtTimeAnalysis(ctx, {
+        onDelta: (text) => setStreamingAdvice((prev) => prev + text),
+      }),
+    onMutate: () => {
+      setStreamingAdvice('');
+    },
   });
+
+  // 模型服务不可用时直接把按钮置灰并说明原因，而不是让用户填完参数点下去才吃个 503
+  const { data: llmStatus } = useLlmStatus();
+  const llmBlockedReason = llmUnavailableReason(llmStatus);
 
   if (phase === 'upload' || phase === 'analyzing') {
     const isUploading = tusUpload.status === 'uploading';
@@ -208,6 +223,8 @@ const TtTimeTool: React.FC = () => {
       bins={bins}
       analysisContext={analysisContext}
       adviceMutation={adviceMutation}
+      streamingAdvice={streamingAdvice}
+      llmBlockedReason={llmBlockedReason}
     />
   );
 };

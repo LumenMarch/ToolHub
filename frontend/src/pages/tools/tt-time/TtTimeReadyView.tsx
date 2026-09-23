@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Markdown } from '@/components/ui/markdown';
+import { Spinner } from '@/components/ui/spinner';
 import {
   TtHistogramChart,
   TtPercentCurveChart,
@@ -59,6 +60,10 @@ export type TtTimeReadyViewProps = {
   bins: Bin[];
   analysisContext: AnalysisContext | null;
   adviceMutation: UseMutationResult<AnalysisResult, Error, AnalysisContext, unknown>;
+  /** 流式过程中已到达的正文（done 之后以 data.advice 为准） */
+  streamingAdvice: string;
+  /** 非空表示模型服务不可用，按钮置灰并直接显示原因 */
+  llmBlockedReason: string | null;
 };
 
 export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
@@ -81,11 +86,15 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
   bins,
   analysisContext,
   adviceMutation,
+  streamingAdvice,
+  llmBlockedReason,
 }) => {
   const adviceError =
     adviceMutation.isError && adviceMutation.error instanceof Error
       ? adviceMutation.error.message
       : adviceMutation.data?.error ?? null;
+  // 先取完整结果，没结果时用流式片段；这样“正文逐字出现”与“完成后带署名”不冲突
+  const renderedAdvice = adviceMutation.data?.advice || streamingAdvice || null;
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
@@ -243,13 +252,15 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
               <Card>
                 <CardHeader>
                   <CardTitle>AI 分析建议</CardTitle>
-                  <CardDescription>本地大模型 · 需已启动 llama.cpp 服务。</CardDescription>
+                  <CardDescription>
+                    {llmBlockedReason ?? '本地大模型 · 结论逐字生成'}
+                  </CardDescription>
                   {analysisContext ? (
                     <CardAction>
                       <Button
                         type="button"
                         size="sm"
-                        disabled={adviceMutation.isPending}
+                        disabled={adviceMutation.isPending || Boolean(llmBlockedReason)}
                         onClick={() => adviceMutation.mutate(analysisContext)}
                       >
                         <Sparkles data-icon="inline-start" />
@@ -263,12 +274,20 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
                     <Alert variant="destructive">
                       <AlertDescription>{adviceError}</AlertDescription>
                     </Alert>
-                  ) : adviceMutation.data ? (
+                  ) : null}
+                  {renderedAdvice ? (
                     <div className="flex flex-col gap-2">
-                      <Markdown className="leading-relaxed">{adviceMutation.data.advice}</Markdown>
-                      <p className="text-xs text-muted-foreground">
-                        {adviceMutation.data.model} · 耗时 {adviceMutation.data.elapsedMs} ms
-                      </p>
+                      <Markdown className="leading-relaxed">{renderedAdvice}</Markdown>
+                      {adviceMutation.data ? (
+                        <p className="text-xs text-muted-foreground">
+                          {adviceMutation.data.model} · 耗时 {adviceMutation.data.elapsedMs} ms
+                        </p>
+                      ) : (
+                        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Spinner className="size-3" />
+                          模型思考中，正文逐字输出…
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">

@@ -7,6 +7,7 @@ export type RealtimeEventType =
   | 'job.updated'
   | 'job.terminal'
   | 'tools_meta.updated'
+  | 'llm_config.updated'
   | 'permissions.updated'
   | 'session.revoked'
   | 'pong';

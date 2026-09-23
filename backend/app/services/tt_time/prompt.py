@@ -1,32 +1,18 @@
-"""TT 时间分析建议 — 对接本地大模型生成中文诊断结论。
+"""TT 时间分析建议的领域提示词。
 
-纯服务层：接收前端传来的统计结构，构造一段面向本地大模型的简洁中文提示词，
-再经 OpenAI 兼容的 /v1/chat/completions 调用本地模型端点（Ollama / llama.cpp
-server），返回模型生成的诊断文本。
+这里只放「TT、机台、IQR」这类工站领域知识；HTTP、超时、并发一律不出现 ——
+那些在全局网关（app/services/llm）里。工具对模型服务的全部诉求就是：
+「把这组统计数字变成一段中文诊断」。
 
-设计约束：
-- 只给模型"测试时间(秒)"的客观统计（样本量/五数/均值/长尾），并把"样本量=条数"
-  与"测试时间=秒"的语义显式讲清，避免小模型把测试条数当成耗时。
-- 输出要求结构化为 Markdown 短结构（1 整体水平 / 2 正常范围 / 3 分布形态 /
-  4 改善方案），前端组件直接按 Markdown 渲染。
+提示词里的术语定义与输出结构都是按实测行为调出来的，改动前先想清楚
+是否会破坏「只引用真实出现的数字」这条铁律。
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
-import httpx
-from loguru import logger
-
-from app.core.config import settings
-
-# 本地 LLM 未配置或调用失败时端点返回该状态码，前端据此提示
-LLM_UNAVAILABLE_STATUS = 503
-
-
-class LlmUnavailableError(RuntimeError):
-    """本地大模型不可用（未配置 / 连接失败 / 返回非 2xx）。"""
+from app.services.llm import ChatMessage, LlmRequest
 
 
 def _fmt(v: float | int | None) -> str:
@@ -64,6 +50,16 @@ def build_analysis_prompt(data: dict[str, Any]) -> str:
     if mean is not None:
         lines.append(f"- 平均值：{_fmt(mean)} 秒")
 
+    # 高分位给尾部更直接的信号（前端已随请求算好）；p50 与中值(Q2)同义，
+    # 不重复给，免得小模型把两个「中值」当成不同指标。
+    pct = data.get("percentiles") or {}
+    if any(pct.get(key) is not None for key in ("p90", "p95", "p99")):
+        lines.append(
+            "- 高分位（P90 / P95 / P99）："
+            f"{_fmt(pct.get('p90'))} / {_fmt(pct.get('p95'))} / "
+            f"{_fmt(pct.get('p99'))} 秒"
+        )
+
     try:
         thr = float(tail.get("iqrThreshold") or 0)
         oc = int(tail.get("outlierCount") or 0)
@@ -71,7 +67,9 @@ def build_analysis_prompt(data: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         thr, oc, op = 0, 0, 0
     extra = ""
-    if total_rows and thr > 0 and oc > 0:
+    # oc=0 时也要显式给出「0 条」：否则输出要求第 3 节让模型援引异常占比
+    # 与长尾阈值，模型手里却没这两个数，只能违反铁律编造或把该节写残。
+    if total_rows and thr > 0:
         extra = (
             f"\n补充：超过 Q3+1.5×(Q3-Q1) = {_fmt(thr)} 秒的异常样本 "
             f"{oc} 条（占比 {op:.1f}%）。"
@@ -104,7 +102,7 @@ def build_analysis_prompt(data: dict[str, Any]) -> str:
         "一并说明，不要只写“平稳”。\n"
         "2. **正常波动范围**：写明“Q1=…秒 ~ Q3=…秒”，只引用上面的数值，禁止自创区间。\n"
         "3. **分布形态**：比较平均值与中值，判定是否右偏，并援引“异常样本占比/长尾阈值”"
-        "说明依据。\n"
+        "说明依据；P95/P99 明显高于中值时，援引具体数值点明尾部偏长。\n"
         "4. **改善方案**：仅当右偏明显或存在异常样本时给出，用“建议：……”句式写明"
         "具体动作；从两类切入——机台状态（执行机构、信号/接口、工装、校准偏移）或"
         "测试程序（某测试步骤耗时、重复测试、程序分支卡滞），结合“长尾阈值、异常占比、"
@@ -114,78 +112,23 @@ def build_analysis_prompt(data: dict[str, Any]) -> str:
     )
 
 
-def _strip_code_fence(text: str) -> str:
-    """去掉模型给正文包上的 ```markdown/``` 围栏，及思考模型泄漏的标记 token。"""
-    # 思考标记（如 K2 的 </ifm|think_faster>、<|im_start|think>）以 <..|..> 或 <|..|> 形式出现在正文，
-    # 只影响可读性，安全剔除。
-    cleaned = re.sub(r"<[^<>]*\|[^<>]*>", "", text)
-    # 再剔除 <think>...</think> 块与孤立的 </?think> 标签（大小写不敏感）
-    cleaned = re.sub(
-        r"<think\b[^>]*>[\s\S]*?</think>", "", cleaned, flags=re.IGNORECASE
+# 系统提示词：过去被硬编码在 HTTP 调用函数里（导致任何工具想复用模型调用
+# 都必须整文件复制），现在回到它该在的地方 —— 它是 tt-time 的领域内容。
+SYSTEM_PROMPT = (
+    "你是一名严谨的测试工站生产数据分析工程师。"
+    "只依据用户提供的统计数字作答，不臆造；默认使用简体中文。"
+)
+
+
+def build_analysis_request(data: dict[str, Any]) -> LlmRequest:
+    """把统计结构组装成一次网关补全请求。
+
+    source 会进指标与审计，用于按调用方拆分延迟、失败率与 token 用量。
+    """
+    return LlmRequest(
+        messages=(
+            ChatMessage("system", SYSTEM_PROMPT),
+            ChatMessage("user", build_analysis_prompt(data)),
+        ),
+        source="tt-time",
     )
-    cleaned = re.sub(r"</?think\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
-    stripped = cleaned.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        while lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-    return stripped
-
-
-def call_llama(user_text: str) -> str:
-    """调用本地模型的 OpenAI 兼容端点，返回模型生成的文本。"""
-    base_url = settings.LLM_BASE_URL.rstrip("/")
-    model = settings.LLM_MODEL
-    api_key = settings.LLM_API_KEY
-    url = f"{base_url}/chat/completions"
-
-    payload: dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "你是一名严谨的测试工站生产数据分析工程师。"
-                    "只依据用户提供的统计数字作答，不臆造；默认使用简体中文。"
-                ),
-            },
-            {"role": "user", "content": user_text},
-        ],
-        "max_tokens": settings.LLM_MAX_TOKENS,
-        "stream": False,
-    }
-    # 思考强度：置空则交由模型默认（开启思考的模型保持默认思考）。
-    if settings.LLM_REASONING_EFFORT:
-        payload["reasoning_effort"] = settings.LLM_REASONING_EFFORT
-    # 注：上下文窗口(num_ctx)无法在 OpenAI 兼容端点逐请求设置，
-    # 需在服务端放大（Ollama: OLLAMA_CONTEXT_LENGTH；llama.cpp: --ctx-size）。
-
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    try:
-        with httpx.Client(timeout=settings.LLM_TIMEOUT_SECONDS) as client:
-            resp = client.post(url, json=payload, headers=headers)
-    except httpx.HTTPError as exc:  # 连接失败 / 超时等
-        logger.warning("本地 LLM 调用失败: {}", exc)
-        raise LlmUnavailableError("本地大模型连接失败或超时") from exc
-
-    if resp.status_code != 200:
-        logger.warning("本地 LLM 返回 HTTP {}: {}", resp.status_code, resp.text[:300])
-        raise LlmUnavailableError(f"本地大模型返回 HTTP {resp.status_code}")
-
-    try:
-        body = resp.json()
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, ValueError) as exc:  # 响应结构异常
-        logger.warning("本地 LLM 响应解析失败: {}", resp.text[:300])
-        raise LlmUnavailableError("本地大模型响应格式异常") from exc
-
-    if not content or not content.strip():
-        raise LlmUnavailableError("本地大模型返回空内容")
-
-    return _strip_code_fence(content)

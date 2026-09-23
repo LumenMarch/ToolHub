@@ -49,6 +49,8 @@ PERMISSIONS = [
     ("stats:read", "查看统计面板"),
     ("role:read", "查看角色与权限定义"),
     ("role:write", "创建/编辑/删除角色，分配权限"),
+    ("llm_config:read", "查看模型服务配置与运行状态"),
+    ("llm_config:write", "修改模型服务配置（地址/模型/并发/超时）"),
     *TOOL_PERMISSIONS,
 ]
 
@@ -63,6 +65,8 @@ ROLES = {
         "stats:read",
         "role:read",
         "role:write",
+        "llm_config:read",
+        "llm_config:write",
         *TOOL_PERMISSION_CODENAMES,
     ],
     "用户管理员": ["user:read", "user:write", "role:read"],
@@ -174,6 +178,53 @@ def migrate_per_tool_permissions() -> None:
                 "（内置工具角色补齐 {} 条）",
                 len(TOOL_PERMISSIONS),
                 len(TOOL_PERMISSION_CODENAMES),
+            )
+    finally:
+        db.close()
+
+
+def migrate_admin_permissions() -> None:
+    """补齐存量库缺失的非工具权限，并让内置角色回到声明的权限集合（幂等）。
+
+    run_seed 只在 permissions 表为空时播种，因此新增的管理权限（如
+    llm_config:read/write）不会自动进入存量库；migrate_per_tool_permissions
+    只管 tool:<id>:use。本函数负责其余权限的补齐与内置角色的权限跟进。
+
+    只动 ROLES 里声明的内置角色：它们「应有什么权限」是代码定义的；
+    管理员自定义的角色一律不碰，需要时由管理员手工分配。重复执行 no-op。
+    """
+    db = SessionLocal()
+    try:
+        perms = db.scalars(select(Permission)).all()
+        perm_map = {p.codename: p for p in perms}
+
+        added = 0
+        for codename, description in PERMISSIONS:
+            if codename in perm_map:
+                continue
+            perm = Permission(codename=codename, description=description)
+            db.add(perm)
+            perm_map[codename] = perm
+            added += 1
+
+        roles = db.scalars(select(Role).options(selectinload(Role.permissions))).all()
+        granted = 0
+        for role_name, declared in ROLES.items():
+            role = next((r for r in roles if r.name == role_name), None)
+            if role is None:
+                continue
+            held = {p.codename for p in role.permissions}
+            missing = [c for c in declared if c not in held and c in perm_map]
+            if missing:
+                role.permissions = list(role.permissions) + [
+                    perm_map[c] for c in missing
+                ]
+                granted += len(missing)
+
+        if added or granted:
+            db.commit()
+            logger.info(
+                "权限补齐完成：新增权限 {} 条，内置角色补授 {} 条", added, granted
             )
     finally:
         db.close()

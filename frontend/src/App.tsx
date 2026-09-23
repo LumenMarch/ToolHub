@@ -25,6 +25,7 @@ const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'))
 const AdminUsers = lazy(() => import('./pages/admin/Users'))
 const AdminAudit = lazy(() => import('./pages/admin/Audit'))
 const AdminTools = lazy(() => import('./pages/admin/Tools'))
+const AdminLlm = lazy(() => import('./pages/admin/Llm'))
 const AdminRoles = lazy(() => import('./pages/admin/Roles'))
 const PendingApproval = lazy(() => import('./pages/PendingApproval'))
 
@@ -102,6 +103,14 @@ function App() {
                     element={
                       <Suspense fallback={<SuspendFallback />}>
                         <AdminTools />
+                      </Suspense>
+                    }
+                  />
+                  <Route
+                    path="/admin/llm"
+                    element={
+                      <Suspense fallback={<SuspendFallback />}>
+                        <AdminLlm />
                       </Suspense>
                     }
                   />

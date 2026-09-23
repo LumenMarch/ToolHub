@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.endpoints import (
     admin_audit,
+    admin_llm,
     admin_roles,
     admin_stats,
     admin_tools,
@@ -13,6 +14,7 @@ from app.api.endpoints import (
     box_plot,
     calendar_tools,
     cpk_charts,
+    llm,
     notifications,
     qrcode_tools,
     realtime,
@@ -71,6 +73,9 @@ api_router.include_router(
 # 工具元数据（已登录用户可读，主控台用）
 api_router.include_router(tools_meta.router, prefix="/tools-meta", tags=["tools_meta"])
 
+# 模型服务状态（登录即可，工具页据此门控「生成建议」按钮）
+api_router.include_router(llm.router, prefix="/llm", tags=["llm"])
+
 # 管理员 endpoints（需 admin 角色）
 api_router.include_router(
     admin_users.router, prefix="/admin/users", tags=["admin_users"]
@@ -85,6 +90,7 @@ api_router.include_router(
     admin_stats.router, prefix="/admin/stats", tags=["admin_stats"]
 )
 api_router.include_router(admin_roles.router, prefix="/admin", tags=["admin_roles"])
+api_router.include_router(admin_llm.router, prefix="/admin/llm", tags=["admin_llm"])
 
 # 上传端点（tus 协议 — 基础设施）
 api_router.include_router(upload.router, prefix="/upload", tags=["upload"])

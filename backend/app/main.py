@@ -14,6 +14,7 @@ from app.api.api_router import api_router
 from app.db.base_class import Base
 from app.db.session import engine, ensure_schema_compat
 from app.seed import (
+    migrate_admin_permissions,
     migrate_per_tool_permissions,
     migrate_retired_tool_permissions,
     run_seed,
@@ -31,6 +32,8 @@ ensure_schema_compat()
 run_seed()
 # 存量库数据迁移：tool:use → tool:<id>:use（幂等，重复执行无副作用）
 migrate_per_tool_permissions()
+# 存量库补齐新增的管理权限（如 llm_config:*）并让内置角色回到声明集（幂等）
+migrate_admin_permissions()
 # 清理已下线工具的存量 tool:*:use（幂等，无匹配行时 no-op）
 migrate_retired_tool_permissions()
 
@@ -43,8 +46,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await bootstrap_initial_admin()
     await start_unapproved_user_cleanup()
     await recover_asset_comparison_jobs()
+    await start_llm_gateway()
     yield
     # shutdown 顺序（与原注册顺序一致）
+    await shutdown_llm_gateway()
     await shutdown_asset_comparison_jobs()
     await shutdown_realtime_redis()
     await shutdown_task_artifact_cleanup()
@@ -331,6 +336,20 @@ async def recover_asset_comparison_jobs() -> None:
     from app.api.endpoints.asset_comparison import asset_comparison_job_manager
 
     asset_comparison_job_manager.recover_interrupted()
+
+
+async def start_llm_gateway() -> None:
+    """启动全局 LLM 网关（连接池 + 闸门预热）。"""
+    from app.services.llm import llm_gateway
+
+    await llm_gateway.startup()
+
+
+async def shutdown_llm_gateway() -> None:
+    """关闭全局 LLM 网关的连接池。"""
+    from app.services.llm import llm_gateway
+
+    await llm_gateway.shutdown()
 
 
 async def shutdown_asset_comparison_jobs() -> None:

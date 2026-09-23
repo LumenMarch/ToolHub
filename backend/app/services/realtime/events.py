@@ -53,6 +53,14 @@ def tools_meta_updated_event() -> dict[str, Any]:
     }
 
 
+def llm_config_updated_event() -> dict[str, Any]:
+    """管理员变更模型服务配置后的广播通知；工具页应重新 GET /llm/status。"""
+    return {
+        "type": "llm_config.updated",
+        "at": _at(),
+    }
+
+
 def permissions_updated_event(*, user_id: int) -> dict[str, Any]:
     """用户角色/权限变更通知；客户端应重新 GET /users/me。"""
     return {
