@@ -117,26 +117,19 @@ const RetestRateTool: React.FC = () => {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <div>
-        <h1 className="text-xl font-semibold">重测率统计</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          汇总多份产线测试 CSV（insight/Hilo、DCR/Moose、Atlas、Summary、Unit
-          Archive 合并导出自动识别），以 SN 为单位统计重测率与不良率，第一个文件用于识别格式与测试项规格。
-        </p>
-      </div>
-
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <Card>
         <CardHeader>
           <CardTitle>待分析 CSV 文件</CardTitle>
           <CardDescription>
-            支持拖放或选择多个 .csv 文件，可分批追加，重复文件自动忽略。
+            可分批追加，重复文件自动忽略。列表顺序即分析顺序，第一个文件用于识别格式与测试项规格。
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <FileDropZone
             id="retest-rate-files"
             label="测试数据 CSV"
+            compact
             description="拖放 .csv 文件到此处，或点击选择（可多选）"
             accept=".csv,text/csv"
             file={null}

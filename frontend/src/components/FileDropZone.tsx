@@ -18,6 +18,17 @@ interface FileDropZoneProps {
   multiple?: boolean
   onSelectMultiple?: (files: File[]) => void
   fileNameClassName?: string
+  /** 紧凑模式：单行高度，适用于下方已有文件列表、无需大面积拖放区的场景 */
+  compact?: boolean
+}
+
+/** 两种排版共用的展示入参 */
+interface ZoneContentProps {
+  description: string
+  file: File | null
+  fileNameClassName?: string
+  id: string
+  label: string
 }
 
 function formatSize(bytes: number): string {
@@ -26,8 +37,85 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
+/** 拖放/已选状态对应的边框与底色 */
+function zoneStateClass(isDragging: boolean, hasFile: boolean): string {
+  if (isDragging) return 'border-primary bg-primary/5'
+  if (hasFile) return 'border-primary/40 bg-card'
+  return 'border-border bg-card hover:bg-muted/40'
+}
+
+/** 优先按 DataTransfer 条目递归展开（支持目录），无条目时退回 files 列表 */
+async function droppedFiles(dataTransfer: DataTransfer): Promise<File[]> {
+  const entries: FileSystemEntry[] = []
+  for (let index = 0; index < dataTransfer.items.length; index++) {
+    const entry = dataTransfer.items[index]?.webkitGetAsEntry?.()
+    if (entry) entries.push(entry)
+  }
+  if (entries.length > 0) {
+    const collected = await collectDroppedFiles(entries)
+    if (collected.length > 0) return collected
+  }
+  return Array.from(dataTransfer.files)
+}
+
+/** 紧凑排版：图标 + 标签 + 提示（或文件名）单行 */
+const CompactZone: React.FC<ZoneContentProps> = ({
+  description,
+  file,
+  fileNameClassName,
+  id,
+  label,
+}) => {
+  const hasFile = file !== null
+  return (
+    <>
+      <Upload className="size-4 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 flex-1 items-baseline gap-2">
+        <span className="shrink-0 text-sm font-medium">{label}</span>
+        <span
+          id={`${id}-description`}
+          className={cn(
+            'truncate text-sm',
+            hasFile ? cn('font-medium', fileNameClassName) : 'text-muted-foreground',
+          )}
+        >
+          {hasFile ? `${file.name}（${formatSize(file.size)}）` : description}
+        </span>
+      </div>
+    </>
+  )
+}
+
+/** 默认排版：大块面板，适合单文件主输入 */
+const PanelZone: React.FC<ZoneContentProps> = ({
+  description,
+  file,
+  fileNameClassName,
+  id,
+  label,
+}) => {
+  const hasFile = file !== null
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium">{label}</span>
+        {hasFile ? null : <Upload className="size-4 text-muted-foreground" />}
+      </div>
+      <div className="min-w-0">
+        <p className={cn('truncate font-medium', fileNameClassName)}>
+          {hasFile ? file.name : '拖放或选择文件'}
+        </p>
+        <p id={`${id}-description`} className="mt-1 text-sm text-muted-foreground">
+          {hasFile ? formatSize(file.size) : description}
+        </p>
+      </div>
+    </>
+  )
+}
+
 const FileDropZone: React.FC<FileDropZoneProps> = ({
   accept,
+  compact = false,
   description,
   directory = false,
   disabled = false,
@@ -55,35 +143,17 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
     event.preventDefault()
     setIsDragging(false)
     if (disabled) return
-
-    const dataTransfer = event.dataTransfer
-    const entries: FileSystemEntry[] = []
-    for (let index = 0; index < dataTransfer.items.length; index++) {
-      const entry = dataTransfer.items[index]?.webkitGetAsEntry?.()
-      if (entry) entries.push(entry)
-    }
-    if (entries.length > 0) {
-      const collected = await collectDroppedFiles(entries)
-      if (collected.length > 0) {
-        deliverFiles(collected)
-        return
-      }
-    }
-    deliverFiles(Array.from(dataTransfer.files))
+    deliverFiles(await droppedFiles(event.dataTransfer))
   }
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
-    if (!files) return
-    if (multiple && onSelectMultiple && files.length > 0) {
-      onSelectMultiple(Array.from(files))
-    } else if (files.length > 0) {
-      onSelect(files[0])
-    }
+    if (files && files.length > 0) deliverFiles(Array.from(files))
     event.target.value = ''
   }
 
   const hasFile = file !== null
+  const contentProps: ZoneContentProps = { description, file, fileNameClassName, id, label }
 
   return (
     <div className="relative min-w-0">
@@ -121,30 +191,15 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
         aria-disabled={disabled || undefined}
         aria-describedby={`${id}-description`}
         className={cn(
-          'flex min-h-48 w-full flex-col justify-center gap-3 rounded-xl border border-dashed p-6 text-left transition-colors',
+          'flex w-full rounded-xl border border-dashed text-left transition-colors',
+          compact
+            ? 'items-center gap-3 p-3'
+            : 'min-h-48 flex-col justify-center gap-3 p-6',
           disabled && 'cursor-not-allowed opacity-50',
-          isDragging
-            ? 'border-primary bg-primary/5'
-            : hasFile
-              ? 'border-primary/40 bg-card'
-              : 'border-border bg-card hover:bg-muted/40',
+          zoneStateClass(isDragging, hasFile),
         )}
       >
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-medium">{label}</span>
-          {hasFile ? null : <Upload className="size-4 text-muted-foreground" />}
-        </div>
-        <div className="min-w-0">
-          <p className={cn('truncate font-medium', fileNameClassName)}>
-            {hasFile ? file.name : '拖放或选择文件'}
-          </p>
-          <p
-            id={`${id}-description`}
-            className="mt-1 text-sm text-muted-foreground"
-          >
-            {hasFile ? formatSize(file.size) : description}
-          </p>
-        </div>
+        {compact ? <CompactZone {...contentProps} /> : <PanelZone {...contentProps} />}
       </div>
       {hasFile && onClear ? (
         <Button
