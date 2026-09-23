@@ -1,6 +1,11 @@
 import { useCallback, useMemo } from 'react';
 import api from '../../../api/axios';
 import type {
+  LlmConfigResponse,
+  LlmConfigUpdateInput,
+  LlmProbeResult,
+} from '../../../types/llm';
+import type {
   NotificationList,
   UnreadCount,
 } from '../../../types/notifications';
@@ -334,6 +339,30 @@ export function useAdminApi() {
     [],
   );
 
+  // 模型服务（全局 LLM 网关）配置
+  const getLlmConfig = useCallback(
+    () => api.get<LlmConfigResponse>('/admin/llm/config').then((r) => r.data),
+    [],
+  );
+
+  // PATCH 的三态语义必须原样递给后端：字段不下发 = 不动，显式 null = 恢复继承 env，
+  // 所以这里不能把 undefined 洗成 null。
+  const patchLlmConfig = useCallback(
+    (input: LlmConfigUpdateInput) =>
+      api.patch<LlmConfigResponse>('/admin/llm/config', input).then((r) => r.data),
+    [],
+  );
+
+  const resetLlmConfig = useCallback(
+    () => api.delete<LlmConfigResponse>('/admin/llm/config').then((r) => r.data),
+    [],
+  );
+
+  const probeLlm = useCallback(
+    () => api.post<LlmProbeResult>('/admin/llm/probe').then((r) => r.data),
+    [],
+  );
+
   // 统计
   const getOverview = useCallback(
     () => api.get<OverviewStats>('/admin/stats/overview').then((r) => r.data),
@@ -451,6 +480,10 @@ export function useAdminApi() {
       updateToolMeta,
       bulkUpdateToolMetas,
       listPublicToolMetas,
+      getLlmConfig,
+      patchLlmConfig,
+      resetLlmConfig,
+      probeLlm,
       getOverview,
       getToolCalls,
       getDailyActiveUsers,
@@ -483,6 +516,10 @@ export function useAdminApi() {
       updateToolMeta,
       bulkUpdateToolMetas,
       listPublicToolMetas,
+      getLlmConfig,
+      patchLlmConfig,
+      resetLlmConfig,
+      probeLlm,
       getOverview,
       getToolCalls,
       getDailyActiveUsers,

@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Markdown } from '@/components/ui/markdown';
+import { Spinner } from '@/components/ui/spinner';
 import {
   TtHistogramChart,
   TtPercentCurveChart,
@@ -59,6 +60,132 @@ export type TtTimeReadyViewProps = {
   bins: Bin[];
   analysisContext: AnalysisContext | null;
   adviceMutation: UseMutationResult<AnalysisResult, Error, AnalysisContext, unknown>;
+  /** 流式过程中已到达的正文（done 之后以 data.advice 为准） */
+  streamingAdvice: string;
+  /** 非空表示模型服务不可用，按钮置灰并直接显示原因 */
+  llmBlockedReason: string | null;
+};
+
+const MODULE_TABS: { id: ActiveModule; label: string; Icon: typeof Activity }[] = [
+  { id: 'distribution', label: '1. 测试时间分布', Icon: Activity },
+  { id: 'boxplot', label: '2. 机台测试时间箱线图', Icon: BoxSelect },
+  { id: 'comparison', label: '3. 机台数据对比', Icon: GitCompare },
+];
+
+/** 模块切换的胶囊 tab 组。 */
+const ModuleTabs: React.FC<{
+  activeModule: ActiveModule;
+  onSelect: (module: ActiveModule) => void;
+}> = ({ activeModule, onSelect }) => (
+  <div className="inline-flex rounded-lg border bg-muted/50 p-1 text-muted-foreground">
+    {MODULE_TABS.map(({ id, label, Icon }) => (
+      <button
+        key={id}
+        type="button"
+        onClick={() => onSelect(id)}
+        className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${
+          activeModule === id
+            ? 'bg-background text-foreground shadow-xs font-semibold'
+            : 'hover:text-foreground'
+        }`}
+      >
+        <Icon className="size-3.5" />
+        {label}
+      </button>
+    ))}
+  </div>
+);
+
+function adviceErrorOf(
+  mutation: UseMutationResult<AnalysisResult, Error, AnalysisContext, unknown>,
+): string | null {
+  if (mutation.isError && mutation.error instanceof Error) {
+    return mutation.error.message;
+  }
+  return mutation.data?.error ?? null;
+}
+
+/** 落款行：完成时署名，进行中转圈；失败后两者都不显示，失败信息由告警承担。 */
+const AdviceFooter: React.FC<{
+  adviceMutation: UseMutationResult<AnalysisResult, Error, AnalysisContext, unknown>;
+}> = ({ adviceMutation }) => {
+  const done = adviceMutation.data;
+  if (done) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        {done.model} · 耗时 {done.elapsedMs} ms
+      </p>
+    );
+  }
+  // 只有请求还挂着才显示“思考中”：流内 error 之后 mutation 已失败，
+  // 再转圈就是在骗用户
+  if (!adviceMutation.isPending) return null;
+  return (
+    <p className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Spinner className="size-3" />
+      模型思考中，正文逐字输出…
+    </p>
+  );
+};
+
+interface AdviceCardProps {
+  analysisContext: AnalysisContext | null;
+  adviceMutation: UseMutationResult<AnalysisResult, Error, AnalysisContext, unknown>;
+  /** 流式过程中已到达的正文（done 之后以 data.advice 为准） */
+  streamingAdvice: string;
+  llmBlockedReason: string | null;
+}
+
+const TtTimeAdviceCard: React.FC<AdviceCardProps> = ({
+  analysisContext,
+  adviceMutation,
+  streamingAdvice,
+  llmBlockedReason,
+}) => {
+  const adviceError = adviceErrorOf(adviceMutation);
+  // 先取完整结果，没结果时用流式片段；这样“正文逐字出现”与“完成后带署名”不冲突
+  const renderedAdvice = adviceMutation.data?.advice || streamingAdvice || null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>AI 分析建议</CardTitle>
+        <CardDescription>
+          {llmBlockedReason ?? '本地大模型 · 结论逐字生成'}
+        </CardDescription>
+        {analysisContext ? (
+          <CardAction>
+            <Button
+              type="button"
+              size="sm"
+              disabled={adviceMutation.isPending || Boolean(llmBlockedReason)}
+              onClick={() => adviceMutation.mutate(analysisContext)}
+            >
+              <Sparkles data-icon="inline-start" />
+              {adviceMutation.isPending ? '分析中…' : '开始分析'}
+            </Button>
+          </CardAction>
+        ) : null}
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {adviceError ? (
+          <Alert variant="destructive">
+            <AlertDescription>{adviceError}</AlertDescription>
+          </Alert>
+        ) : null}
+        {renderedAdvice ? (
+          <div className="flex flex-col gap-2">
+            <Markdown className="leading-relaxed">{renderedAdvice}</Markdown>
+            <AdviceFooter adviceMutation={adviceMutation} />
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            基于当前筛选的统计结果调用本地大模型分析。
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
 };
 
 export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
@@ -81,12 +208,9 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
   bins,
   analysisContext,
   adviceMutation,
+  streamingAdvice,
+  llmBlockedReason,
 }) => {
-  const adviceError =
-    adviceMutation.isError && adviceMutation.error instanceof Error
-      ? adviceMutation.error.message
-      : adviceMutation.data?.error ?? null;
-
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border bg-card p-4 shadow-xs">
@@ -98,44 +222,7 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
             {processData?.elapsedMs ?? 0} ms)
           </span>
         </div>
-        <div className="inline-flex rounded-lg border bg-muted/50 p-1 text-muted-foreground">
-          <button
-            type="button"
-            onClick={() => setActiveModule('distribution')}
-            className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${
-              activeModule === 'distribution'
-                ? 'bg-background text-foreground shadow-xs font-semibold'
-                : 'hover:text-foreground'
-            }`}
-          >
-            <Activity className="size-3.5" />
-            1. 测试时间分布
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveModule('boxplot')}
-            className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${
-              activeModule === 'boxplot'
-                ? 'bg-background text-foreground shadow-xs font-semibold'
-                : 'hover:text-foreground'
-            }`}
-          >
-            <BoxSelect className="size-3.5" />
-            2. 机台测试时间箱线图
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveModule('comparison')}
-            className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${
-              activeModule === 'comparison'
-                ? 'bg-background text-foreground shadow-xs font-semibold'
-                : 'hover:text-foreground'
-            }`}
-          >
-            <GitCompare className="size-3.5" />
-            3. 机台数据对比
-          </button>
-        </div>
+        <ModuleTabs activeModule={activeModule} onSelect={setActiveModule} />
         <Button type="button" variant="outline" size="sm" onClick={reset}>
           <RefreshCw data-icon="inline-start" />
           重新上传
@@ -240,43 +327,12 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
                   </dl>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>AI 分析建议</CardTitle>
-                  <CardDescription>本地大模型 · 需已启动 llama.cpp 服务。</CardDescription>
-                  {analysisContext ? (
-                    <CardAction>
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={adviceMutation.isPending}
-                        onClick={() => adviceMutation.mutate(analysisContext)}
-                      >
-                        <Sparkles data-icon="inline-start" />
-                        {adviceMutation.isPending ? '分析中…' : '开始分析'}
-                      </Button>
-                    </CardAction>
-                  ) : null}
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3">
-                  {adviceError ? (
-                    <Alert variant="destructive">
-                      <AlertDescription>{adviceError}</AlertDescription>
-                    </Alert>
-                  ) : adviceMutation.data ? (
-                    <div className="flex flex-col gap-2">
-                      <Markdown className="leading-relaxed">{adviceMutation.data.advice}</Markdown>
-                      <p className="text-xs text-muted-foreground">
-                        {adviceMutation.data.model} · 耗时 {adviceMutation.data.elapsedMs} ms
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      基于当前筛选的统计结果调用本地大模型分析。
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
+              <TtTimeAdviceCard
+                analysisContext={analysisContext}
+                adviceMutation={adviceMutation}
+                streamingAdvice={streamingAdvice}
+                llmBlockedReason={llmBlockedReason}
+              />
             </div>
             <div className="flex min-w-0 flex-col gap-6">
               <Card>

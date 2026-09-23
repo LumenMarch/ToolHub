@@ -7,11 +7,13 @@ import FileDropZone from '@/components/FileDropZone';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTusUpload } from '@/hooks/useTusUpload';
+import { llmUnavailableReason, useLlmStatus } from '@/hooks/useLlmStatus';
 import { LoadingSignal } from '@/components/LoadingSignal';
 import type { HistogramMode } from './charts';
 import type { AnalysisContext, Bin, Stats } from './lib';
 import { makeAnalysisContext } from './analysisWiring';
-import type { ActiveModule, AnalysisResult, BackendProcessResponse, Phase } from './types';
+import { streamTtTimeAnalysis } from './analysisStream';
+import type { ActiveModule, BackendProcessResponse, Phase } from './types';
 import { TtTimeReadyView } from './TtTimeReadyView';
 
 const DEFAULT_BIN_WIDTH = 10;
@@ -27,7 +29,19 @@ const TtTimeTool: React.FC = () => {
   const [binWidthStr, setBinWidthStr] = useState(String(DEFAULT_BIN_WIDTH));
   const [station, setStation] = useState('all');
   const [excludeFail, setExcludeFail] = useState(true);
+  // 流式过程中已到达的正文
+  const [streamingAdvice, setStreamingAdvice] = useState('');
   const processGenRef = useRef(0);
+  // 流式中止句柄：每次 mutation 各持一个 controller，reset / 重选文件 /
+  // 卸载统一经它掐掉旧流，防止旧正文继续写进新数据集的渲染区
+  const adviceAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      adviceAbortRef.current?.abort();
+    },
+    [],
+  );
 
   const binWidth = useMemo(() => {
     const n = Number(binWidthStr.trim());
@@ -83,6 +97,7 @@ const TtTimeTool: React.FC = () => {
   });
 
   const onFileSelect = (file: File) => {
+    stopAdviceStream();
     setFileName(file.name);
     setErrorMessage('');
     setProcessData(null);
@@ -102,6 +117,7 @@ const TtTimeTool: React.FC = () => {
   }, [currentUploadId, binWidth, station, excludeFail, runBackendProcess, phase]);
 
   const reset = () => {
+    stopAdviceStream();
     tusUpload.reset();
     setPhase('upload');
     setCurrentUploadId('');
@@ -126,9 +142,33 @@ const TtTimeTool: React.FC = () => {
   );
 
   const adviceMutation = useMutation({
-    mutationFn: (ctx: AnalysisContext) =>
-      api.post<AnalysisResult>('/tools/tt-time/analyze', ctx).then((r) => r.data),
+    // 流式消费：思考类模型要先思考几百 token 才吐正文，一次性等就是十几秒空白。
+    // onDelta 直接把正文片段追到 streamingAdvice，边生成边渲染。
+    mutationFn: (ctx: AnalysisContext) => {
+      const controller = new AbortController();
+      adviceAbortRef.current = controller;
+      return streamTtTimeAnalysis(ctx, {
+        onDelta: (text) => setStreamingAdvice((prev) => prev + text),
+        signal: controller.signal,
+      });
+    },
+    onMutate: () => {
+      setStreamingAdvice('');
+    },
   });
+
+  // reset / 重选文件时掐掉旧流：reset() 清掉失败态，AbortError 不会残留成
+  // 下个数据集界面上的红色告警
+  const stopAdviceStream = useCallback(() => {
+    adviceAbortRef.current?.abort();
+    adviceAbortRef.current = null;
+    setStreamingAdvice('');
+    adviceMutation.reset();
+  }, [adviceMutation]);
+
+  // 模型服务不可用时直接把按钮置灰并说明原因，而不是让用户填完参数点下去才吃个 503
+  const { data: llmStatus } = useLlmStatus();
+  const llmBlockedReason = llmUnavailableReason(llmStatus);
 
   if (phase === 'upload' || phase === 'analyzing') {
     const isUploading = tusUpload.status === 'uploading';
@@ -208,6 +248,8 @@ const TtTimeTool: React.FC = () => {
       bins={bins}
       analysisContext={analysisContext}
       adviceMutation={adviceMutation}
+      streamingAdvice={streamingAdvice}
+      llmBlockedReason={llmBlockedReason}
     />
   );
 };

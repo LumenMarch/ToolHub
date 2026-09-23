@@ -119,20 +119,57 @@ class Settings(BaseSettings):
     ASSET_COMPARISON_MAX_STORED_JOBS: int = 20
     ASSET_COMPARISON_MAX_STORAGE_BYTES: int = 1024 * 1024 * 1024
 
-    # ===== 本地大模型（TT 时间分析建议）=====
-    # 对接本地 llama.cpp server（或任何 OpenAI 兼容端点）。
-    # 未配置 LLM_BASE_URL 时，/tools/tt-time/analyze 返回 503，前端给出提示。
+    # ===== 本地大模型（全局 LLM 网关的 env 默认层）=====
+    # 这些字段只是「默认层」：运行时可被数据库 llm_config 表逐字段覆盖
+    # （见 app/services/llm/settings.py 与 /api/v1/admin/llm/config），
+    # 覆盖层为空即回落到这里，因此改 env 仍需重启，改管理台不需要。
+    # LLM_PROVIDER 决定用哪套协议：openai_compat（llama.cpp server、
+    # vLLM、Ollama /v1 兼容层）或 ollama（Ollama 原生 /api/chat）。
+    LLM_ENABLED: bool = True
+    LLM_PROVIDER: str = "openai_compat"
     LLM_BASE_URL: str = "http://127.0.0.1:8080/v1"
     LLM_API_KEY: str = ""
     LLM_MODEL: str = "ggml-org/gemma-3-4b-it-qat-GGUF:Q4_0"
+    # 读超时：本地小模型跑满 3 分钟是常态，不要按「HTTP 应当很快」调小。
     LLM_TIMEOUT_SECONDS: float = Field(default=180, gt=0)
-    LLM_MAX_TOKENS: int = Field(default=900, ge=16)
+    LLM_CONNECT_TIMEOUT_SECONDS: float = Field(default=5, gt=0)
+    # 思考类模型的思考 token 计入 max_tokens（实测 llama.cpp server + K2-Horizon-0.9B：
+    # 一句短提示词就花掉 443 个 completion token，而正文只有 12 字）。
+    # 默认值必须同时容下「思考 + 正文」，否则模型会先把预算用光、留下空正文。
+    LLM_MAX_TOKENS: int = Field(default=1500, ge=16)
+    # 分析类结论要可复现，默认取低温；实际输出仍受服务端采样实现影响。
+    LLM_TEMPERATURE: float = Field(default=0.2, ge=0, le=2)
     # OpenAI 兼容端点的思考强度（high/medium/low/max/none）。
     # 置空字符串时不发送该字段（思考类模型保持默认思考；不识别此参数的
     # llama.cpp 等端点也不受影响）。思考类小模型注意把 LLM_MAX_TOKENS 调大，
-    # 并把服务端上下文（Ollama: OLLAMA_CONTEXT_LENGTH；llama.cpp: --ctx-size）
-    # 一起放大，否则推理会先耗尽上下文预算，导致 content 为空。
+    # 并把服务端上下文一起放大，否则推理会先耗尽上下文预算，导致 content 为空。
     LLM_REASONING_EFFORT: str = ""
+    # 上下文窗口（token）。仅 ollama provider 能逐请求生效：Ollama 原生
+    # /api/chat 接受 options.num_ctx，而 OpenAI 兼容层历史上直接忽略 num_ctx
+    # （见 ollama#5356/#6544，转发补丁 ollama#16825 落地前依赖服务端版本）。
+    # 0 表示不发送该字段，此时仍需服务端放大（Ollama: OLLAMA_CONTEXT_LENGTH；
+    # llama.cpp: --ctx-size）。
+    LLM_NUM_CTX: int = Field(default=0, ge=0)
+
+    # 并发闸门：本地单卡模型的真实并发容量就是 1~2，超发只会让请求在
+    # GPU 队列里干等并吃掉 FastAPI sync 端点共享的 40 个线程（实测 anyio
+    # 默认 40 tokens），把全站其它接口一起拖死。因此默认串行 + 有限排队，
+    # 队满立即 429，不做「假装受理」。
+    LLM_MAX_CONCURRENCY: int = Field(default=1, ge=1)
+    LLM_MAX_QUEUED: int = Field(default=8, ge=0)
+    # 只重试瞬时故障（连接失败/超时/429/5xx），4xx 配置类错误立即失败。
+    LLM_MAX_RETRIES: int = Field(default=2, ge=0)
+    LLM_RETRY_BASE_DELAY_SECONDS: float = Field(default=0.5, ge=0)
+    # 熔断：连续失败达到阈值后，在冷却期内直接拒绝而不再压上游
+    # （参照 LiteLLM Router 的 allowed_fails + cooldown_time）。
+    LLM_ALLOWED_FAILURES: int = Field(default=3, ge=1)
+    LLM_COOLDOWN_SECONDS: float = Field(default=60, gt=0)
+    # 结果缓存：切机台筛选来回点时同一统计上下文会重复推理，短 TTL 缓存
+    # 直接消掉这部分开销。进程内 TTL+LRU，不写盘（见 services/llm/cache.py）。
+    LLM_CACHE_TTL_SECONDS: int = Field(default=900, ge=0)
+    LLM_CACHE_MAX_ENTRIES: int = Field(default=128, ge=1)
+    # 探活结果缓存，避免每次 /llm/status 都压一次上游。
+    LLM_HEALTH_CACHE_TTL_SECONDS: float = Field(default=15, ge=0)
 
     # ===== 用户注册审批 =====
     # 注册接口限流（单实例内存滑动窗口，按 IP）。多实例部署时建议在

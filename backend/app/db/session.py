@@ -55,3 +55,18 @@ def ensure_schema_compat() -> None:
             conn.execute(
                 text("UPDATE users SET status = 'approved' WHERE status IS NULL")
             )
+
+        # llm_config 是后加的表：新库由 create_all 直接带上全部列，存量库在这补。
+        # 表还不存在（尚未建表）时跳过，由 create_all 负责建完整结构。
+        llm_columns = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(llm_config)")).fetchall()
+        }
+        if llm_columns and "cache_max_entries" not in llm_columns:
+            conn.execute(
+                text("ALTER TABLE llm_config ADD COLUMN cache_max_entries INTEGER")
+            )
+        if llm_columns and "health_cache_ttl_seconds" not in llm_columns:
+            conn.execute(
+                text("ALTER TABLE llm_config ADD COLUMN health_cache_ttl_seconds FLOAT")
+            )

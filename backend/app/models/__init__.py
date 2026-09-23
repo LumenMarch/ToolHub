@@ -1,6 +1,7 @@
 from app.models.asset_comparison_artifact import AssetComparisonArtifact
 from app.models.asset_comparison_job import AssetComparisonJob
 from app.models.audit_log import AuditLog
+from app.models.llm_config import LlmConfig
 from app.models.notification import Notification
 from app.models.permission import Permission
 from app.models.role import Role
@@ -12,6 +13,7 @@ __all__ = [
     "AssetComparisonArtifact",
     "AssetComparisonJob",
     "AuditLog",
+    "LlmConfig",
     "Notification",
     "Permission",
     "Role",

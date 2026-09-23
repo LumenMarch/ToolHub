@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   ChartBar,
   ClipboardList,
+  Cpu,
   Home,
   LogOut,
   ScrollText,
@@ -40,6 +41,7 @@ const ALL_NAV_ITEMS = [
   { to: '/admin/users', label: '用户', icon: Users, permission: 'user:read' },
   { to: '/admin/audit', label: '审计日志', icon: ScrollText, permission: 'audit:read' },
   { to: '/admin/tools', label: '工具', icon: ClipboardList, permission: 'tool_meta:read' },
+  { to: '/admin/llm', label: '模型服务', icon: Cpu, permission: 'llm_config:read' },
   { to: '/admin/roles', label: '角色管理', icon: ShieldCheck, permission: 'role:read' },
 ] as const
 

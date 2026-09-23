@@ -35,6 +35,10 @@ dependencies = [
     "qrcode[pil]>=8.2",
     "lunar-python>=1.4.8",
     "httpx>=0.28.0",
+    "cachetools>=7.2.0",
+    "tenacity>=9.1.4",
+    "sse-starlette>=3.4.11",
+    "openai>=3.17.0",
 ]
 
 [project.optional-dependencies]

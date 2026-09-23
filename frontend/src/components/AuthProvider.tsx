@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import api from '../api/axios';
 import { realtimeClient } from '../lib/realtime';
 import { useToolsMetaRealtimeInvalidation } from '../hooks/useToolsMeta';
+import { useLlmStatusRealtimeInvalidation } from '../hooks/useLlmStatus';
 import { useNotificationsRealtimeInvalidation } from '../hooks/use-notifications';
 import { AuthContext, type User } from '../context/AuthContext';
 
@@ -11,6 +12,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   useToolsMetaRealtimeInvalidation();
+  useLlmStatusRealtimeInvalidation();
   useNotificationsRealtimeInvalidation();
 
   const login = useCallback((authenticatedUser: User) => {
