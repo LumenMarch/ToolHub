@@ -166,6 +166,15 @@ class _LoopRuntime:
     provider: BaseLlmProvider
     gate: _Gate
     fingerprint: tuple[Any, ...]
+    # 在途/排队引用数：配置变更后旧运行时退休而不是立即关闭，
+    # 等最后一个持有者松手才关 client（见 release_user）
+    users: int = 0
+    retired: bool = False
+
+    async def release_user(self) -> None:
+        self.users -= 1
+        if self.retired and self.users == 0:
+            await self.client.aclose()
 
 
 class LlmGateway:
@@ -222,8 +231,13 @@ class LlmGateway:
 
     # ----- 运行时：按配置指纹复用或重建 -----
 
-    async def _runtime(self, profile: LlmProfile) -> tuple[BaseLlmProvider, _Gate]:
-        """配置未变则复用长生命周期连接池；变了才重建并清缓存。"""
+    async def _runtime(self, profile: LlmProfile) -> _LoopRuntime:
+        """配置未变则复用长生命周期连接池；变了才重建并清缓存。
+
+        重建不掐断在途请求：旧运行时标记退休，引用计数归零才关 client。
+        立即关闭会把还在旧 provider 上跑的推理（最长 180 秒的流式）和
+        排旧闸门队列的请求全打断，一次改配置就可能把自己打进熔断冷却。
+        """
         fingerprint = (
             profile.provider,
             profile.base_url,
@@ -236,15 +250,22 @@ class LlmGateway:
         loop = asyncio.get_running_loop()
         current = self._runtimes.get(loop)
         if current is not None and current.fingerprint == fingerprint:
-            return current.provider, current.gate
+            return current
 
         # 重建锁也是跳循环的：跳循环自己串行化，不需要一把全局锁把所请求串起来
         async with self._loop_lock(self._rebuild_locks, loop):
             current = self._runtimes.get(loop)
             if current is not None and current.fingerprint == fingerprint:
-                return current.provider, current.gate
+                return current
             if current is not None:
-                await current.client.aclose()
+                current.retired = True
+                if current.users == 0:
+                    await current.client.aclose()
+                else:
+                    logger.info(
+                        "LLM 配置已变更，旧运行时还有 {} 个在途/排队请求，等待其自然结束后关闭",
+                        current.users,
+                    )
             # 连接池上限跟着闸门走：池子里堆一堆永远拿不到闸门的连接没有任何好处
             client = httpx.AsyncClient(
                 limits=httpx.Limits(
@@ -272,7 +293,7 @@ class LlmGateway:
                 logger.info(
                     "LLM 配置已变更，重建运行时并清空缓存 {} 条", self.cache.clear()
                 )
-            return runtime.provider, runtime.gate
+            return runtime
 
     @staticmethod
     def _loop_lock(
@@ -317,8 +338,18 @@ class LlmGateway:
                     finish_reason=hit.finish_reason,
                 )
 
-        provider, gate = await self._runtime(profile)
-        await self._enter(profile, gate, source=request.source)
+        runtime = await self._runtime(profile)
+        # 与 _runtime 返回处于同一任务步、中间没有 await：先记引用，
+        # 重建方就不会在这一刻把旧 client 判定为空闲而提前关闭
+        runtime.users += 1
+        provider, gate = runtime.provider, runtime.gate
+        # _enter 的拒绝（闸门满 / 冷却）不是模型失败，不能进熔断记账；
+        # 单独守卫，失败时只归还引用
+        try:
+            await self._enter(profile, gate, source=request.source)
+        except BaseException:
+            await runtime.release_user()
+            raise
         try:
             completion = await self._call_with_retry(provider, request, profile)
         except LlmError as exc:
@@ -326,6 +357,7 @@ class LlmGateway:
             raise
         finally:
             gate.release()
+            await runtime.release_user()
 
         content = clean_model_text(completion.content)
         if not content:
@@ -437,8 +469,15 @@ class LlmGateway:
                 yield LlmChunk(delta=cached.content, is_final=True, result=cached)
                 return
 
-        provider, gate = await self._runtime(profile)
-        await self._enter(profile, gate, source=request.source)
+        runtime = await self._runtime(profile)
+        runtime.users += 1  # 同 complete：先记引用再进闸门
+        provider, gate = runtime.provider, runtime.gate
+        # 同 complete：闸门拒绝不进熔断记账，失败时只归还引用
+        try:
+            await self._enter(profile, gate, source=request.source)
+        except BaseException:
+            await runtime.release_user()
+            raise
         pieces: list[str] = []
         # 流式的重试窗口只到「第一个正文片段」为止：失败点集中在建连与首 token，
         # 已经吐过字再重放会让用户看到重复内容。因此这里不套 tenacity，
@@ -464,16 +503,18 @@ class LlmGateway:
                     self.metrics.record_retry(source=request.source)
                     await asyncio.sleep(profile.retry_base_delay_seconds)
                     continue
-                if first:
-                    pieces.append(first)
-                    yield LlmChunk(delta=first)
                 stream_iter = candidate
                 break
 
             if stream_iter is not None:
                 # aclosing：客户端中途断开时把上游响应连接关掉，
-                # 否则半成品生成器只能等 GC，本地模型服务会堆住连接
+                # 否则半成品生成器只能等 GC，本地模型服务会堆住连接。
+                # 首片段也在这个作用域里产出：消费方可能停在第一次
+                # yield 处就关闭生成器，那之前它必须已被 aclosing 接管
                 async with aclosing(stream_iter):
+                    if first:
+                        pieces.append(first)
+                        yield LlmChunk(delta=first)
                     async for delta in stream_iter:
                         if delta:
                             pieces.append(delta)
@@ -483,6 +524,7 @@ class LlmGateway:
             raise
         finally:
             gate.release()
+            await runtime.release_user()
 
         content = clean_model_text("".join(pieces))
         if not content:
@@ -626,11 +668,20 @@ class LlmGateway:
         gate = runtime.gate if runtime is not None else None
         outcome = await self.probe() if probe and profile.configured else None
         listed = outcome.models if outcome is not None else []
+        cooldown_active = time.monotonic() < self._cooldown_until
+        # available 是前端按钮态的唯一契约字段：冷却中或探活已明确失败
+        # 就不能报「可用」，否则语义只在 enabled+configured 的调用方会被误导
+        available = (
+            profile.enabled
+            and profile.configured
+            and not cooldown_active
+            and (outcome is None or outcome.ok)
+        )
         return {
             "enabled": profile.enabled,
             "configured": profile.configured,
-            "available": profile.enabled and profile.configured,
-            "cooldownActive": time.monotonic() < self._cooldown_until,
+            "available": available,
+            "cooldownActive": cooldown_active,
             "lastError": self._last_error,
             "lastProbe": outcome.as_dict() if outcome is not None else None,
             "modelListed": (profile.model in listed) if listed else None,

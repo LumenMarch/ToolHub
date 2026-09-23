@@ -14,6 +14,25 @@ export interface SseEvent {
   data: string;
 }
 
+/** 推流开始前的非 2xx：保留 HTTP 事实与结构化 detail，别让调用方只剩一句 message。 */
+export class SseHttpError extends Error {
+  readonly status: number;
+  readonly retryAfter: number | null;
+  /** 后端 FastAPI 的 detail 原样保留；LLM 契约在这里就是 {code, message, retryable}。 */
+  readonly detail: unknown;
+
+  constructor(
+    message: string,
+    init: { status: number; retryAfter: number | null; detail: unknown },
+  ) {
+    super(message);
+    this.name = 'SseHttpError';
+    this.status = init.status;
+    this.retryAfter = init.retryAfter;
+    this.detail = init.detail;
+  }
+}
+
 export interface PostSseOptions {
   body: unknown;
   signal?: AbortSignal;
@@ -32,8 +51,10 @@ export async function postSse(path: string, options: PostSseOptions): Promise<vo
   });
 
   if (!response.ok) {
-    // 推流开始前的失败仍然是普通 HTTP 错误（如 400 参数不合法、403 无权限）
-    throw new Error(await readHttpError(response));
+    // 推流开始前的失败仍然是普通 HTTP 错误（如 400 参数不合法、403 无权限），
+    // 但闸门 429 / 冷却 503 也走这里：结构化的 {code, retryable} 和
+    // Retry-After 必须原样带给上层，否则统一重试策略在推流前就断了
+    throw await readHttpError(response);
   }
   if (!response.body) {
     throw new Error('当前浏览器不支持流式响应');
@@ -93,16 +114,25 @@ function parseFrame(frame: string): SseEvent | null {
   return { event, data: dataLines.join('\n') };
 }
 
-async function readHttpError(response: Response): Promise<string> {
+async function readHttpError(response: Response): Promise<SseHttpError> {
+  const retryAfterRaw = response.headers.get('retry-after');
+  const retryAfter = retryAfterRaw !== null ? Number(retryAfterRaw) : null;
+  let message = `请求失败（HTTP ${response.status}）`;
+  let detail: unknown = null;
   try {
     const body = await response.json();
-    const detail = body?.detail;
-    if (typeof detail === 'string') return detail;
-    if (detail && typeof detail === 'object' && 'message' in detail) {
-      return String((detail as { message: unknown }).message);
+    detail = body?.detail;
+    if (typeof detail === 'string') {
+      message = detail;
+    } else if (detail && typeof detail === 'object' && 'message' in detail) {
+      message = String((detail as { message: unknown }).message);
     }
   } catch {
     /* 响应体不是 JSON 时退回状态码文案 */
   }
-  return `请求失败（HTTP ${response.status}）`;
+  return new SseHttpError(message, {
+    status: response.status,
+    retryAfter: retryAfter !== null && Number.isFinite(retryAfter) ? retryAfter : null,
+    detail,
+  });
 }

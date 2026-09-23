@@ -151,12 +151,14 @@ const TtTimeAdviceCard: React.FC<AdviceCardProps> = ({
               <p className="text-xs text-muted-foreground">
                 {adviceMutation.data.model} · 耗时 {adviceMutation.data.elapsedMs} ms
               </p>
-            ) : (
+            ) : adviceMutation.isPending ? (
+              // 只有请求还挂着才显示“思考中”：流内 error 之后 mutation 已失败，
+              // 再转圈就是在骗用户
               <p className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Spinner className="size-3" />
                 模型思考中，正文逐字输出…
               </p>
-            )}
+            ) : null}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">

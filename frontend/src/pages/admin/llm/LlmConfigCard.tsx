@@ -198,7 +198,10 @@ const LlmField: React.FC<FieldProps> = (props) => {
         ) : null}
       </FieldLabel>
       <LlmFieldControl {...props} />
-      {spec.kind === 'secret' && props.apiKeySet ? <ClearSecretKey {...props} /> : null}
+      {/* 清除按钮只针对数据库覆盖层。apiKeySet 含 env 密钥：env-only 时
+          勾选后提交的 api_key: null 只会“恢复继承 env”，密钥纹丝不动，
+          控件必须按 overridden 判定 */}
+      {spec.kind === 'secret' && overridden ? <ClearSecretKey {...props} /> : null}
       <p className="text-xs text-muted-foreground">{spec.hint}</p>
     </Field>
   );
