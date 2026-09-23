@@ -129,6 +129,7 @@ const RetestRateTool: React.FC = () => {
           <FileDropZone
             id="retest-rate-files"
             label="测试数据 CSV"
+            compact
             description="拖放 .csv 文件到此处，或点击选择（可多选）"
             accept=".csv,text/csv"
             file={null}

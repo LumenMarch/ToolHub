@@ -18,6 +18,8 @@ interface FileDropZoneProps {
   multiple?: boolean
   onSelectMultiple?: (files: File[]) => void
   fileNameClassName?: string
+  /** 紧凑模式：单行高度，适用于下方已有文件列表、无需大面积拖放区的场景 */
+  compact?: boolean
 }
 
 function formatSize(bytes: number): string {
@@ -28,6 +30,7 @@ function formatSize(bytes: number): string {
 
 const FileDropZone: React.FC<FileDropZoneProps> = ({
   accept,
+  compact = false,
   description,
   directory = false,
   disabled = false,
@@ -121,7 +124,10 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
         aria-disabled={disabled || undefined}
         aria-describedby={`${id}-description`}
         className={cn(
-          'flex min-h-48 w-full flex-col justify-center gap-3 rounded-xl border border-dashed p-6 text-left transition-colors',
+          'flex w-full rounded-xl border border-dashed text-left transition-colors',
+          compact
+            ? 'items-center gap-3 p-3'
+            : 'min-h-48 flex-col justify-center gap-3 p-6',
           disabled && 'cursor-not-allowed opacity-50',
           isDragging
             ? 'border-primary bg-primary/5'
@@ -130,21 +136,43 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
               : 'border-border bg-card hover:bg-muted/40',
         )}
       >
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-medium">{label}</span>
-          {hasFile ? null : <Upload className="size-4 text-muted-foreground" />}
-        </div>
-        <div className="min-w-0">
-          <p className={cn('truncate font-medium', fileNameClassName)}>
-            {hasFile ? file.name : '拖放或选择文件'}
-          </p>
-          <p
-            id={`${id}-description`}
-            className="mt-1 text-sm text-muted-foreground"
-          >
-            {hasFile ? formatSize(file.size) : description}
-          </p>
-        </div>
+        {compact ? (
+          <>
+            <Upload className="size-4 shrink-0 text-muted-foreground" />
+            <div className="flex min-w-0 flex-1 items-baseline gap-2">
+              <span className="shrink-0 text-sm font-medium">{label}</span>
+              <span
+                id={`${id}-description`}
+                className={cn(
+                  'truncate text-sm',
+                  hasFile
+                    ? cn('font-medium', fileNameClassName)
+                    : 'text-muted-foreground',
+                )}
+              >
+                {hasFile ? `${file.name}（${formatSize(file.size)}）` : description}
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium">{label}</span>
+              {hasFile ? null : <Upload className="size-4 text-muted-foreground" />}
+            </div>
+            <div className="min-w-0">
+              <p className={cn('truncate font-medium', fileNameClassName)}>
+                {hasFile ? file.name : '拖放或选择文件'}
+              </p>
+              <p
+                id={`${id}-description`}
+                className="mt-1 text-sm text-muted-foreground"
+              >
+                {hasFile ? formatSize(file.size) : description}
+              </p>
+            </div>
+          </>
+        )}
       </div>
       {hasFile && onClear ? (
         <Button
