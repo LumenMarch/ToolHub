@@ -628,32 +628,39 @@ class LlmGateway:
                     checked_at=now,
                 )
             else:
-                provider, _gate = await self._runtime(profile)
+                # 探活同样经当前 provider 出网，也要占一个引用：否则改配置时
+                # 旧运行时就地关 client，会把正在跑的 /models 请求掐掉
+                runtime = await self._runtime(profile)
+                runtime.users += 1
                 try:
-                    models = await provider.list_models()
-                except LlmError as exc:
-                    # 4xx/5xx 说明 TCP 与端口是通的，只有连接类错误才是真不可达
-                    outcome = ProbeOutcome(
-                        ok=False,
-                        reachable=exc.code != "llm_unreachable",
-                        error=exc.message,
-                        checked_at=now,
-                    )
-                else:
-                    # 能力跟模型服务走，不跟请求走：同一次探活顺带拉一次，
-                    # 结果跟着 probe 缓存一起复用，不会每次状态查询都打 /props
+                    provider = runtime.provider
                     try:
-                        capabilities = await provider.capabilities()
+                        models = await provider.list_models()
                     except LlmError as exc:
-                        logger.debug("读取服务端能力失败（不影响探活）: {}", exc)
-                        capabilities = None
-                    outcome = ProbeOutcome(
-                        ok=True,
-                        reachable=True,
-                        models=models,
-                        checked_at=now,
-                        capabilities=capabilities,
-                    )
+                        # 4xx/5xx 说明 TCP 与端口是通的，只有连接类错误才是真不可达
+                        outcome = ProbeOutcome(
+                            ok=False,
+                            reachable=exc.code != "llm_unreachable",
+                            error=exc.message,
+                            checked_at=now,
+                        )
+                    else:
+                        # 能力跟模型服务走，不跟请求走：同一次探活顺带拉一次，
+                        # 结果跟着 probe 缓存一起复用，不会每次状态查询都打 /props
+                        try:
+                            capabilities = await provider.capabilities()
+                        except LlmError as exc:
+                            logger.debug("读取服务端能力失败（不影响探活）: {}", exc)
+                            capabilities = None
+                        outcome = ProbeOutcome(
+                            ok=True,
+                            reachable=True,
+                            models=models,
+                            checked_at=now,
+                            capabilities=capabilities,
+                        )
+                finally:
+                    await runtime.release_user()
             self._probe = outcome
             return outcome
 
