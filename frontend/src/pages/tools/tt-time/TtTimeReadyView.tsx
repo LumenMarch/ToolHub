@@ -66,6 +66,108 @@ export type TtTimeReadyViewProps = {
   llmBlockedReason: string | null;
 };
 
+const MODULE_TABS: { id: ActiveModule; label: string; Icon: typeof Activity }[] = [
+  { id: 'distribution', label: '1. 测试时间分布', Icon: Activity },
+  { id: 'boxplot', label: '2. 机台测试时间箱线图', Icon: BoxSelect },
+  { id: 'comparison', label: '3. 机台数据对比', Icon: GitCompare },
+];
+
+/** 模块切换的胶囊 tab 组。 */
+const ModuleTabs: React.FC<{
+  activeModule: ActiveModule;
+  onSelect: (module: ActiveModule) => void;
+}> = ({ activeModule, onSelect }) => (
+  <div className="inline-flex rounded-lg border bg-muted/50 p-1 text-muted-foreground">
+    {MODULE_TABS.map(({ id, label, Icon }) => (
+      <button
+        key={id}
+        type="button"
+        onClick={() => onSelect(id)}
+        className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${
+          activeModule === id
+            ? 'bg-background text-foreground shadow-xs font-semibold'
+            : 'hover:text-foreground'
+        }`}
+      >
+        <Icon className="size-3.5" />
+        {label}
+      </button>
+    ))}
+  </div>
+);
+
+interface AdviceCardProps {
+  analysisContext: AnalysisContext | null;
+  adviceMutation: UseMutationResult<AnalysisResult, Error, AnalysisContext, unknown>;
+  /** 流式过程中已到达的正文（done 之后以 data.advice 为准） */
+  streamingAdvice: string;
+  llmBlockedReason: string | null;
+}
+
+const TtTimeAdviceCard: React.FC<AdviceCardProps> = ({
+  analysisContext,
+  adviceMutation,
+  streamingAdvice,
+  llmBlockedReason,
+}) => {
+  const adviceError =
+    adviceMutation.isError && adviceMutation.error instanceof Error
+      ? adviceMutation.error.message
+      : adviceMutation.data?.error ?? null;
+  // 先取完整结果，没结果时用流式片段；这样“正文逐字出现”与“完成后带署名”不冲突
+  const renderedAdvice = adviceMutation.data?.advice || streamingAdvice || null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>AI 分析建议</CardTitle>
+        <CardDescription>
+          {llmBlockedReason ?? '本地大模型 · 结论逐字生成'}
+        </CardDescription>
+        {analysisContext ? (
+          <CardAction>
+            <Button
+              type="button"
+              size="sm"
+              disabled={adviceMutation.isPending || Boolean(llmBlockedReason)}
+              onClick={() => adviceMutation.mutate(analysisContext)}
+            >
+              <Sparkles data-icon="inline-start" />
+              {adviceMutation.isPending ? '分析中…' : '开始分析'}
+            </Button>
+          </CardAction>
+        ) : null}
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {adviceError ? (
+          <Alert variant="destructive">
+            <AlertDescription>{adviceError}</AlertDescription>
+          </Alert>
+        ) : null}
+        {renderedAdvice ? (
+          <div className="flex flex-col gap-2">
+            <Markdown className="leading-relaxed">{renderedAdvice}</Markdown>
+            {adviceMutation.data ? (
+              <p className="text-xs text-muted-foreground">
+                {adviceMutation.data.model} · 耗时 {adviceMutation.data.elapsedMs} ms
+              </p>
+            ) : (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Spinner className="size-3" />
+                模型思考中，正文逐字输出…
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            基于当前筛选的统计结果调用本地大模型分析。
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
 export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
   fileName,
   processData,
@@ -89,13 +191,6 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
   streamingAdvice,
   llmBlockedReason,
 }) => {
-  const adviceError =
-    adviceMutation.isError && adviceMutation.error instanceof Error
-      ? adviceMutation.error.message
-      : adviceMutation.data?.error ?? null;
-  // 先取完整结果，没结果时用流式片段；这样“正文逐字出现”与“完成后带署名”不冲突
-  const renderedAdvice = adviceMutation.data?.advice || streamingAdvice || null;
-
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border bg-card p-4 shadow-xs">
@@ -107,44 +202,7 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
             {processData?.elapsedMs ?? 0} ms)
           </span>
         </div>
-        <div className="inline-flex rounded-lg border bg-muted/50 p-1 text-muted-foreground">
-          <button
-            type="button"
-            onClick={() => setActiveModule('distribution')}
-            className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${
-              activeModule === 'distribution'
-                ? 'bg-background text-foreground shadow-xs font-semibold'
-                : 'hover:text-foreground'
-            }`}
-          >
-            <Activity className="size-3.5" />
-            1. 测试时间分布
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveModule('boxplot')}
-            className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${
-              activeModule === 'boxplot'
-                ? 'bg-background text-foreground shadow-xs font-semibold'
-                : 'hover:text-foreground'
-            }`}
-          >
-            <BoxSelect className="size-3.5" />
-            2. 机台测试时间箱线图
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveModule('comparison')}
-            className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium ${
-              activeModule === 'comparison'
-                ? 'bg-background text-foreground shadow-xs font-semibold'
-                : 'hover:text-foreground'
-            }`}
-          >
-            <GitCompare className="size-3.5" />
-            3. 机台数据对比
-          </button>
-        </div>
+        <ModuleTabs activeModule={activeModule} onSelect={setActiveModule} />
         <Button type="button" variant="outline" size="sm" onClick={reset}>
           <RefreshCw data-icon="inline-start" />
           重新上传
@@ -249,53 +307,12 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
                   </dl>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>AI 分析建议</CardTitle>
-                  <CardDescription>
-                    {llmBlockedReason ?? '本地大模型 · 结论逐字生成'}
-                  </CardDescription>
-                  {analysisContext ? (
-                    <CardAction>
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={adviceMutation.isPending || Boolean(llmBlockedReason)}
-                        onClick={() => adviceMutation.mutate(analysisContext)}
-                      >
-                        <Sparkles data-icon="inline-start" />
-                        {adviceMutation.isPending ? '分析中…' : '开始分析'}
-                      </Button>
-                    </CardAction>
-                  ) : null}
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3">
-                  {adviceError ? (
-                    <Alert variant="destructive">
-                      <AlertDescription>{adviceError}</AlertDescription>
-                    </Alert>
-                  ) : null}
-                  {renderedAdvice ? (
-                    <div className="flex flex-col gap-2">
-                      <Markdown className="leading-relaxed">{renderedAdvice}</Markdown>
-                      {adviceMutation.data ? (
-                        <p className="text-xs text-muted-foreground">
-                          {adviceMutation.data.model} · 耗时 {adviceMutation.data.elapsedMs} ms
-                        </p>
-                      ) : (
-                        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Spinner className="size-3" />
-                          模型思考中，正文逐字输出…
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      基于当前筛选的统计结果调用本地大模型分析。
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
+              <TtTimeAdviceCard
+                analysisContext={analysisContext}
+                adviceMutation={adviceMutation}
+                streamingAdvice={streamingAdvice}
+                llmBlockedReason={llmBlockedReason}
+              />
             </div>
             <div className="flex min-w-0 flex-col gap-6">
               <Card>

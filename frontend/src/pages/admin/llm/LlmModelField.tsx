@@ -24,6 +24,71 @@ interface Props {
   onChange: (value: string) => void;
 }
 
+/** 名字不在服务端列表里：单模型 llama.cpp 会忽略 model 字段所以照样能跑，
+ * 但这颗雷会在服务端挂第二个模型时炸，必须显式提醒而不是静默通过。 */
+function isNotListed({
+  loading,
+  value,
+  models,
+}: {
+  loading: boolean;
+  value: string;
+  models: string[];
+}): boolean {
+  return !loading && value.trim() !== '' && models.length > 0 && !models.includes(value);
+}
+
+interface ModelListProps {
+  loading: boolean;
+  error: string | null;
+  models: string[];
+  filtered: string[];
+  selected: string;
+  onPick: (name: string) => void;
+}
+
+/** 下拉面板正文：加载中 / 出错 / 空列表 / 列表，四态之一。 */
+const ModelList: React.FC<ModelListProps> = ({
+  loading,
+  error,
+  models,
+  filtered,
+  selected,
+  onPick,
+}) => {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
+        <Spinner />
+        正在读取服务端模型列表…
+      </div>
+    );
+  }
+  if (error) {
+    return <div className="px-3 py-4 text-sm text-destructive">{error}</div>;
+  }
+  if (filtered.length === 0) {
+    return (
+      <CommandEmpty>{models.length ? '没有匹配的模型名' : '服务端未返回模型列表'}</CommandEmpty>
+    );
+  }
+  return (
+    <CommandGroup heading={`服务端模型（${models.length}）`}>
+      {filtered.map((name) => (
+        <CommandItem
+          key={name}
+          value={name}
+          onSelect={() => onPick(name)}
+          className="font-mono text-xs"
+        >
+          <Check className={name === selected ? 'opacity-100' : 'opacity-0'} />
+          {name}
+        </CommandItem>
+      ))}
+    </CommandGroup>
+  );
+};
+
 /**
  * 模型名选择器：可手输 + 从服务端模型列表里挑。
  *
@@ -71,10 +136,7 @@ export const LlmModelField: React.FC<Props> = ({ id, value, envDefault, onChange
     return models.filter((name) => name.toLowerCase().includes(needle));
   }, [models, query]);
 
-  // 名字不在服务端列表里：单模型 llama.cpp 会忽略 model 字段所以照样能跑，
-  // 但这颗雷会在服务端挂第二个模型时炸，必须显式提醒而不是静默通过。
-  const notListed =
-    !loading && value.trim() !== '' && models.length > 0 && !models.includes(value);
+  const notListed = isNotListed({ loading, value, models });
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -106,40 +168,17 @@ export const LlmModelField: React.FC<Props> = ({ id, value, envDefault, onChange
                 onValueChange={setQuery}
               />
               <CommandList>
-                {loading ? (
-                  <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
-                    <Spinner />
-                    正在读取服务端模型列表…
-                  </div>
-                ) : null}
-                {!loading && error ? (
-                  <div className="px-3 py-4 text-sm text-destructive">{error}</div>
-                ) : null}
-                {!loading && !error && filtered.length === 0 ? (
-                  <CommandEmpty>
-                    {models.length ? '没有匹配的模型名' : '服务端未返回模型列表'}
-                  </CommandEmpty>
-                ) : null}
-                {!loading && filtered.length > 0 ? (
-                  <CommandGroup heading={`服务端模型（${models.length}）`}>
-                    {filtered.map((name) => (
-                      <CommandItem
-                        key={name}
-                        value={name}
-                        onSelect={() => {
-                          onChange(name);
-                          setOpen(false);
-                        }}
-                        className="font-mono text-xs"
-                      >
-                        <Check
-                          className={name === value ? 'opacity-100' : 'opacity-0'}
-                        />
-                        {name}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                ) : null}
+                <ModelList
+                  loading={loading}
+                  error={error}
+                  models={models}
+                  filtered={filtered}
+                  selected={value}
+                  onPick={(name) => {
+                    onChange(name);
+                    setOpen(false);
+                  }}
+                />
               </CommandList>
               {!loading && !error ? (
                 <div className="border-t px-3 py-2 text-xs text-muted-foreground">

@@ -14,7 +14,11 @@ import {
 } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/spinner';
 import { llmUnavailableReason } from '@/hooks/useLlmStatus';
-import type { LlmEffectiveConfig, LlmStatus } from '../../../types/llm';
+import type {
+  LlmCapabilities,
+  LlmEffectiveConfig,
+  LlmStatus,
+} from '../../../types/llm';
 import { useAdminApi } from '../hooks/use-admin-api';
 import { describeThinkingCaps } from './fields';
 
@@ -30,12 +34,8 @@ export const LlmStatusCard: React.FC<Props> = ({ status, effective, onProbed }) 
   const [probing, setProbing] = useState(false);
   const blockedReason = llmUnavailableReason(status);
   const caps = status?.lastProbe?.capabilities ?? null;
-  // 闸门容量超过服务端实际槽位时，多出来的请求只是换地方排队：界面得说明白，
-  // 否则管理员会把「改了 max_concurrency 却没变快」当成网关有问题
-  const overSlots =
-    caps?.totalSlots != null && effective.maxConcurrency > caps.totalSlots
-      ? `并发容量 ${effective.maxConcurrency} 超过服务端 ${caps.totalSlots} 个槽位（total_slots），多出来的请求只会在服务端排队`
-      : null;
+  const overSlots = overSlotsWarning(caps, effective.maxConcurrency);
+  const errorCodes = errorCodesLabel(status);
   const handleProbe = useCallback(() => {
     setProbing(true);
     api
@@ -78,33 +78,11 @@ export const LlmStatusCard: React.FC<Props> = ({ status, effective, onProbed }) 
           <Stat label="协议" value={effective.provider} />
           <Stat label="模型" value={effective.model || '(未设置)'} mono />
           <Stat label="服务地址" value={effective.baseUrl || '(未设置)'} mono />
-          <Stat
-            label="配置来源"
-            value={effective.source === 'db' ? '数据库覆盖' : 'env 默认'}
-          />
-          <Stat
-            label="服务端上报 n_ctx"
-            value={caps?.nCtx != null ? String(caps.nCtx) : '未上报'}
-          />
-          <Stat
-            label="服务端口数 / 构建"
-            value={
-              caps
-                ? `${caps.totalSlots ?? '?'} / ${caps.buildInfo ?? '?'}`
-                : '未上报'
-            }
-          />
+          <Stat label="配置来源" value={configSourceLabel(effective.source)} />
+          <Stat label="服务端上报 n_ctx" value={nCtxLabel(caps)} />
+          <Stat label="服务端口数 / 构建" value={slotsStatLabel(caps)} />
           <Stat label="思考能力" value={describeThinkingCaps(caps)} />
-          <Stat
-            label="探活"
-            value={
-              status?.lastProbe
-                ? status.lastProbe.ok
-                  ? `正常（${status.lastProbe.models.length} 个模型）`
-                  : (status.lastProbe.error ?? '失败')
-                : '尚未探活'
-            }
-          />
+          <Stat label="探活" value={probeStatLabel(status)} />
           <Stat
             label="在途 / 排队"
             value={`${status?.gate.inflight ?? 0} / ${status?.gate.queued ?? 0}`}
@@ -131,18 +109,49 @@ export const LlmStatusCard: React.FC<Props> = ({ status, effective, onProbed }) 
         {overSlots ? (
           <p className="mt-3 text-xs text-amber-600 dark:text-amber-500">{overSlots}</p>
         ) : null}
-        {status && Object.keys(status.metrics.errorCodes).length > 0 ? (
-          <p className="mt-3 text-xs text-muted-foreground">
-            错误分布：
-            {Object.entries(status.metrics.errorCodes)
-              .map(([code, count]) => `${code}×${count}`)
-              .join('，')}
-          </p>
+        {errorCodes ? (
+          <p className="mt-3 text-xs text-muted-foreground">错误分布：{errorCodes}</p>
         ) : null}
       </CardContent>
     </Card>
   );
 };
+
+function configSourceLabel(source: LlmEffectiveConfig['source']): string {
+  return source === 'db' ? '数据库覆盖' : 'env 默认';
+}
+
+function nCtxLabel(caps: LlmCapabilities | null): string {
+  return caps?.nCtx != null ? String(caps.nCtx) : '未上报';
+}
+
+function slotsStatLabel(caps: LlmCapabilities | null): string {
+  return caps ? `${caps.totalSlots ?? '?'} / ${caps.buildInfo ?? '?'}` : '未上报';
+}
+
+function probeStatLabel(status: LlmStatus | undefined): string {
+  const probe = status?.lastProbe;
+  if (!probe) return '尚未探活';
+  return probe.ok ? `正常（${probe.models.length} 个模型）` : (probe.error ?? '失败');
+}
+
+// 闸门容量超过服务端实际槽位时，多出来的请求只是换地方排队：界面得说明白，
+// 否则管理员会把「改了 max_concurrency 却没变快」当成网关有问题
+function overSlotsWarning(
+  caps: LlmCapabilities | null,
+  maxConcurrency: number,
+): string | null {
+  if (caps?.totalSlots == null || maxConcurrency <= caps.totalSlots) return null;
+  return `并发容量 ${maxConcurrency} 超过服务端 ${caps.totalSlots} 个槽位（total_slots），多出来的请求只会在服务端排队`;
+}
+
+function errorCodesLabel(status: LlmStatus | undefined): string | null {
+  const codes = status?.metrics.errorCodes;
+  if (!codes || Object.keys(codes).length === 0) return null;
+  return Object.entries(codes)
+    .map(([code, count]) => `${code}×${count}`)
+    .join('，');
+}
 
 function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (

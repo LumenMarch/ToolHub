@@ -185,28 +185,30 @@ interface FieldProps {
   onChange: (key: FieldKey, value: string) => void;
 }
 
-const LlmField: React.FC<FieldProps> = ({
-  spec,
-  value,
-  overridden,
-  envDefault,
-  apiKeySet,
-  apiKeyMask,
-  clearApiKey,
-  capabilities,
-  onClearApiKeyChange,
-  onChange,
-}) => (
-  <Field>
-    <FieldLabel htmlFor={spec.key} className="flex items-center gap-2">
-      {spec.label}
-      {overridden ? (
-        <Badge variant="secondary" className="text-[10px]">
-          已覆盖
-        </Badge>
-      ) : null}
-    </FieldLabel>
-    {spec.kind === 'select' ? (
+const LlmField: React.FC<FieldProps> = (props) => {
+  const { spec, overridden } = props;
+  return (
+    <Field>
+      <FieldLabel htmlFor={spec.key} className="flex items-center gap-2">
+        {spec.label}
+        {overridden ? (
+          <Badge variant="secondary" className="text-[10px]">
+            已覆盖
+          </Badge>
+        ) : null}
+      </FieldLabel>
+      <LlmFieldControl {...props} />
+      {spec.kind === 'secret' && props.apiKeySet ? <ClearSecretKey {...props} /> : null}
+      <p className="text-xs text-muted-foreground">{spec.hint}</p>
+    </Field>
+  );
+};
+
+/** 按字段类型分发到具体控件；每个叶子控件保持单一职责。 */
+const LlmFieldControl: React.FC<FieldProps> = (props) => {
+  const { spec, value, envDefault, capabilities, onChange } = props;
+  if (spec.kind === 'select') {
+    return (
       <Select
         value={value === INHERIT ? INHERIT_OPTION : value}
         onValueChange={(next) =>
@@ -224,7 +226,10 @@ const LlmField: React.FC<FieldProps> = ({
           ))}
         </SelectContent>
       </Select>
-    ) : spec.kind === 'thinking' ? (
+    );
+  }
+  if (spec.kind === 'thinking') {
+    return (
       <LlmThinkingField
         id={spec.key}
         value={value}
@@ -232,38 +237,53 @@ const LlmField: React.FC<FieldProps> = ({
         capabilities={capabilities}
         onChange={(next) => onChange(spec.key, next)}
       />
-    ) : spec.kind === 'model' ? (
+    );
+  }
+  if (spec.kind === 'model') {
+    return (
       <LlmModelField
         id={spec.key}
         value={value}
         envDefault={envDefault}
         onChange={(next) => onChange(spec.key, next)}
       />
-    ) : (
-      <Input
-        id={spec.key}
-        type={
-          spec.kind === 'number' ? 'number' : spec.kind === 'secret' ? 'password' : 'text'
-        }
-        value={value}
-        placeholder={
-          spec.kind === 'secret' ? (apiKeySet ? `已保存 ${apiKeyMask}` : '未设置') : envDefault
-        }
-        onChange={(event) => onChange(spec.key, event.target.value)}
-      />
-    )}
-    {spec.kind === 'secret' && apiKeySet ? (
-      <label className="flex items-center gap-2 text-xs text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={clearApiKey}
-          onChange={(event) => onClearApiKeyChange(event.target.checked)}
-        />
-        清除已保存的密钥
-      </label>
-    ) : null}
-    <p className="text-xs text-muted-foreground">{spec.hint}</p>
-  </Field>
+    );
+  }
+  return <LlmInputControl {...props} />;
+};
+
+/** number / text / secret 三种 Input 形态。 */
+const LlmInputControl: React.FC<FieldProps> = ({
+  spec,
+  value,
+  envDefault,
+  apiKeySet,
+  apiKeyMask,
+  onChange,
+}) => (
+  <Input
+    id={spec.key}
+    type={spec.kind === 'number' ? 'number' : spec.kind === 'secret' ? 'password' : 'text'}
+    value={value}
+    placeholder={
+      spec.kind === 'secret' ? (apiKeySet ? `已保存 ${apiKeyMask}` : '未设置') : envDefault
+    }
+    onChange={(event) => onChange(spec.key, event.target.value)}
+  />
+);
+
+const ClearSecretKey: React.FC<Pick<FieldProps, 'clearApiKey' | 'onClearApiKeyChange'>> = ({
+  clearApiKey,
+  onClearApiKeyChange,
+}) => (
+  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+    <input
+      type="checkbox"
+      checked={clearApiKey}
+      onChange={(event) => onClearApiKeyChange(event.target.checked)}
+    />
+    清除已保存的密钥
+  </label>
 );
 
 function readDetail(exc: unknown): string | null {
