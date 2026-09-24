@@ -19,6 +19,7 @@ import React, {
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
@@ -352,6 +353,25 @@ const useDesktopTable = () => {
   return isDesktop;
 };
 
+/**
+ * 「查看全部数据」的展开容器。
+ *
+ * 原来用 hidden 硬开合：整张表凭空出现/消失。改成 Radix Collapsible 后高度补间，
+ * 关闭时内容真的卸载（筛选/翻页状态在本组件里，不会丢），外边距随元素一起消失。
+ */
+const AttendanceDetailsCollapse: React.FC<{
+  open: boolean;
+  children: React.ReactNode;
+}> = ({ open, children }) => (
+  <Collapsible open={open}>
+    <section aria-label="全部分析数据">
+      <CollapsibleContent id="attendance-all-data" asChild>
+        {children}
+      </CollapsibleContent>
+    </section>
+  </Collapsible>
+);
+
 const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
   analysis,
   isVisible,
@@ -401,13 +421,8 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
   );
 
   return (
-    <section
-      id="attendance-all-data"
-      hidden={!isVisible}
-      aria-label="全部分析数据"
-      className="mt-6 pt-2"
-    >
-      <div className="flex flex-col gap-6">
+    <AttendanceDetailsCollapse open={isVisible}>
+      <div className="mt-6 flex flex-col gap-6 pt-2">
         <div
           className="flex flex-wrap gap-2"
           aria-label="选择工作表"
@@ -596,7 +611,7 @@ const AttendanceDataBrowser: React.FC<AttendanceDataBrowserProps> = ({
           </div>
         </div>
       </div>
-    </section>
+    </AttendanceDetailsCollapse>
   );
 };
 
@@ -833,7 +848,10 @@ const AttendanceOrganizer: React.FC = () => {
 
         {phase === 'ready' && analysis && (
           <>
-            <section className="overflow-hidden rounded-xl border bg-card" aria-labelledby="attendance-result-title">
+            <section
+              className="animate-in overflow-hidden rounded-xl border bg-card animation-duration-200 fade-in-0 fill-mode-backwards slide-in-from-bottom-1 ease-out-strong"
+              aria-labelledby="attendance-result-title"
+            >
               <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
                 <div className="min-w-0 p-6">
                   <div className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
@@ -905,7 +923,7 @@ const AttendanceOrganizer: React.FC = () => {
                     variant="outline"
                     className="mt-6"
                     aria-expanded={isDetailsVisible}
-                    aria-controls="attendance-all-data"
+                    aria-controls={isDetailsVisible ? 'attendance-all-data' : undefined}
                     onClick={() => setIsDetailsVisible((current) => !current)}
                   >
                     {isDetailsVisible ? '收起全部数据' : '查看全部数据'}
