@@ -1,10 +1,8 @@
-import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowUpRight, Wrench } from 'lucide-react'
 
 import { LoadingSignal } from '@/components/LoadingSignal'
 import { PageHeader } from '@/components/PageHeader'
-import { Button } from '@/components/ui/button'
 import {
   Card,
   CardDescription,
@@ -20,14 +18,6 @@ import {
 } from '@/components/ui/empty'
 import type { ToolDefinition } from '@/config/tools'
 import { useVisibleTools } from '@/hooks/useToolsMeta'
-
-const PINNED_TOOL_IDS = new Set([
-  'asset-comparison',
-  'attendance-organizer',
-  'atlas-merge',
-  'cpk-charts',
-])
-const OTHERS_STORAGE_KEY = 'toolhub-console-other-collapsed'
 
 const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
   const Icon = tool.icon
@@ -49,18 +39,6 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
 
 const Dashboard: React.FC = () => {
   const { visibleTools, isPending, hasAccess } = useVisibleTools()
-  const [otherCollapsed, setOtherCollapsed] = useState<boolean>(() => {
-    return localStorage.getItem(OTHERS_STORAGE_KEY) !== 'false'
-  })
-
-  const pinnedTools = visibleTools.filter((tool) => PINNED_TOOL_IDS.has(tool.id))
-  const otherTools = visibleTools.filter((tool) => !PINNED_TOOL_IDS.has(tool.id))
-
-  const toggleOthers = () => {
-    const next = !otherCollapsed
-    setOtherCollapsed(next)
-    localStorage.setItem(OTHERS_STORAGE_KEY, String(next))
-  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -83,48 +61,11 @@ const Dashboard: React.FC = () => {
           </EmptyHeader>
         </Empty>
       ) : (
-        <>
-          {pinnedTools.length > 0 ? (
-            <section className="flex flex-col gap-4" aria-label="常用工具">
-              <h2 className="text-sm font-medium text-muted-foreground">常用</h2>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {pinnedTools.map((tool) => (
-                  <ToolCard key={tool.id} tool={tool} />
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {otherTools.length > 0 ? (
-            <section className="flex flex-col gap-4" aria-label="其它工具">
-              <div className="flex items-center justify-between gap-4">
-                <h2 className="text-sm font-medium text-muted-foreground">
-                  其它工具
-                </h2>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={toggleOthers}
-                  aria-expanded={!otherCollapsed}
-                  aria-controls="other-tools-grid"
-                >
-                  {otherCollapsed ? '展开' : '收起'}
-                </Button>
-              </div>
-              {otherCollapsed ? null : (
-                <div
-                  id="other-tools-grid"
-                  className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
-                >
-                  {otherTools.map((tool) => (
-                    <ToolCard key={tool.id} tool={tool} />
-                  ))}
-                </div>
-              )}
-            </section>
-          ) : null}
-        </>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {visibleTools.map((tool) => (
+            <ToolCard key={tool.id} tool={tool} />
+          ))}
+        </div>
       )}
     </div>
   )
