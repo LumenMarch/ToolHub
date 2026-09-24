@@ -196,11 +196,15 @@ const RetestRateTool: React.FC = () => {
       </Card>
 
       {result ? (
-        <ResultPanel
-          result={result}
-          reasons={reasons}
-          onReasonChange={handleReasonChange}
-        />
+        // 结果是一整块在任务结束时出现的，用与主页同一份入场语汇补上这一跳。
+        // 包一层 flex-col gap-6：外层也是 gap-6，间距与包裹前完全一致。
+        <div className="flex animate-in fade-in-0 flex-col gap-6 animation-duration-200 fill-mode-backwards slide-in-from-bottom-1 ease-out-strong">
+          <ResultPanel
+            result={result}
+            reasons={reasons}
+            onReasonChange={handleReasonChange}
+          />
+        </div>
       ) : null}
     </div>
   )

@@ -137,6 +137,30 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* 强 ease-out：内置 ease-out 太弱，动画起手没有力度 */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* 折叠区（Radix Collapsible）高度动画：这里只覆盖时长与曲线，出场比入场快。
+   高度动画走 layout，是折叠区少见的可接受例外——位移本身就是要表达的信息。
+
+   keyframes 不在这里重写：shadcn/tailwind.css 已提供 collapsible-down / collapsible-up，
+   读的是 Radix 自己写上的 --radix-collapsible-content-height。Tailwind 按名字去重，
+   同名重写静默保留包那份、丢掉我们这份——先前借用 accordion-* 就是这样坏掉的：
+   accordion-down 读 --radix-accordion-content-height，Collapsible 上没有这个变量，
+   高度落在 auto 兜底上不可补间，动画跑完画面却不动。要改形状，连 keyframes 名字一起换。 */
+@theme {
+  --animate-collapsible-down: collapsible-down 200ms cubic-bezier(0.77, 0, 0.175, 1);
+  --animate-collapsible-up: collapsible-up 150ms cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+@keyframes collapse-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @layer base {
@@ -162,5 +186,14 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* 折叠区在减少动效下保留纯淡入（去掉高度位移）。
+   上面那条 * 通配把时长压到 0.01ms，这里用更高特异性的 !important 重新放行 120ms 淡入。 */
+@media (prefers-reduced-motion: reduce) {
+  [data-slot='collapsible-content'] {
+    animation-name: collapse-fade !important;
+    animation-duration: 120ms !important;
   }
 }

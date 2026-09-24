@@ -29,6 +29,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from '@/components/ui/empty'
+import { animateRowRemoval, useFlipList } from '@/hooks/useFlipList'
 
 /*
  * 图片转 PDF — 纯前端实现:
@@ -59,6 +60,9 @@ type Phase = 'upload' | 'processing' | 'ready'
 const MAX_CANVAS_DIMENSION = 16384
 /** 图片数量上限,避免内存失控 */
 const MAX_IMAGES = 20
+/** 新增行的入场交错：间隔与总延迟上限（一次最多 20 张，不按 index 线性铺开） */
+const ROW_STAGGER_MS = 30
+const ROW_STAGGER_CAP_MS = 180
 const A4_PORTRAIT: [number, number] = [595.28, 841.89]
 const A4_LANDSCAPE: [number, number] = [841.89, 595.28]
 const PAGE_MARGIN = 32
@@ -217,6 +221,10 @@ const ImageToPdf: React.FC = () => {
   // 事件处理器同步读取的镜像:避免闭包捕获过期 items 导致追加丢失/覆盖。
   const itemsRef = useRef<ImageItem[]>([])
   const directoryInputRef = useRef<HTMLInputElement>(null)
+  // 列表重排补间 + 移除淡出（见 hooks/useFlipList）
+  const listRef = useFlipList<HTMLUListElement>()
+  // 淡出中的行 key：挡住淡出期间的重复点击，避免同一行被删两次
+  const removingRef = useRef(new Set<string>())
 
   // 组件卸载时释放下载 object URL。
   useEffect(() => {
@@ -298,8 +306,25 @@ const ImageToPdf: React.FC = () => {
     })
   }
 
+  // 按 key 删除而非按下标：淡出期间列表可能已被其它操作改过，下标会删错行。
   const removeItem = (index: number) => {
-    updateItems((p) => p.filter((_, i) => i !== index))
+    const target = itemsRef.current[index]
+    if (!target) return
+    const key = itemKey(target.file)
+    if (removingRef.current.has(key)) return
+    const row = listRef.current?.querySelector<HTMLElement>(
+      `[data-flip-key="${CSS.escape(key)}"]`,
+    )
+    const drop = () => {
+      removingRef.current.delete(key)
+      updateItems((p) => p.filter((item) => itemKey(item.file) !== key))
+    }
+    if (!row) {
+      drop()
+      return
+    }
+    removingRef.current.add(key)
+    animateRowRemoval(row, drop)
   }
 
   const handleReset = () => {
@@ -308,6 +333,7 @@ const ImageToPdf: React.FC = () => {
       urlRef.current = null
     }
     setReady(null)
+    removingRef.current.clear()
     updateItems(() => [])
     setError(null)
     setNotice(null)
@@ -425,11 +451,15 @@ const ImageToPdf: React.FC = () => {
                     <Metric label="JPEG 直通" value={jpegCount} />
                     <Metric label="预估页数" value={items.length} />
                   </div>
-                  <ul className="flex flex-col gap-2">
+                  <ul ref={listRef} className="flex flex-col gap-2">
                     {items.map((item, index) => (
                       <li
                         key={itemKey(item.file)}
-                        className="flex items-center gap-3 rounded-lg border p-2"
+                        data-flip-key={itemKey(item.file)}
+                        className="flex animate-in fade-in-0 items-center gap-3 rounded-lg border p-2 animation-duration-150 fill-mode-backwards ease-out-strong"
+                        style={{
+                          animationDelay: `${Math.min(index * ROW_STAGGER_MS, ROW_STAGGER_CAP_MS)}ms`,
+                        }}
                       >
                         {item.thumb ? (
                           <img
@@ -562,7 +592,7 @@ const ImageToPdf: React.FC = () => {
 
       {phase === 'ready' && ready ? (
         <>
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="grid animate-in fade-in-0 slide-in-from-bottom-1 grid-cols-1 gap-6 animation-duration-200 fill-mode-backwards ease-out-strong lg:grid-cols-2">
             <Card>
               <CardHeader>
                 <CardTitle>PDF 已生成</CardTitle>

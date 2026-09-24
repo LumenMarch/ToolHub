@@ -191,7 +191,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
         aria-disabled={disabled || undefined}
         aria-describedby={`${id}-description`}
         className={cn(
-          'flex w-full rounded-xl border border-dashed text-left transition-colors',
+          'flex w-full rounded-xl border border-dashed text-left transition-[background-color,border-color,transform] duration-150 ease-out-strong motion-safe:active:translate-y-px',
           compact
             ? 'items-center gap-3 p-3'
             : 'min-h-48 flex-col justify-center gap-3 p-6',
