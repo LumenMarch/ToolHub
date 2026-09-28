@@ -65,20 +65,17 @@ const AdminLayout: React.FC = () => {
     [user],
   )
 
-  const isActive = (to: string) =>
-    to === '/admin'
-      ? location.pathname === '/admin'
-      : location.pathname.startsWith(to)
-
-  // 未知子路由不匹配任何导航项：标题回退「控制台」，不要误标首个菜单项
-  const currentItem = navItems.find((item) => isActive(item.to))
+  // 标签按静态路由表取，而非权限过滤后的导航项：无权限的路由页面仍会渲染，
+  // 只有不在路由表中的路径才是「页面不存在」
+  const currentLabel =
+    ALL_NAV_ITEMS.find((item) => item.to === location.pathname)?.label ?? '页面不存在'
 
   useEffect(() => {
-    document.title = pageTitle(currentItem?.label ?? '控制台')
+    document.title = pageTitle(currentLabel)
     return () => {
       document.title = pageTitle()
     }
-  }, [currentItem])
+  }, [currentLabel])
 
   const handleLogout = async () => {
     try {
@@ -108,7 +105,7 @@ const AdminLayout: React.FC = () => {
               <SidebarMenu>
                 {navItems.map((item) => {
                   const Icon = item.icon
-                  const active = isActive(item.to)
+                  const active = location.pathname === item.to
                   return (
                     <SidebarMenuItem key={item.to}>
                       <SidebarMenuButton asChild isActive={active} tooltip={item.label}>
@@ -146,7 +143,7 @@ const AdminLayout: React.FC = () => {
           <SidebarTrigger className="md:hidden" />
           <Separator orientation="vertical" className="mr-2 h-4 md:hidden" />
           <h1 className="min-w-0 truncate text-sm font-medium">
-            {currentItem?.label ?? '控制台'}
+            {currentLabel}
           </h1>
           <div className="ml-auto flex items-center gap-1">
             <ThemeToggle />
