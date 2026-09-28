@@ -22,7 +22,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { AuthContext } from '@/context/AuthContext'
-import { isBackendUnreachable } from '@/hooks/use-hitokoto'
+import { isBackendUnreachable } from '@/lib/api-error'
 import { pageTitle } from '@/lib/title'
 import api from '@/api/axios'
 

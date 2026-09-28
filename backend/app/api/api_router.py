@@ -19,7 +19,6 @@ from app.api.endpoints import (
     qrcode_tools,
     realtime,
     retest_rate,
-    sixty_seconds,
     tools_meta,
     tt_time,
     upload,
@@ -60,9 +59,6 @@ api_router.include_router(
 )
 api_router.include_router(
     cpk_charts.router, prefix="/tools/cpk-charts", tags=["cpk_charts"]
-)
-api_router.include_router(
-    sixty_seconds.router, prefix="/tools/sixty-seconds", tags=["sixty_seconds"]
 )
 api_router.include_router(box_plot.router, prefix="/tools/box-plot", tags=["box_plot"])
 api_router.include_router(tt_time.router, prefix="/tools/tt-time", tags=["tt_time"])

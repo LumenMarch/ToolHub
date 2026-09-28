@@ -10,7 +10,7 @@
   自定义角色同样获得全部工具权限、tool:use 记录被清理；
 - 迁移脚本 migrate_retired_tool_permissions：摘掉已下线工具权限及其角色/
   用户直接授权，现有 TOOL_PERMISSIONS 不被误删，重复执行无副作用；
-- 公开端点（OPTIONS /upload/tus、GET /tools/sixty-seconds/hitokoto）不受影响。
+- 公开端点（OPTIONS /upload/tus）不受影响。
 """
 
 from sqlalchemy import delete, select
@@ -322,8 +322,6 @@ def test_retired_permissions_migration_noop_when_absent(db):
 
 
 def test_public_endpoints_stay_public(client):
-    """OPTIONS /upload/tus（CORS 预检）与 GET /tools/sixty-seconds/hitokoto 保持公开。"""
+    """OPTIONS /upload/tus（CORS 预检）保持公开。"""
     resp = client.options("/api/v1/upload/tus")
     assert resp.status_code == 204
-    resp = client.get("/api/v1/tools/sixty-seconds/hitokoto")
-    assert resp.status_code == 200
