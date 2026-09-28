@@ -190,7 +190,7 @@ export const LlmModelField: React.FC<Props> = ({ id, value, envDefault, onChange
         </Popover>
       </div>
       {notListed ? (
-        <p className="text-xs text-amber-600 dark:text-amber-500">
+        <p className="text-xs text-status-warning-foreground">
           这个名字不在服务端模型列表里：单模型 llama.cpp 会忽略它所以照样能跑，
           挂第二个模型就 404。建议从列表选，或给服务端加 --alias。
         </p>

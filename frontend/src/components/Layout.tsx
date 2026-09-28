@@ -5,6 +5,7 @@ import { LogOut, Shield } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 import { NotificationBell } from '@/components/NotificationBell'
 import { PageHeader } from '@/components/PageHeader'
+import { SkipLink } from '@/components/SkipLink'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -31,12 +32,17 @@ const Layout: React.FC = () => {
       location.pathname.startsWith(`${tool.path}/`),
   )
 
+  const isDashboard = location.pathname === '/'
+
   useEffect(() => {
-    document.title = pageTitle(activeTool?.name)
+    // 未知路由（star 路由渲染 NotFound）时标题给出明确提示
+    document.title = pageTitle(
+      activeTool?.name ?? (isDashboard ? undefined : '页面不存在'),
+    )
     return () => {
       document.title = pageTitle()
     }
-  }, [activeTool])
+  }, [activeTool, isDashboard])
 
   const handleLogout = async () => {
     try {
@@ -53,6 +59,7 @@ const Layout: React.FC = () => {
   return (
     <div className="flex min-h-dvh flex-col bg-background">
       <header className="sticky top-0 z-50 border-b bg-background">
+        <SkipLink targetId="main-content" />
         <div className="flex h-14 items-center gap-3 px-4">
           <Link to="/" className="shrink-0">
             <BrandMark />
@@ -89,7 +96,7 @@ const Layout: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex flex-1 flex-col">
+      <main id="main-content" className="flex flex-1 flex-col">
         {isToolRoute ? (
           <div className="flex flex-1 flex-col gap-6 p-6">
             {activeTool ? (

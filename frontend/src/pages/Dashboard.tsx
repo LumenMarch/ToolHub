@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ArrowUpRight, Wrench } from 'lucide-react'
 
-import { LoadingSignal } from '@/components/LoadingSignal'
 import { PageHeader } from '@/components/PageHeader'
 import {
   Card,
@@ -16,6 +15,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
+import { Skeleton } from '@/components/ui/skeleton'
 import type { ToolDefinition } from '@/config/tools'
 import { useVisibleTools } from '@/hooks/useToolsMeta'
 
@@ -53,6 +53,28 @@ const ToolCard: React.FC<{ tool: ToolDefinition; index: number }> = ({
   )
 }
 
+/** 加载态与工具卡片网格同形：骨架直接占住最终布局的位置，不强制视线重定位。 */
+const ToolGridSkeleton: React.FC = () => (
+  <div
+    role="status"
+    aria-label="正在加载工具列表"
+    className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+  >
+    {Array.from({ length: 6 }, (_, index) => (
+      <Card key={index} size="sm" aria-hidden="true">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-3">
+            <Skeleton className="size-4 rounded-md" />
+            <Skeleton className="size-4 rounded-md" />
+          </div>
+          <Skeleton className="h-5 w-1/3" />
+          <Skeleton className="h-4 w-5/6" />
+        </CardHeader>
+      </Card>
+    ))}
+  </div>
+)
+
 const Dashboard: React.FC = () => {
   const { visibleTools, isPending, hasAccess } = useVisibleTools()
 
@@ -61,7 +83,7 @@ const Dashboard: React.FC = () => {
       <PageHeader title="工具" description="选择一个工具开始工作。" />
 
       {isPending ? (
-        <LoadingSignal ariaLabel="正在加载工具列表" label="正在加载工具列表" />
+        <ToolGridSkeleton />
       ) : visibleTools.length === 0 ? (
         <Empty className="border">
           <EmptyHeader>

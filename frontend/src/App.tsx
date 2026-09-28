@@ -13,6 +13,7 @@ import Layout from './components/Layout'
 import AdminLayout from './pages/admin/components/AdminLayout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import NotFound from './pages/NotFound'
 import { toolsConfig } from './config/tools'
 
 const SuspendFallback = () => (
@@ -69,6 +70,8 @@ function App() {
                       )
                     })}
                   </Route>
+                  {/* 登录后未知路径兜底，避免渲染空白页 */}
+                  <Route path="*" element={<NotFound />} />
                 </Route>
               </Route>
 
@@ -122,6 +125,7 @@ function App() {
                       </Suspense>
                     }
                   />
+                  <Route path="/admin/*" element={<NotFound />} />
                 </Route>
               </Route>
             </Routes>
