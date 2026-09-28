@@ -87,6 +87,7 @@ const AdminLayout: React.FC = () => {
 
   return (
     <SidebarProvider defaultOpen={sidebarDefaultOpen()}>
+      <SkipLink targetId="admin-content" />
       {/* icon 模式：收起后保留 3rem 图标栏，而不是整块滑出视口 */}
       <Sidebar collapsible="icon">
         <SidebarHeader className="flex-row items-center justify-between gap-2">
@@ -139,7 +140,6 @@ const AdminLayout: React.FC = () => {
       </Sidebar>
       <SidebarInset>
         <header className="flex h-14 items-center gap-2 border-b px-4">
-          <SkipLink targetId="admin-content" />
           <SidebarTrigger className="md:hidden" />
           <Separator orientation="vertical" className="mr-2 h-4 md:hidden" />
           <h1 className="min-w-0 truncate text-sm font-medium">
