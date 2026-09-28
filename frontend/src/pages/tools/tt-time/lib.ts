@@ -343,7 +343,7 @@ export const binByWidth = (tts: number[], widthSeconds: number): Bin[] => {
       label:
         widthSeconds === 1
           ? `${fmtSeconds(lo)}S`
-          : `${fmtSeconds(lo)}–${fmtSeconds(hi)} S`,
+          : `${fmtSeconds(lo)}-${fmtSeconds(hi)} S`,
       lo,
       hi,
       count,

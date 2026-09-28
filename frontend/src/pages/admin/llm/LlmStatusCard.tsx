@@ -52,7 +52,7 @@ export const LlmStatusCard: React.FC<Props> = ({ status, effective, onProbed }) 
       <CardContent>
         <StatsGrid status={status} effective={effective} caps={caps} />
         {overSlots ? (
-          <p className="mt-3 text-xs text-amber-600 dark:text-amber-500">{overSlots}</p>
+          <p className="mt-3 text-xs text-status-warning-foreground">{overSlots}</p>
         ) : null}
         {errorCodes ? (
           <p className="mt-3 text-xs text-muted-foreground">错误分布：{errorCodes}</p>
