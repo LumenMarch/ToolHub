@@ -65,7 +65,7 @@ ToolHub 是内网工具平台,当前全部工具仅由一个粗粒度权限 `too
 
 - 新增专用守卫函数(如 `require_any_tool_permission`),语义为"用户持有至少一条 `tool:<id>:use` 即放行";
 - 替换 upload.py 6 个带守卫端点(`POST /tus` :100、`HEAD /tus/{upload_id}` :168、`PATCH /tus/{upload_id}` :193、`DELETE /tus/{upload_id}` :260、`POST /cache/resolve` :279、`GET /{upload_id}/info` :308)与 `GET /tools-meta`(`tools_meta.py:13`,守卫 :16)的 `require_permission("tool:use")`;
-- `OPTIONS /tus`(:83,CORS 预检)与 `GET /hitokoto`(`sixty_seconds.py:79`)保持公开。
+- `OPTIONS /tus`(:83,CORS 预检)与 `GET /hitokoto`(`sixty_seconds.py:79`)保持公开。(`GET /hitokoto` 已于 2026-09-28 随 sixty_seconds 一并移除,见 §9)
 
 ## 5. 备选方案
 
@@ -129,7 +129,7 @@ ToolHub 是内网工具平台,当前全部工具仅由一个粗粒度权限 `too
 
 - 35 个带守卫端点全部切换(28 工具端点 + upload 6 + tools-meta 1);
 - 顺带补齐 5 个原本缺启用校验的端点:atlas_merge.py 3 个、attendance.py 2 个;
-- 公开端点 `GET /hitokoto` 与 `OPTIONS /tus` 未改动。
+- 公开端点 `GET /hitokoto` 与 `OPTIONS /tus` 未改动(`GET /hitokoto` 后续已移除,见 §9)。
 
 ### 7.5 前端
 
@@ -154,3 +154,18 @@ ToolHub 是内网工具平台,当前全部工具仅由一个粗粒度权限 `too
 - [ADR-0002:会话 token_version 与权限/吊销实时事件](./0002-session-token-version-and-permission-events.md)(permissions.updated 推送通道)
 - [ADR-0004:用户注册管理员审批机制](./0004-registration-approval.md)("不新增专用权限、避开 seed 幂等坑"的权衡与本 ADR 的迁移策略直接相关)
 - [权限细化调研报告](../research/permission-granularity.md)
+
+## 9. 修订记录
+
+### 9.1 2026-09-28：移除公开端点 `GET /tools/sixty-seconds/hitokoto`
+
+本 ADR 4.7 曾把 `GET /hitokoto` 列为"保持公开"的基础设施端点,当时的依据是登录页用它做 API 探活。
+
+后续两次改动掏空了这条依据：
+
+- PR #64 下线 60s 每日新闻工具页,`tool:sixty-seconds:use` 进入 `RETIRED_TOOL_PERMISSIONS`,但显式保留 `/hitokoto` 供登录页探活;
+- PR #72（radix-nova 视觉改版）重写 `Login.tsx`,删掉了 `useHitokoto()` 调用,探活随之失效,只剩纯函数 `isBackendUnreachable` 仍被登录页使用。
+
+自此该端点在全仓无任何调用方,却仍是一项未认证公开面,并随 `--include-package-data` 把 276KB `hitokoto.json` 打进离线包,失败路径还会回源第三方 `60s.viki.moe`。据此移除端点、`app/services/sixty_seconds/` 与路由注册,`isBackendUnreachable` 迁至 `frontend/src/lib/api-error.ts`。
+
+本 ADR 其余决策（per-tool codename、`require_tool_permission`、`require_any_tool_permission`、迁移策略）不受影响；`OPTIONS /tus` 仍保持公开。

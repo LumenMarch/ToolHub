@@ -212,7 +212,7 @@ def venv_python() -> Path:
 # Five things MUST stay explicit:
 # - app (+ package data): the entry is the string form "app.main:app"
 #   (uvicorn imports it via importlib.import_module), and app/ ships data
-#   files (hitokoto.json, reportlab fonts) picked up by --include-package-data.
+#   files (reportlab fonts) picked up by --include-package-data.
 # - frontend dist: embedded as frontend (see main.py's frozen layout).
 # - sqlalchemy.dialects.sqlite: SQLAlchemy loads dialects lazily via
 #   __import__("sqlalchemy.dialects.<name>") (util.PluginLoader) — Nuitka
