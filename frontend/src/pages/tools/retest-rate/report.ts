@@ -14,6 +14,7 @@ import {
   type DefectItemDetail,
   type RetestItemDetail,
 } from './types'
+import { escapeHtml } from '../../../lib/escape-html'
 
 /** 原因分析编辑状态：key = `${kind}:${测试项}:${SN}` */
 export type ReasonMap = Record<string, string>
@@ -158,13 +159,6 @@ export const buildCsvReport = (result: AnalyzeResult, reasons: ReasonMap): strin
     rows.map((row) => row.map(csvEscape).join(',')).join('\r\n')
   )
 }
-
-const escapeHtml = (value: string) =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
 
 const table = (headers: string[], body: string[][]): string => {
   const head = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')

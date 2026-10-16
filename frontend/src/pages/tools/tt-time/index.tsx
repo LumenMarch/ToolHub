@@ -5,6 +5,7 @@ import { Database } from 'lucide-react';
 import api from '@/api/axios';
 import FileDropZone from '@/components/FileDropZone';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTusUpload } from '@/hooks/useTusUpload';
 import { llmUnavailableReason, useLlmStatus } from '@/hooks/useLlmStatus';
@@ -25,6 +26,8 @@ const TtTimeTool: React.FC = () => {
   const [fileName, setFileName] = useState('');
   const [processData, setProcessData] = useState<BackendProcessResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+  // 参数变化后的页内重算：结果页保持挂载，只叠加提示，避免卸载正在编辑的表单
+  const [isRecomputing, setIsRecomputing] = useState(false);
   const [mode, setMode] = useState<HistogramMode>('percent');
   const [binWidthStr, setBinWidthStr] = useState(String(DEFAULT_BIN_WIDTH));
   const [station, setStation] = useState('all');
@@ -65,9 +68,11 @@ const TtTimeTool: React.FC = () => {
         });
         if (gen !== processGenRef.current) return;
         setProcessData(res.data);
+        setIsRecomputing(false);
         setPhase('ready');
       } catch (err: unknown) {
         if (gen !== processGenRef.current) return;
+        setIsRecomputing(false);
         const msg =
           err instanceof Error
             ? err.message
@@ -82,13 +87,9 @@ const TtTimeTool: React.FC = () => {
 
   const tusUpload = useTusUpload({
     onSuccess: (uploadId) => {
+      // 只登记结果，请求交给下面的单一驱动点：这里再发一次会让同一 uploadId 被重复全量计算
       setCurrentUploadId(uploadId);
       setPhase('analyzing');
-      void runBackendProcess(uploadId, {
-        binWidthVal: binWidth,
-        stationVal: station,
-        excludeFailVal: excludeFail,
-      });
     },
     onError: (err) => {
       setErrorMessage(err.message || '文件上传失败');
@@ -104,29 +105,73 @@ const TtTimeTool: React.FC = () => {
     setStation('all');
     setExcludeFail(true);
     setPhase('upload');
+    // 同一文件命中服务端缓存时 uploadId 会复用，必须清掉去重键才能重新触发处理
+    lastProcessedRef.current = '';
+    // 立刻清掉旧数据集的 uploadId：否则 station/excludeFail 被重置会让驱动 effect
+    // 重跑，用上一个 uploadId 发请求，把旧数据集的图表当成"新文件的结果"展示，
+    // 还会在上传期间把界面切到 analyzing、盖掉上传进度。
+    setCurrentUploadId('');
+    // 在途的旧响应同样不能再落地
+    processGenRef.current += 1;
     void tusUpload.upload({ file, metadata: { filename: file.name } });
   };
 
+  // 后端处理的单一驱动点：上传完成或参数变化后重新计算。
+  // ① 去重键含参数，处理完成把 phase 置回 ready 不会再次触发同一 uploadId 的
+  //    全量计算（旧实现因此对每次上传都发两遍相同请求）；
+  // ② 300ms 定时器把分箱宽度输入期间的逐字触发收敛成一次请求。
+  const lastProcessedRef = useRef('');
   useEffect(() => {
-    if (!currentUploadId || phase !== 'ready') return;
+    if (!currentUploadId) return;
+    const key = `${currentUploadId}|${binWidth}|${station}|${excludeFail}`;
+    if (lastProcessedRef.current === key) return;
+    const timer = window.setTimeout(() => {
+      // 只有上传后的首次计算才切整页 analyzing；参数变化必须保持结果页挂载，
+      // 否则分箱宽度输入框会被卸载，用户打字打到一半的字符直接丢失。
+      const isFirstRun = lastProcessedRef.current === '';
+      lastProcessedRef.current = key;
+      if (isFirstRun) {
+        setPhase('analyzing');
+      } else {
+        setIsRecomputing(true);
+      }
+      void runBackendProcess(currentUploadId, {
+        binWidthVal: binWidth,
+        stationVal: station,
+        excludeFailVal: excludeFail,
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [currentUploadId, binWidth, station, excludeFail, runBackendProcess]);
+
+  // I-3：处理失败必须可见且可重试。原实现只在去重键上做一次性请求，
+  // 失败后既没有提示也没有重试入口，用户只能重传整个文件。
+  const retryProcess = () => {
+    if (!currentUploadId) return;
+    lastProcessedRef.current = `${currentUploadId}|${binWidth}|${station}|${excludeFail}`;
+    setErrorMessage('');
+    setIsRecomputing(true);
     void runBackendProcess(currentUploadId, {
       binWidthVal: binWidth,
       stationVal: station,
       excludeFailVal: excludeFail,
     });
-  }, [currentUploadId, binWidth, station, excludeFail, runBackendProcess, phase]);
+  };
 
   const reset = () => {
     stopAdviceStream();
     tusUpload.reset();
     setPhase('upload');
     setCurrentUploadId('');
+    lastProcessedRef.current = '';
     setProcessData(null);
     setFileName('');
     setStation('all');
     setExcludeFail(true);
     setActiveModule('distribution');
     setErrorMessage('');
+    // 重置期间在途的旧响应不得再把界面拉回旧结果页
+    processGenRef.current += 1;
   };
 
   const stations = processData?.stations ?? [];
@@ -228,8 +273,25 @@ const TtTimeTool: React.FC = () => {
   }
 
   return (
-    <TtTimeReadyView
-      fileName={fileName}
+    <div className="flex flex-col gap-4">
+      {isRecomputing ? (
+        <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
+          <LoadingSignal label="重算中" ariaLabel="后端正在按新参数重新计算" />
+          <span>正在按新参数重新计算...</span>
+        </div>
+      ) : null}
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <AlertDescription className="flex items-center gap-3">
+            {errorMessage}
+            <Button variant="outline" size="sm" onClick={retryProcess}>
+              重新计算
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      <TtTimeReadyView
+        fileName={fileName}
       processData={processData}
       activeModule={activeModule}
       setActiveModule={setActiveModule}
@@ -249,8 +311,9 @@ const TtTimeTool: React.FC = () => {
       analysisContext={analysisContext}
       adviceMutation={adviceMutation}
       streamingAdvice={streamingAdvice}
-      llmBlockedReason={llmBlockedReason}
-    />
+        llmBlockedReason={llmBlockedReason}
+      />
+    </div>
   );
 };
 

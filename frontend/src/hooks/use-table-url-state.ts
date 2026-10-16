@@ -192,7 +192,9 @@ export function useTableUrlState(
                 [pageKey]: null, // 搜索时回到第一页
                 [globalFilterKey]: next ? next : null,
               }),
-            { replace: false }
+            // 搜索是逐字写入：push 会把历史记录刷成「回退搜索词」，
+            // 浏览器后退键再也回不到上一页
+            { replace: true }
           )
         }
       : undefined
@@ -229,7 +231,8 @@ export function useTableUrlState(
 
     setSearchParams(
       (prev) => applyParamPatch(prev, { [pageKey]: null, ...patch }),
-      { replace: false }
+      // 同上：列筛选同样逐字变化，只有翻页保留 push
+      { replace: true }
     )
   }
 

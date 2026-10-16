@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useAdminApi, type Role, type UserCreateInput } from '../hooks/use-admin-api'
+import { usePermission } from '@/hooks/use-permission'
 import { adminPermissionsQueryKey, adminRolesQueryKey, adminUsersQueryKey } from './query-keys'
 import { type User } from './schema'
 
@@ -437,18 +438,23 @@ export function UsersActionDialog({
   const queryClient = useQueryClient()
   const isEdit = !!currentRow
 
+  // /admin/roles 与 /admin/permissions 都要求 role:read，而用户管理页只要求 user:read。
+  // 没有 role:read 的管理员不该被锁死：不发这两个查询，保存时也省略对应字段。
+  const { has } = usePermission()
+  const canReadRoles = has('role:read')
+
   const rolesQuery = useQuery({
     queryKey: adminRolesQueryKey,
     queryFn: () => api.listRoles(),
     staleTime: 60 * 1000,
-    enabled: open,
+    enabled: open && canReadRoles,
   })
 
   const permissionsQuery = useQuery({
     queryKey: adminPermissionsQueryKey,
     queryFn: () => api.listPermissions(),
     staleTime: 60 * 1000,
-    enabled: open,
+    enabled: open && canReadRoles,
   })
 
   // 该用户当前直接持有的工具权限 codename（编辑时从详情接口刷新，失败回退列表行数据）
@@ -459,6 +465,10 @@ export function UsersActionDialog({
   const [userRoleIds, setUserRoleIds] = useState<number[]>([])
   // 用户角色数据是否就绪（决定 derivedToolMode 计算时机）
   const [roleIdsReady, setRoleIdsReady] = useState(false)
+  // 角色加载是否失败：失败时必须阻止保存，否则表单会以空集合冒充「该用户没有角色」
+  const [roleIdsError, setRoleIdsError] = useState(false)
+  // 重新加载计数：驱动上面的异步加载 effect 重跑
+  const [reloadKey, setReloadKey] = useState(0)
 
   // 全部 tool: 前缀权限：'all' 模式的全选集合，也是初始化时比较的基准
   const allPermissions = useMemo(() => permissionsQuery.data ?? [], [permissionsQuery.data])
@@ -532,17 +542,19 @@ export function UsersActionDialog({
   // 打开重置由调用方 key 变化强制重挂载完成。
   useEffect(() => {
     if (!open) return
-    if (!currentRow || isSelf) {
-      // 新建 / 编辑自己：角色与工具权限均不可改，工具区按 'all' 展示（提交时不发送）
+    if (!currentRow || isSelf || !canReadRoles) {
+      // 新建 / 编辑自己 / 无 role:read：角色与工具权限均不可改（提交时不发送字段）
       setDirectToolPermissions([])
       setDirectPermsReady(true)
       setUserRoleIds([])
       setRoleIdsReady(true)
+      setRoleIdsError(false)
       return
     }
     let cancelled = false
     setDirectPermsReady(false)
     setRoleIdsReady(false)
+    setRoleIdsError(false)
     api
       .getUserRoles(currentRow.id)
       .then((roles) => {
@@ -554,11 +566,12 @@ export function UsersActionDialog({
         }
       })
       .catch(() => {
-        // 角色加载失败：按无角色处理（仅 toast），避免初始化悬挂在 'all' 默认值上
+        // 角色加载失败时不能按「无角色」继续：表单 roleIds 会是空集合，一旦保存
+        // 后端按整体替换处理，等于清空该用户全部角色。保持未就绪并阻止保存。
         if (!cancelled) {
           setUserRoleIds([])
-          setRoleIdsReady(true)
-          toast.error('用户角色加载失败')
+          setRoleIdsError(true)
+          toast.error('用户角色加载失败，已禁用保存以免清空角色')
         }
       })
     api
@@ -579,7 +592,7 @@ export function UsersActionDialog({
     return () => {
       cancelled = true
     }
-  }, [open, currentRow, isSelf, api, setValue])
+  }, [open, currentRow, isSelf, canReadRoles, api, setValue, reloadKey])
 
   // 切换工具权限模式：'all' 时全选工具；切 'custom' 时自动取消「工具使用者」角色勾选，
   // 避免「工具使用者角色 + 自定义部分工具」的矛盾组合。
@@ -596,19 +609,35 @@ export function UsersActionDialog({
     }
   }
 
+  // 保存门禁：角色/权限列表尚在加载时，表单里呈现的空集合只是「还没加载到」，
+  // 而后端对非 None 的 role_ids / tool_permission_ids 做整体替换——此时提交
+  // 就会把空集合写成真相，清空该用户的角色与直接权限，且提示仍是「已更新」。
+  // 没有 role:read 时两个查询是 disabled 的，v5 里 disabled 查询恒为 isPending，
+  // 不能把它算进"数据未就绪"，否则按钮永久不可用（连只改启用状态都做不到）。
+  const listsLoading =
+    canReadRoles && (rolesQuery.isPending || permissionsQuery.isPending)
+  const dataReady = roleIdsReady && directPermsReady && !listsLoading
+  // 列表加载失败时两种模式都禁止保存：derivedToolMode 依赖 allToolPermIds，列表缺位会
+  // 被 [].every() 判成「持有全部工具」，角色区随之隐藏「工具使用者」，提交的 role_ids
+  // 就会把它摘掉；而 tool_permission_ids 又因 isError 不下发——目标用户会被清成零权限，
+  // 界面提示却仍是「已更新用户」。这与角色加载失败是同一条数据损坏路径。
+  const listsFailed = canReadRoles && (rolesQuery.isError || permissionsQuery.isError)
+  const canSubmit = dataReady && !listsFailed && !roleIdsError
+
   const onSubmit = handleSubmit(async (values) => {
     try {
       if (isEdit && currentRow) {
         // 权限列表加载失败时不发送工具权限（undefined = 不修改），避免误清空直接权限
         const toolPermissionIds =
-          isSelf || permissionsQuery.isError
+          isSelf || !canReadRoles || !directPermsReady || permissionsQuery.isError
             ? undefined
             : toolMode === 'all'
               ? allToolPermIds
               : toolIds
         await api.updateUser(currentRow.id, {
           is_active: values.isActive,
-          role_ids: isSelf ? undefined : values.roleIds,
+          // 未就绪同样按下发 undefined 处理：防御性兜底，避免任何路径把空数组当真相
+          role_ids: isSelf || !canReadRoles || !roleIdsReady ? undefined : values.roleIds,
           password: values.password.trim() || undefined,
           // 编辑自己不发送工具权限（与 role_ids 对齐）；'all' 发送全部工具 id，'custom' 发送勾选集合
           toolPermissionIds,
@@ -707,13 +736,44 @@ export function UsersActionDialog({
           )}
         </form>
 
-        <DialogFooter>
-          <Button type='button' variant='outline' onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button type='submit' form='user-form' disabled={isSubmitting}>
-            {isSubmitting ? '保存中...' : '保存'}
-          </Button>
+        <DialogFooter
+          // 有提示时才用两端对齐；否则 space-between 会把按钮挤到左侧
+          className={
+            roleIdsError || listsFailed || !canReadRoles ? 'sm:justify-between' : undefined
+          }
+        >
+          {!canReadRoles ? (
+            <p className='text-sm text-muted-foreground'>
+              当前账号没有 role:read 权限，保存不会改动角色与工具权限
+            </p>
+          ) : roleIdsError || listsFailed ? (
+            <div className='flex flex-col items-start gap-2'>
+              <p className='text-sm text-destructive'>
+                {roleIdsError ? '用户角色加载失败' : '角色或权限列表加载失败'}
+                ，继续保存会误清空其权限，已停用
+              </p>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() => {
+                  setReloadKey((key) => key + 1)
+                  void rolesQuery.refetch()
+                  void permissionsQuery.refetch()
+                }}
+              >
+                重新加载
+              </Button>
+            </div>
+          ) : null}
+          <div className='flex gap-2'>
+            <Button type='button' variant='outline' onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
+            <Button type='submit' form='user-form' disabled={isSubmitting || !canSubmit}>
+              {isSubmitting ? '保存中...' : '保存'}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

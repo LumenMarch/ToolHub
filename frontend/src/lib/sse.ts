@@ -39,6 +39,22 @@ export interface PostSseOptions {
   onEvent: (event: SseEvent) => void;
 }
 
+const MAX_FRAME_BUFFER = 4 * 1024 * 1024;
+
+/**
+ * 复用 axios 拦截器定义的全局认证事件契约。
+ *
+ * 推流用裸 fetch，绕过了 axios：不在这里补派发，会话过期时工具只会显示
+ * 「请求失败（HTTP 401）」，既不跳登录也不刷新权限，用户只会反复重试。
+ */
+function notifyAuthFailure(status: number): void {
+  if (status === 401) {
+    window.dispatchEvent(new Event('unauthorized'));
+  } else if (status === 403) {
+    window.dispatchEvent(new Event('forbidden'));
+  }
+}
+
 export async function postSse(path: string, options: PostSseOptions): Promise<void> {
   const { body, signal, onEvent } = options;
 
@@ -54,6 +70,7 @@ export async function postSse(path: string, options: PostSseOptions): Promise<vo
     // 推流开始前的失败仍然是普通 HTTP 错误（如 400 参数不合法、403 无权限），
     // 但闸门 429 / 冷却 503 也走这里：结构化的 {code, retryable} 和
     // Retry-After 必须原样带给上层，否则统一重试策略在推流前就断了
+    notifyAuthFailure(response.status);
     throw await readHttpError(response);
   }
   if (!response.body) {
@@ -64,22 +81,31 @@ export async function postSse(path: string, options: PostSseOptions): Promise<vo
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
 
-  // SSE 以空行分帧；服务端心跳(ping)也是事件帧，直接忽略
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer = normalizeLineEnds(buffer + decoder.decode(value, { stream: true }));
-    let boundary = buffer.indexOf('\n\n');
-    while (boundary !== -1) {
-      const frame = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      const parsed = parseFrame(frame);
-      if (parsed) onEvent(parsed);
-      boundary = buffer.indexOf('\n\n');
+  try {
+    // SSE 以空行分帧；服务端心跳(ping)也是事件帧，直接忽略
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer = normalizeLineEnds(buffer + decoder.decode(value, { stream: true }));
+      // 一直没有分帧边界说明对端在发超长单帧：不设上限会把整个响应堆进内存
+      if (buffer.length > MAX_FRAME_BUFFER) {
+        throw new Error('流式响应单帧超出上限，已中止');
+      }
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const parsed = parseFrame(frame);
+        if (parsed) onEvent(parsed);
+        boundary = buffer.indexOf('\n\n');
+      }
     }
+    const tail = parseFrame(buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+    if (tail) onEvent(tail);
+  } finally {
+    // 提前失败或调用方取消时释放底层连接
+    void reader.cancel().catch(() => undefined);
   }
-  const tail = parseFrame(buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
-  if (tail) onEvent(tail);
 }
 
 /**

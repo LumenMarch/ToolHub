@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as tus from 'tus-js-client';
 import api from '../api/axios';
 import { calculateFileDigest } from '../lib/fileDigest';
@@ -61,6 +61,37 @@ interface UploadFileOptions {
 const DEFAULT_ENDPOINT = '/api/v1/upload/tus';
 const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
 
+/** 进度节流窗口：百分比未变且距上次上报不足该时长时跳过，避免大文件下高频 setState。 */
+const PROGRESS_MIN_INTERVAL_MS = 100;
+/** 无进度看门狗：连接被静默掐断时 tus 不会报错，只会永远停在 uploading。 */
+const STALL_TIMEOUT_MS = 60_000;
+const STALL_CHECK_INTERVAL_MS = 5_000;
+/** 缓存检查超时：这一步挂住会让上传既开始不了也失败不了，界面永远停在「查找缓存」。 */
+const CACHE_RESOLVE_TIMEOUT_MS = 30_000;
+
+interface ProgressThrottle {
+  percent: number;
+  at: number;
+}
+
+const shouldReportProgress = (
+  percent: number,
+  throttle: ProgressThrottle,
+): boolean => {
+  if (percent === throttle.percent) return false;
+  const advanced = percent - throttle.percent >= 1;
+  if (
+    percent < 100
+    && !advanced
+    && Date.now() - throttle.at < PROGRESS_MIN_INTERVAL_MS
+  ) {
+    return false;
+  }
+  throttle.percent = percent;
+  throttle.at = Date.now();
+  return true;
+};
+
 const createInitialState = (): UploadState => ({
   status: 'idle',
   uploadId: null,
@@ -89,6 +120,16 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
 
   const [state, setState] = useState<UploadState>(createInitialState);
 
+  // 回调放进 ref：调用方普遍传内联箭头函数，直接作为 upload 的依赖会让 upload
+  // 每次 render 都重建，上游一旦把 upload 放进 effect 依赖就会重复触发。
+  const callbacksRef = useRef({ onProgress, onChunkComplete, onSuccess, onError });
+  useEffect(() => {
+    callbacksRef.current = { onProgress, onChunkComplete, onSuccess, onError };
+  }, [onProgress, onChunkComplete, onSuccess, onError]);
+
+  const hashingThrottleRef = useRef<ProgressThrottle>({ percent: -1, at: 0 });
+  const uploadThrottleRef = useRef<ProgressThrottle>({ percent: -1, at: 0 });
+
   const uploadRefs = useRef<Set<tus.Upload> | null>(null);
   if (uploadRefs.current === null) {
     uploadRefs.current = new Set<tus.Upload>();
@@ -112,6 +153,8 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
         const controller = new AbortController();
         const filename = metadata?.filename || file.name;
         aborts.add(controller);
+        hashingThrottleRef.current = { percent: -1, at: 0 };
+        uploadThrottleRef.current = { percent: -1, at: 0 };
         setState({
           ...createInitialState(),
           status: 'hashing',
@@ -126,6 +169,8 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
                 100,
                 Math.floor((bytesHashed / bytesTotal) * 100),
               );
+              // 1 GiB 文件按 4 MiB 批次回调 256 次，全量 setState 会让主线程抖
+              if (!shouldReportProgress(progress, hashingThrottleRef.current)) return;
               setState((prev) => ({ ...prev, progress }));
             },
           });
@@ -136,18 +181,36 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
           }));
 
           const cacheEndpoint = endpoint.replace(/\/tus\/?$/, '/cache/resolve');
-          const cacheResponse = await api.post<{
-            cache_hit: boolean;
-            upload_id: string | null;
-          }>(
-            cacheEndpoint.replace(/^\/api\/v1/, ''),
-            {
-              filename,
-              content_type: file.type || 'application/octet-stream',
-              ...digest,
-            },
-            { signal: controller.signal },
-          );
+          // 独立 controller：既能被超时中断，也能被 abort() 通过 aborts 集合取消
+          const resolveCache = async () => {
+            const cacheController = new AbortController();
+            aborts.add(cacheController);
+            let timedOut = false;
+            const timer = window.setTimeout(() => {
+              timedOut = true;
+              cacheController.abort();
+            }, CACHE_RESOLVE_TIMEOUT_MS);
+            try {
+              return await api.post<{
+                cache_hit: boolean;
+                upload_id: string | null;
+              }>(
+                cacheEndpoint.replace(/^\/api\/v1/, ''),
+                {
+                  filename,
+                  content_type: file.type || 'application/octet-stream',
+                  ...digest,
+                },
+                { signal: cacheController.signal },
+              );
+            } catch (error) {
+              throw timedOut ? new Error('缓存检查超时，请重试') : error;
+            } finally {
+              window.clearTimeout(timer);
+              aborts.delete(cacheController);
+            }
+          };
+          const cacheResponse = await resolveCache();
           if (cacheResponse.data.cache_hit && cacheResponse.data.upload_id) {
             const uploadId = cacheResponse.data.upload_id;
             setState({
@@ -161,7 +224,7 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
               cacheHit: true,
               error: null,
             });
-            onSuccess?.(uploadId);
+            callbacksRef.current.onSuccess?.(uploadId);
             return uploadId;
           }
 
@@ -171,6 +234,15 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
             progress: 0,
           }));
           return await new Promise<string>((resolve, reject) => {
+            let lastTick = Date.now();
+            let watchdog: number | null = null;
+            const stopWatchdog = () => {
+              if (watchdog !== null) {
+                window.clearInterval(watchdog);
+                watchdog = null;
+              }
+            };
+
             const uploadInstance = new tus.Upload(file, {
               endpoint,
               chunkSize,
@@ -181,6 +253,7 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
                 sha256: digest.sha256,
               },
               onProgress(bytesUploaded, bytesTotal) {
+                lastTick = Date.now();
                 const pct =
                   bytesTotal > 0
                     ? Math.min(
@@ -188,20 +261,22 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
                         Math.floor((bytesUploaded / bytesTotal) * 100),
                       )
                     : 0;
-                setState((prev) => ({
-                  ...prev,
-                  status:
-                    bytesTotal > 0 && bytesUploaded >= bytesTotal
-                      ? 'confirming'
-                      : 'uploading',
-                  progress: pct,
-                  bytesSent: bytesUploaded,
-                  bytesTotal,
-                }));
-                onProgress?.(bytesUploaded, bytesTotal);
+                const settled = bytesTotal > 0 && bytesUploaded >= bytesTotal;
+                // 字节级进度事件极其密集：只节流 setState，终态必须放行
+                if (settled || shouldReportProgress(pct, uploadThrottleRef.current)) {
+                  setState((prev) => ({
+                    ...prev,
+                    status: settled ? 'confirming' : 'uploading',
+                    progress: pct,
+                    bytesSent: bytesUploaded,
+                    bytesTotal,
+                  }));
+                }
+                callbacksRef.current.onProgress?.(bytesUploaded, bytesTotal);
                 onFileProgress?.(bytesUploaded, bytesTotal);
               },
               onChunkComplete(chunkBytes, bytesAccepted, bytesTotal) {
+                lastTick = Date.now();
                 const acceptedPct =
                   bytesTotal > 0
                     ? Math.min(
@@ -219,7 +294,11 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
                   bytesAccepted,
                   bytesTotal,
                 }));
-                onChunkComplete?.(chunkBytes, bytesAccepted, bytesTotal);
+                callbacksRef.current.onChunkComplete?.(
+                  chunkBytes,
+                  bytesAccepted,
+                  bytesTotal,
+                );
                 onFileChunkComplete?.(chunkBytes, bytesAccepted, bytesTotal);
               },
               onSuccess(payload) {
@@ -240,11 +319,13 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
                   cacheHit: false,
                   error: null,
                 });
+                stopWatchdog();
                 uploads.delete(uploadInstance);
-                onSuccess?.(uploadId);
+                callbacksRef.current.onSuccess?.(uploadId);
                 resolve(uploadId);
               },
               onError(err) {
+                stopWatchdog();
                 uploads.delete(uploadInstance);
                 reject(err);
               },
@@ -257,10 +338,24 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
             });
 
             uploads.add(uploadInstance);
+            // 对端静默失联时 tus 既不报错也不超时，这里用无进度看门狗兜底，
+            // 避免界面永远停在 uploading 且请求永久 pending。
+            watchdog = window.setInterval(() => {
+              if (controller.signal.aborted) {
+                stopWatchdog();
+                return;
+              }
+              if (Date.now() - lastTick <= STALL_TIMEOUT_MS) return;
+              stopWatchdog();
+              void uploadInstance.abort(true);
+              reject(new Error('上传停滞超过 60 秒，已中止'));
+            }, STALL_CHECK_INTERVAL_MS);
             uploadInstance.start();
           });
         } catch (error) {
           if (controller.signal.aborted) {
+            // 取消路径也要收口状态：否则 UI 会同时显示「已取消」和上一次的错误文案
+            setState({ ...createInitialState(), status: 'aborted' });
             throw error;
           }
           const message = error instanceof Error ? error.message : String(error);
@@ -272,7 +367,7 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
             uploadId: null,
             error: message,
           }));
-          onError?.(normalizedError);
+          callbacksRef.current.onError?.(normalizedError);
           throw normalizedError;
         } finally {
           aborts.delete(controller);
@@ -281,16 +376,7 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
 
       return run();
     },
-    [
-      aborts,
-      endpoint,
-      chunkSize,
-      onProgress,
-      onChunkComplete,
-      onSuccess,
-      onError,
-      uploads,
-    ],
+    [aborts, chunkSize, endpoint, uploads],
   );
 
   const abort = useCallback(() => {

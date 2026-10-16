@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { useAdminApi } from './hooks/use-admin-api';
 import type {
@@ -74,9 +75,10 @@ const AdminRoles: React.FC = () => {
     refresh();
   };
 
+  // 这里不关闭弹窗：权限保存是第二次请求，提前卸载会让它的失败无处展示
+  // （改名已生效、权限未改的「半成功」过去会静默关闭）。
   const handleUpdate = async (roleId: number, name?: string, description?: string) => {
     await api.updateRole(roleId, { name, description });
-    setEditTarget(null);
     refresh();
   };
 
@@ -358,7 +360,11 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    api.listPermissions().then(setAllPermissions).catch(() => {});
+    // 静默失败会让「工具使用者」模式的全选变成空操作，用户以为已授权
+    api
+      .listPermissions()
+      .then(setAllPermissions)
+      .catch(() => toast.error('权限列表加载失败，「工具使用者」模式暂不可用'));
   }, [api]);
 
   // 全部 tool: 前缀权限的 id，供「工具使用者」模式的全选与初始状态判断使用
@@ -404,6 +410,8 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
     try {
       await onSubmit(target.id, name.trim() || undefined, description.trim() || undefined);
       await api.updateRolePermissions(target.id, selectedPermIds);
+      // 两次写入都成功后才关闭；任一失败保持打开并展示错误
+      onClose();
     } catch {
       setError('保存失败');
     } finally {

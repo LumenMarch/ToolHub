@@ -94,7 +94,15 @@ export function UsersApproveDialog({
     }
   }
 
+  // 权限列表未就绪时禁止提交：'all' 模式的全选集合来自 permissionsQuery.data，
+  // 尚未加载到时它是空数组，提交等于把用户批成「零工具权限」，界面却提示「已通过」。
+  const permissionsReady = !permissionsQuery.isPending && !permissionsQuery.isError
+
   const onSubmit = handleSubmit(async (values) => {
+    if (!permissionsReady) {
+      toast.error('工具权限列表尚未就绪，请稍后重试')
+      return
+    }
     try {
       // 'all' 模式：role_ids 留空则省略（后端默认分配"工具使用者"角色）；
       // 若勾选过自定义角色则原样提交（与全部工具直接权限叠加）。
@@ -272,17 +280,26 @@ export function UsersApproveDialog({
           </div>
         </form>
 
-        <DialogFooter>
-          <Button
-            type='button'
-            variant='outline'
-            onClick={() => onOpenChange(false)}
-          >
-            取消
-          </Button>
-          <Button type='submit' form='approve-user-form' disabled={isSubmitting}>
-            {isSubmitting ? '提交中...' : '确认通过'}
-          </Button>
+        <DialogFooter className='sm:justify-between'>
+          {!permissionsReady ? (
+            <p className='text-sm text-destructive'>工具权限列表未就绪，暂不能提交</p>
+          ) : null}
+          <div className='flex gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => onOpenChange(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type='submit'
+              form='approve-user-form'
+              disabled={isSubmitting || !permissionsReady}
+            >
+              {isSubmitting ? '提交中...' : '确认通过'}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

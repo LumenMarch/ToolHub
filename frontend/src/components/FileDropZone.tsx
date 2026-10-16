@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { Upload, X } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -70,7 +71,7 @@ const CompactZone: React.FC<ZoneContentProps> = ({
   return (
     <>
       <Upload className="size-4 shrink-0 text-muted-foreground" />
-      <div className="flex min-w-0 flex-1 items-baseline gap-2">
+      <span className="flex min-w-0 flex-1 items-baseline gap-2">
         <span className="shrink-0 text-sm font-medium">{label}</span>
         <span
           id={`${id}-description`}
@@ -81,7 +82,7 @@ const CompactZone: React.FC<ZoneContentProps> = ({
         >
           {hasFile ? `${file.name}（${formatSize(file.size)}）` : description}
         </span>
-      </div>
+      </span>
     </>
   )
 }
@@ -101,14 +102,17 @@ const PanelZone: React.FC<ZoneContentProps> = ({
         <span className="text-sm font-medium">{label}</span>
         {hasFile ? null : <Upload className="size-4 text-muted-foreground" />}
       </div>
-      <div className="min-w-0">
-        <p className={cn('truncate font-medium', fileNameClassName)}>
+      <span className="block min-w-0">
+        <span className={cn('block truncate font-medium', fileNameClassName)}>
           {hasFile ? file.name : '拖放或选择文件'}
-        </p>
-        <p id={`${id}-description`} className="mt-1 text-sm text-muted-foreground">
+        </span>
+        <span
+          id={`${id}-description`}
+          className="mt-1 block text-sm text-muted-foreground"
+        >
           {hasFile ? formatSize(file.size) : description}
-        </p>
-      </div>
+        </span>
+      </span>
     </>
   )
 }
@@ -139,11 +143,21 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
     }
   }
 
-  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = async (event: React.DragEvent<HTMLButtonElement>) => {
     event.preventDefault()
     setIsDragging(false)
-    if (disabled) return
-    deliverFiles(await droppedFiles(event.dataTransfer))
+    if (disabled) {
+      // 禁用期拖放也要有反馈：原生 disabled 的控件不派发 drop，事件根本到不了这里，
+      // 所以按钮只用 aria-disabled + tabIndex 表达禁用，才能接住这次拖放
+      toast.info('当前正在处理上一个文件，暂不能更换')
+      return
+    }
+    try {
+      deliverFiles(await droppedFiles(event.dataTransfer))
+    } catch {
+      // 受保护目录、权限被拒等会让目录展开抛错，静默失败会让用户以为拖放没生效
+      toast.error('读取拖入的文件失败')
+    }
   }
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -171,15 +185,14 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
         disabled={disabled}
         onChange={handleChange}
       />
-      <div
-        role="button"
-        tabIndex={disabled ? -1 : 0}
-        onClick={() => inputRef.current?.click()}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            inputRef.current?.click()
-          }
+      <button
+        type="button"
+        // 不用原生 disabled：它会让 drop 事件静默丢失，用户拖入文件毫无反馈
+        aria-disabled={disabled || undefined}
+        tabIndex={disabled ? -1 : undefined}
+        onClick={() => {
+          if (disabled) return
+          inputRef.current?.click()
         }}
         onDragEnter={(event) => {
           event.preventDefault()
@@ -188,7 +201,6 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
         onDragOver={(event) => event.preventDefault()}
         onDragLeave={() => setIsDragging(false)}
         onDrop={(event) => void handleDrop(event)}
-        aria-disabled={disabled || undefined}
         aria-describedby={`${id}-description`}
         className={cn(
           'flex w-full rounded-xl border border-dashed text-left transition-[background-color,border-color,transform] duration-150 ease-out-strong motion-safe:active:translate-y-px',
@@ -200,7 +212,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
         )}
       >
         {compact ? <CompactZone {...contentProps} /> : <PanelZone {...contentProps} />}
-      </div>
+      </button>
       {hasFile && onClear ? (
         <Button
           type="button"

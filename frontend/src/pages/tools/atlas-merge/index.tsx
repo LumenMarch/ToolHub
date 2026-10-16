@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { zip } from 'fflate';
+import { AsyncZipDeflate, Zip } from 'fflate';
 import React, {
   useEffect,
   useRef,
@@ -105,14 +105,16 @@ type AnalyzeStep = 'packing' | 'uploading' | 'processing';
 const POLL_INTERVAL_MS = 1600;
 /** 连续轮询网络失败上限，超过即停止并提示（避免无限轮询）。 */
 const MAX_POLL_FAILURES = 3;
+/** 归档原始字节上限：后端 tus 端点 MAX_SIZE = 256 MB，超出必然被拒。 */
+const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 
-/** 判断查询错误是否为 HTTP 404（任务不存在/过期）。 */
-const isHttp404 = (error: unknown): boolean => {
+/** 判断查询错误是否为「任务已不存在」：404 未找到、410 已过期。 */
+const isJobGoneError = (error: unknown): boolean => {
   if (typeof error !== 'object' || error === null) {
     return false;
   }
-  const response = (error as { response?: { status?: number } }).response;
-  return response?.status === 404;
+  const status = (error as { response?: { status?: number } }).response?.status;
+  return status === 404 || status === 410;
 };
 
 interface SelectedFile {
@@ -223,29 +225,91 @@ const computeArchive = (files: File[]): ArchiveStats => {
   };
 };
 
-/** 打包 zip：逐文件读取（真实进度）→ 异步压缩（Web Worker，不阻塞主线程）。 */
+/**
+ * 打包 zip：逐文件「读入 → 压缩 → 释放」，不在内存里同时持有全部原始字节。
+ * fflate 的 Zip + AsyncZipDeflate 是流式压缩（异步 DEFLATE 在 Worker 中执行），
+ * 每读完一个 CSV 就 push 进压缩流并释放该文件引用，峰值内存从
+ * 「全部原始字节 + 完整压缩产物」降到「单个文件 + 压缩产物」。
+ */
 const buildArchive = async (
   files: SelectedFile[],
   zipName: string,
   onReadProgress: (readCount: number) => void,
 ): Promise<File> => {
-  const entries: Record<string, Uint8Array> = {};
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let completed = false;
+  let zipError: Error | null = null;
+
+  const zipStream = new Zip((error, data, final) => {
+    if (error) {
+      if (!completed) {
+        completed = true;
+        zipError = error;
+      }
+      return;
+    }
+    if (data && data.length > 0) {
+      chunks.push(data);
+    }
+    if (final) {
+      completed = true;
+    }
+  });
+
+  // 每个文件一条独立 deflate 流，全部结束后才写中央目录（zip.end()）
+  let pending = 0;
+  const endArchive = () => {
+    if (pending === 0 && !completed) {
+      // end() 必须等当前一轮 add/ondata 回调栈退出后调用：否则 fflate 会把
+      // 中央目录的写入推迟到下一次 add，而 end() 之后不再有 add，归档永远不结束
+      queueMicrotask(() => zipStream.end());
+    }
+  };
+
   for (let index = 0; index < files.length; index += 1) {
     const { file, path } = files[index];
-    entries[path] = new Uint8Array(await file.arrayBuffer());
+    const bytes = new Uint8Array(await file.arrayBuffer());
     onReadProgress(index + 1);
+
+    const entry = new AsyncZipDeflate(path, { level: 6 });
+    zipStream.add(entry);
+    // 保存 Zip 注册的 ondata（负责写 header / CRC / 压缩数据），在其之上叠加计数
+    const archiveHandler = entry.ondata;
+    entry.ondata = (error, data, final) => {
+      archiveHandler(error, data, final);
+      if (final) {
+        pending -= 1;
+        endArchive();
+      }
+    };
+    pending += 1;
+    entry.push(bytes, true);
   }
-  const compressed = await new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
-    // fflate 异步 zip 在 Web Worker 中执行，完成后一次性回调完整输出
-    zip(entries, { consume: true }, (error, data) => {
-      if (error) {
-        reject(error);
+  // 空列表（files 为空）或全部文件已在 await 期间压缩完成时，这里兜底关闭归档
+  endArchive();
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = window.setInterval(() => {
+      if (zipError) {
+        window.clearInterval(timer);
+        reject(zipError);
         return;
       }
-      resolve(data);
-    });
+      if (completed) {
+        window.clearInterval(timer);
+        resolve();
+      }
+    }, 16);
   });
-  return new File([compressed], zipName, { type: 'application/zip' });
+
+  // 压缩产物只保留这一份；原始文件字节已在循环里逐个释放
+  const merged = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return new File([merged], zipName, { type: 'application/zip' });
 };
 
 type UploadProgressState = Pick<
@@ -550,6 +614,8 @@ const AtlasMerge: React.FC = () => {
   );
   const [analysis, setAnalysis] = useState<AtlasMergeAnalysis | null>(null);
   const [error, setError] = useState('');
+  /** 轮询瞬时失败的可重试提示：非空时保留 jobId 与 analyzing 阶段，不退回上传 */
+  const [pollRetryMessage, setPollRetryMessage] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const [exportFormat, setExportFormat] = useState<ExportFormat>('pivot_to_wide');
   const [isDownloading, setIsDownloading] = useState(false);
@@ -599,8 +665,8 @@ const AtlasMerge: React.FC = () => {
       if (data && (data.status === 'done' || data.status === 'error')) {
         return false;
       }
-      // 任务不存在/过期（404）立即终止，不等失败上限
-      if (isHttp404(query.state.error)) {
+      // 任务不存在/过期（404/410）立即终止，不等失败上限
+      if (isJobGoneError(query.state.error)) {
         return false;
       }
       // 连续失败达到上限后停止（QueryState 上的连续失败计数，成功时重置）
@@ -639,22 +705,33 @@ const AtlasMerge: React.FC = () => {
     }
   }, [pollingEnabled, jobQuery.data]);
 
-  // 轮询失败的分发：404 视为任务丢失；连续失败达上限才放弃，
-  // 未达上限的瞬时失败由 refetchInterval 继续轮询。
+  // 轮询失败的分发，失败计数统一取 jobQuery.failureCount（QueryObserver 暴露的同一个
+  // 连续失败计数，与 refetchInterval 读取的 query.state.fetchFailureCount 同源）；
+  // 成功轮询会把该计数重置为 0：
+  // - 404/410：任务确已丢失/过期，退回上传阶段；
+  // - 其它错误（网络抖动、5xx）达上限：保留 jobId 与 analyzing 阶段，只提示可重试，
+  //   后端任务可能仍在跑或已有结果，绝不能清掉 jobId 让用户重传数百 MB。
   useEffect(() => {
     if (!pollingEnabled || !jobQuery.isError || !jobQuery.error) {
       return;
     }
-    if (isHttp404(jobQuery.error)) {
+    const queryError = jobQuery.error;
+    if (isJobGoneError(queryError)) {
       setError('合并任务已丢失或过期，请重新分析');
       setPhase('upload');
       return;
     }
-    if (jobQuery.failureCount >= MAX_POLL_FAILURES) {
-      setError('无法获取合并进度，请检查网络后重新分析');
-      setPhase('upload');
+    if (jobQuery.failureCount < MAX_POLL_FAILURES) {
+      return;
     }
-  }, [pollingEnabled, jobQuery.isError, jobQuery.error, jobQuery.failureCount]);
+    const message = queryError.message || '无法获取合并进度，请稍后重试';
+    setPollRetryMessage((prev) => (prev === message ? prev : message));
+  }, [
+    pollingEnabled,
+    jobQuery.isError,
+    jobQuery.error,
+    jobQuery.failureCount,
+  ]);
 
   const handleDirectoryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -676,8 +753,18 @@ const AtlasMerge: React.FC = () => {
       setError('请先选择 unit-archive 目录，且目录中需包含可合并的 CSV 文件');
       return;
     }
+    // 打包前按原始体积拦截：浏览器端流式压缩仍会把压缩产物留在内存里，
+    // 超过后端上限的文件不应走完整个打包/上传流程再失败
+    if (stats.totalBytes > MAX_ARCHIVE_BYTES) {
+      setError(
+        `归档原始体积 ${formatBytes(stats.totalBytes)} 超过上限 ${formatBytes(MAX_ARCHIVE_BYTES)}，`
+        + '请先按 unit 拆分为多个目录分批合并（后端 tus 上传上限为 256 MB）',
+      );
+      return;
+    }
 
     setError('');
+    setPollRetryMessage('');
     setAnalysis(null);
     setDownloadError('');
     setJobId(null);
@@ -687,6 +774,8 @@ const AtlasMerge: React.FC = () => {
     setPackReadCount(0);
     setIsCompressing(false);
     isAnalyzingRef.current = true;
+    // analyze 成功后置位：此后任何异常都不再退回上传页
+    let jobAccepted = false;
 
     try {
       const zipName = `${stats.rootName}-atlas-merge.zip`;
@@ -694,10 +783,6 @@ const AtlasMerge: React.FC = () => {
         setPackReadCount(count);
       });
       setIsCompressing(true);
-      await new Promise<void>((resolve) => {
-        // 给压缩动画一拍的时间进入“压缩中”状态，压缩本身在 Worker 中执行
-        requestAnimationFrame(() => resolve());
-      });
 
       setAnalyzeStep('uploading');
       const uploadId = await archiveUpload.upload({
@@ -711,9 +796,13 @@ const AtlasMerge: React.FC = () => {
         '/tools/atlas-merge/analyze',
         { upload_id: uploadId, export_format: exportFormat },
       );
+      jobAccepted = true;
       setJobId(response.data.job_id);
       setJobProgress({ status: 'queued', done: 0, total: 0 });
     } catch (requestError) {
+      // 接口未就绪（404）与外层错误都只在上传/提交阶段退回上传页；
+      // 只要 analyze 已返回 job_id（jobAccepted），任务就已提交，后续交给
+      // 轮询的失败分发处理，保留 jobId 让用户可以继续等待或重新查询
       if (
         axios.isAxiosError(requestError) &&
         requestError.response?.status === 404
@@ -724,7 +813,9 @@ const AtlasMerge: React.FC = () => {
       } else {
         setError(await readErrorMessage(requestError));
       }
-      setPhase('upload');
+      if (!jobAccepted) {
+        setPhase('upload');
+      }
     } finally {
       isAnalyzingRef.current = false;
     }
@@ -989,16 +1080,40 @@ const AtlasMerge: React.FC = () => {
         )}
 
         {phase === 'analyzing' && stats && (
-          <AnalysisInProgress
-            rootName={stats.rootName}
-            fileCount={stats.files.length}
-            totalBytes={stats.totalBytes}
-            upload={archiveUpload}
-            step={analyzeStep}
-            packReadCount={packReadCount}
-            isCompressing={isCompressing}
-            jobProgress={jobProgress}
-          />
+          <>
+            <AnalysisInProgress
+              rootName={stats.rootName}
+              fileCount={stats.files.length}
+              totalBytes={stats.totalBytes}
+              upload={archiveUpload}
+              step={analyzeStep}
+              packReadCount={packReadCount}
+              isCompressing={isCompressing}
+              jobProgress={jobProgress}
+            />
+            {pollRetryMessage
+              && jobQuery.isError
+              && jobQuery.failureCount >= MAX_POLL_FAILURES && (
+                <Alert className="mt-6 flex flex-wrap items-center justify-between gap-4">
+                  <AlertDescription className="min-w-0 flex-1">
+                    连续 {MAX_POLL_FAILURES} 次获取合并进度失败（{pollRetryMessage}
+                    ）。任务仍在后台执行：自动轮询已暂停，点「重新查询」重试一次，
+                    查询成功后会自动恢复轮询。
+                  </AlertDescription>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void jobQuery.refetch().catch(() => undefined)}
+                    >
+                      <RotateCcw data-icon="inline-start" />
+                      重新查询
+                    </Button>
+                  </div>
+                </Alert>
+              )}
+          </>
         )}
 
         {phase === 'ready' && analysis && (

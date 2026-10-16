@@ -101,6 +101,8 @@ const AdminDashboard: React.FC = () => {
   const [toolLoading, setToolLoading] = useState(true);
   const [activeLoading, setActiveLoading] = useState(true);
   const [error, setError] = useState('');
+  // 重试计数：三个 effect 都依赖它，点「重试」即可重新拉取全部统计
+  const [reloadKey, setReloadKey] = useState(0);
 
   // 概览卡片只加载一次，不随日期范围变化。
   useEffect(() => {
@@ -128,7 +130,7 @@ const AdminDashboard: React.FC = () => {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canViewStats]);
+  }, [canViewStats, reloadKey]);
 
   // 工具调用统计：随 toolDays 变化重新拉取（null = 全部时间，不携带 days 参数）。
   useEffect(() => {
@@ -136,6 +138,8 @@ const AdminDashboard: React.FC = () => {
 
     let active = true;
     setToolLoading(true);
+    // 重新拉取前先清掉上一次的错误：否则一次瞬时失败会让整页永久停在「加载失败」
+    setError('');
     api
       .getToolCalls(toolDays ?? undefined)
       .then((t) => {
@@ -154,7 +158,7 @@ const AdminDashboard: React.FC = () => {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canViewStats, toolDays]);
+  }, [canViewStats, reloadKey, toolDays]);
 
   // 每日活跃用户：随 activeDays 变化重新拉取。
   useEffect(() => {
@@ -162,6 +166,7 @@ const AdminDashboard: React.FC = () => {
 
     let active = true;
     setActiveLoading(true);
+    setError('');
     api
       .getDailyActiveUsers(activeDays)
       .then((d) => {
@@ -180,7 +185,7 @@ const AdminDashboard: React.FC = () => {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canViewStats, activeDays]);
+  }, [canViewStats, reloadKey, activeDays]);
 
   // 工具调用统计：同一工具不同操作（如 analyze/download）按 slug 归并为一个条目，
   // count 相加，label 显示中文工具名；最终按 count 降序（与后端返回排序一致）。
@@ -220,7 +225,16 @@ const AdminDashboard: React.FC = () => {
       {error && (
         <Alert variant="destructive">
           <AlertTitle>加载失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex items-center gap-3">
+            {error}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReloadKey((key) => key + 1)}
+            >
+              重试
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 
@@ -230,7 +244,7 @@ const AdminDashboard: React.FC = () => {
           label="正在加载统计数据"
           detail="等待安全聚合"
         />
-      ) : !error && (
+      ) : (
         <>
           <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
             <PermissionGuard permission="user:read">
