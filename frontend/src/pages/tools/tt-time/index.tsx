@@ -106,13 +106,13 @@ const TtTimeTool: React.FC = () => {
     setExcludeFail(true);
     setPhase('upload');
     // 同一文件命中服务端缓存时 uploadId 会复用，必须清掉去重键才能重新触发处理
-    lastProcessedRef.current = '';
+    clearProcessed();
     // 立刻清掉旧数据集的 uploadId：否则 station/excludeFail 被重置会让驱动 effect
     // 重跑，用上一个 uploadId 发请求，把旧数据集的图表当成"新文件的结果"展示，
     // 还会在上传期间把界面切到 analyzing、盖掉上传进度。
     setCurrentUploadId('');
     // 在途的旧响应同样不能再落地
-    processGenRef.current += 1;
+    invalidateInFlight();
     void tusUpload.upload({ file, metadata: { filename: file.name } });
   };
 
@@ -121,15 +121,31 @@ const TtTimeTool: React.FC = () => {
   //    全量计算（旧实现因此对每次上传都发两遍相同请求）；
   // ② 300ms 定时器把分箱宽度输入期间的逐字触发收敛成一次请求。
   const lastProcessedRef = useRef('');
+  // ref 写入统一走这三个回调：效果/事件里直接改 ref 会被 React Compiler 的
+  // immutability 规则判为"在渲染期修改"
+  const invalidateInFlight = useCallback(() => {
+    processGenRef.current += 1;
+  }, []);
+  const markProcessed = useCallback((key: string) => {
+    lastProcessedRef.current = key;
+  }, []);
+  const clearProcessed = useCallback(() => {
+    lastProcessedRef.current = '';
+  }, []);
   useEffect(() => {
     if (!currentUploadId) return;
     const key = `${currentUploadId}|${binWidth}|${station}|${excludeFail}`;
     if (lastProcessedRef.current === key) return;
+    // 参数已变：立刻作废在途请求。否则它会在 300ms 防抖窗口内落地，
+    // 把旧参数的结果配着新参数一起渲染出来。
+    invalidateInFlight();
     const timer = window.setTimeout(() => {
+      // 「重新计算」可能已经替同一组参数发过请求了，别再发一遍
+      if (lastProcessedRef.current === key) return;
       // 只有上传后的首次计算才切整页 analyzing；参数变化必须保持结果页挂载，
       // 否则分箱宽度输入框会被卸载，用户打字打到一半的字符直接丢失。
       const isFirstRun = lastProcessedRef.current === '';
-      lastProcessedRef.current = key;
+      markProcessed(key);
       if (isFirstRun) {
         setPhase('analyzing');
       } else {
@@ -142,13 +158,21 @@ const TtTimeTool: React.FC = () => {
       });
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [currentUploadId, binWidth, station, excludeFail, runBackendProcess]);
+  }, [
+    currentUploadId,
+    binWidth,
+    station,
+    excludeFail,
+    runBackendProcess,
+    invalidateInFlight,
+    markProcessed,
+  ]);
 
   // I-3：处理失败必须可见且可重试。原实现只在去重键上做一次性请求，
   // 失败后既没有提示也没有重试入口，用户只能重传整个文件。
   const retryProcess = () => {
     if (!currentUploadId) return;
-    lastProcessedRef.current = `${currentUploadId}|${binWidth}|${station}|${excludeFail}`;
+    markProcessed(`${currentUploadId}|${binWidth}|${station}|${excludeFail}`);
     setErrorMessage('');
     setIsRecomputing(true);
     void runBackendProcess(currentUploadId, {
@@ -163,7 +187,7 @@ const TtTimeTool: React.FC = () => {
     tusUpload.reset();
     setPhase('upload');
     setCurrentUploadId('');
-    lastProcessedRef.current = '';
+    clearProcessed();
     setProcessData(null);
     setFileName('');
     setStation('all');
@@ -171,7 +195,7 @@ const TtTimeTool: React.FC = () => {
     setActiveModule('distribution');
     setErrorMessage('');
     // 重置期间在途的旧响应不得再把界面拉回旧结果页
-    processGenRef.current += 1;
+    invalidateInFlight();
   };
 
   const stations = processData?.stations ?? [];

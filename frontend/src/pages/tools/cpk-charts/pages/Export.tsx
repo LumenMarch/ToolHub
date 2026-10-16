@@ -37,7 +37,15 @@ const Export: React.FC = () => {
   // 才从总览页载入时勾选集合仍停留在首挂载的空快照（导致所有导出按钮被禁用）
   const [exportChecked, setExportChecked] = useState<Set<string> | null>(null);
   const defaultChecked = useMemo(() => new Set(merged.map((m) => m.name)), [merged]);
-  const checkedNames = exportChecked ?? defaultChecked;
+  // 手动勾选要按当前数据集求交集：替换数据集后残留的旧名字会让"已勾选 N 项"
+  // 和导出按钮看起来可用，实际却匹配不到任何列、导出 0 项
+  const checkedNames = useMemo(
+    () =>
+      exportChecked
+        ? new Set([...exportChecked].filter((name) => defaultChecked.has(name)))
+        : defaultChecked,
+    [defaultChecked, exportChecked],
+  );
 
   const filteredExport = useMemo(() => {
     const q = exportQuery.trim().toLowerCase();

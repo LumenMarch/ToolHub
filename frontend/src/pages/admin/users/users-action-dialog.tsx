@@ -614,15 +614,21 @@ export function UsersActionDialog({
   // 就会把空集合写成真相，清空该用户的角色与直接权限，且提示仍是「已更新」。
   // 没有 role:read 时两个查询是 disabled 的，v5 里 disabled 查询恒为 isPending，
   // 不能把它算进"数据未就绪"，否则按钮永久不可用（连只改启用状态都做不到）。
+  // 编辑自己不发送 role_ids / tool_permission_ids，因此不该被这两个列表的失败连带挡住
+  const permissionsEditable = !(isEdit && isSelf)
   const listsLoading =
-    canReadRoles && (rolesQuery.isPending || permissionsQuery.isPending)
+    permissionsEditable && canReadRoles && (rolesQuery.isPending || permissionsQuery.isPending)
   const dataReady = roleIdsReady && directPermsReady && !listsLoading
-  // 列表加载失败时两种模式都禁止保存：derivedToolMode 依赖 allToolPermIds，列表缺位会
-  // 被 [].every() 判成「持有全部工具」，角色区随之隐藏「工具使用者」，提交的 role_ids
+  // 列表加载失败时禁止保存：derivedToolMode 依赖 allToolPermIds，列表缺位会被
+  // [].every() 判成「持有全部工具」，角色区随之隐藏「工具使用者」，提交的 role_ids
   // 就会把它摘掉；而 tool_permission_ids 又因 isError 不下发——目标用户会被清成零权限，
   // 界面提示却仍是「已更新用户」。这与角色加载失败是同一条数据损坏路径。
-  const listsFailed = canReadRoles && (rolesQuery.isError || permissionsQuery.isError)
-  const canSubmit = dataReady && !listsFailed && !roleIdsError
+  const listsFailed =
+    permissionsEditable && canReadRoles && (rolesQuery.isError || permissionsQuery.isError)
+  // 新建同样要求能读到角色：POST /admin/users 对显式空 role_ids 与缺省都不分配角色，
+  // 没有 role:read 时创建只会得到一个进不去任何工具的账号。
+  const canSubmit =
+    dataReady && !listsFailed && !roleIdsError && (isEdit || canReadRoles)
 
   const onSubmit = handleSubmit(async (values) => {
     try {
@@ -744,7 +750,9 @@ export function UsersActionDialog({
         >
           {!canReadRoles ? (
             <p className='text-sm text-muted-foreground'>
-              当前账号没有 role:read 权限，保存不会改动角色与工具权限
+              {isEdit
+                ? '当前账号没有 role:read 权限，保存不会改动角色与工具权限'
+                : '当前账号没有 role:read 权限，无法创建用户（无法分配角色）'}
             </p>
           ) : roleIdsError || listsFailed ? (
             <div className='flex flex-col items-start gap-2'>

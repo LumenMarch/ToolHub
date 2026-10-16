@@ -130,6 +130,14 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
   const hashingThrottleRef = useRef<ProgressThrottle>({ percent: -1, at: 0 });
   const uploadThrottleRef = useRef<ProgressThrottle>({ percent: -1, at: 0 });
 
+  // 活跃看门狗的停止器：reset() 必须能把它们停掉，否则被放弃的上传仍会在
+  // 稍后因停滞而 reject，把已经重置干净的状态改回 error
+  const watchdogStoppersRef = useRef<Set<() => void> | null>(null);
+  if (watchdogStoppersRef.current === null) {
+    watchdogStoppersRef.current = new Set<() => void>();
+  }
+  const watchdogStoppers = watchdogStoppersRef.current;
+
   const uploadRefs = useRef<Set<tus.Upload> | null>(null);
   if (uploadRefs.current === null) {
     uploadRefs.current = new Set<tus.Upload>();
@@ -241,7 +249,9 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
                 window.clearInterval(watchdog);
                 watchdog = null;
               }
+              watchdogStoppers.delete(stopWatchdog);
             };
+            watchdogStoppers.add(stopWatchdog);
 
             const uploadInstance = new tus.Upload(file, {
               endpoint,
@@ -347,7 +357,11 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
               }
               if (Date.now() - lastTick <= STALL_TIMEOUT_MS) return;
               stopWatchdog();
-              void uploadInstance.abort(true);
+              // 停滞实例必须自己从 uploads 摘掉：abort 之后 tus 不再回调
+              // onError/onSuccess，留在集合里会一直持有整个 File
+              uploads.delete(uploadInstance);
+              // abort 的 rejection 单独吞掉，只上报停滞本身
+              void uploadInstance.abort(true).catch(() => undefined);
               reject(new Error('上传停滞超过 60 秒，已中止'));
             }, STALL_CHECK_INTERVAL_MS);
             uploadInstance.start();
@@ -376,12 +390,13 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
 
       return run();
     },
-    [aborts, chunkSize, endpoint, uploads],
+    [aborts, chunkSize, endpoint, uploads, watchdogStoppers],
   );
 
   const abort = useCallback(() => {
+    for (const stop of [...watchdogStoppers]) stop();
     for (const uploadInstance of uploads) {
-      void uploadInstance.abort(true);
+      void uploadInstance.abort(true).catch(() => undefined);
     }
     uploads.clear();
     for (const controller of aborts) {
@@ -389,13 +404,16 @@ export function useTusUpload(options: UseTusUploadOptions = {}) {
     }
     aborts.clear();
     setState({ ...createInitialState(), status: 'aborted' });
-  }, [aborts, uploads]);
+  }, [aborts, uploads, watchdogStoppers]);
 
   const reset = useCallback(() => {
+    // 先停看门狗：否则被放弃的上传仍可能在稍后因停滞而 reject，
+    // 把刚刚重置干净的状态改成 error
+    for (const stop of [...watchdogStoppers]) stop();
     uploads.clear();
     aborts.clear();
     setState(createInitialState());
-  }, [aborts, uploads]);
+  }, [aborts, uploads, watchdogStoppers]);
 
   return { ...state, upload, abort, reset };
 }

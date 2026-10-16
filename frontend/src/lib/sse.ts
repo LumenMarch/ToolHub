@@ -87,17 +87,21 @@ export async function postSse(path: string, options: PostSseOptions): Promise<vo
       const { value, done } = await reader.read();
       if (done) break;
       buffer = normalizeLineEnds(buffer + decoder.decode(value, { stream: true }));
-      // 一直没有分帧边界说明对端在发超长单帧：不设上限会把整个响应堆进内存
-      if (buffer.length > MAX_FRAME_BUFFER) {
-        throw new Error('流式响应单帧超出上限，已中止');
-      }
       let boundary = buffer.indexOf('\n\n');
       while (boundary !== -1) {
         const frame = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
+        // 上限按"单个帧"判定：一次读到多个完整小帧是正常的，不能因此拒绝整个流
+        if (frame.length > MAX_FRAME_BUFFER) {
+          throw new Error('流式响应单帧超出上限，已中止');
+        }
         const parsed = parseFrame(frame);
         if (parsed) onEvent(parsed);
         boundary = buffer.indexOf('\n\n');
+      }
+      // 尚未分帧的残留同样要设上限，否则对端一直不发分隔符时会把整个响应堆进内存
+      if (buffer.length > MAX_FRAME_BUFFER) {
+        throw new Error('流式响应单帧超出上限，已中止');
       }
     }
     const tail = parseFrame(buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));

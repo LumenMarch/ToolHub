@@ -258,8 +258,11 @@ const buildArchive = async (
 
   // 每个文件一条独立 deflate 流，全部结束后才写中央目录（zip.end()）
   let pending = 0;
+  // 循环里有 await（逐个读文件），期间先入队的 entry 可能已经压完。若只看 pending，
+  // 就会在还有文件没入队时提前 end()，后续 add() 抛错或产出截断的 zip。
+  let allQueued = false;
   const endArchive = () => {
-    if (pending === 0 && !completed) {
+    if (allQueued && pending === 0 && !completed) {
       // end() 必须等当前一轮 add/ondata 回调栈退出后调用：否则 fflate 会把
       // 中央目录的写入推迟到下一次 add，而 end() 之后不再有 add，归档永远不结束
       queueMicrotask(() => zipStream.end());
@@ -285,7 +288,8 @@ const buildArchive = async (
     pending += 1;
     entry.push(bytes, true);
   }
-  // 空列表（files 为空）或全部文件已在 await 期间压缩完成时，这里兜底关闭归档
+  // 全部文件都入队了才允许关档；空列表（files 为空）同样在这里兜底
+  allQueued = true;
   endArchive();
 
   await new Promise<void>((resolve, reject) => {
@@ -646,6 +650,13 @@ const AtlasMerge: React.FC = () => {
   const pollingEnabled =
     phase === 'analyzing' && analyzeStep === 'processing' && jobId !== null;
 
+  // 连续轮询失败次数自己记：TanStack Query 的 fetchFailureCount 是「单次 fetch」的
+  // 失败计数（retry: false 时每次都是 1），不跨轮累加，拿它做上限判断永远不会触发
+  const pollFailureCountRef = useRef(0);
+  const [pollFailureCount, setPollFailureCount] = useState(0);
+  // 每次失败都会刷新 errorUpdatedAt，用它保证每轮只计一次
+  const lastPollErrorAtRef = useRef(0);
+
   const jobQuery = useQuery({
     queryKey: ['atlas-merge-job', jobId],
     queryFn: async ({ queryKey }) => {
@@ -669,8 +680,9 @@ const AtlasMerge: React.FC = () => {
       if (isJobGoneError(query.state.error)) {
         return false;
       }
-      // 连续失败达到上限后停止（QueryState 上的连续失败计数，成功时重置）
-      if (query.state.fetchFailureCount >= MAX_POLL_FAILURES) {
+      // 连续失败达到上限后停止。注意不能用 query.state.fetchFailureCount：
+      // retry:false 时它每次 fetch 都从 0 重新记，恒为 1，永远到不了上限
+      if (pollFailureCountRef.current >= MAX_POLL_FAILURES) {
         return false;
       }
       return POLL_INTERVAL_MS;
@@ -705,12 +717,10 @@ const AtlasMerge: React.FC = () => {
     }
   }, [pollingEnabled, jobQuery.data]);
 
-  // 轮询失败的分发，失败计数统一取 jobQuery.failureCount（QueryObserver 暴露的同一个
-  // 连续失败计数，与 refetchInterval 读取的 query.state.fetchFailureCount 同源）；
-  // 成功轮询会把该计数重置为 0：
+  // 轮询失败的分发。连续失败次数用上面的自有计数（react-query 的计数不跨轮累加）：
   // - 404/410：任务确已丢失/过期，退回上传阶段；
-  // - 其它错误（网络抖动、5xx）达上限：保留 jobId 与 analyzing 阶段，只提示可重试，
-  //   后端任务可能仍在跑或已有结果，绝不能清掉 jobId 让用户重传数百 MB。
+  // - 其它错误（网络抖动、5xx）逐次累加，达上限后停止轮询并提示可重试，
+  //   但保留 jobId 与 analyzing 阶段，绝不把用户推回上传页重传数百 MB。
   useEffect(() => {
     if (!pollingEnabled || !jobQuery.isError || !jobQuery.error) {
       return;
@@ -721,7 +731,14 @@ const AtlasMerge: React.FC = () => {
       setPhase('upload');
       return;
     }
-    if (jobQuery.failureCount < MAX_POLL_FAILURES) {
+    // errorUpdatedAt 每失败一次都会变，用它保证每轮只计一次
+    if (lastPollErrorAtRef.current === jobQuery.errorUpdatedAt) {
+      return;
+    }
+    lastPollErrorAtRef.current = jobQuery.errorUpdatedAt;
+    pollFailureCountRef.current += 1;
+    setPollFailureCount(pollFailureCountRef.current);
+    if (pollFailureCountRef.current < MAX_POLL_FAILURES) {
       return;
     }
     const message = queryError.message || '无法获取合并进度，请稍后重试';
@@ -730,8 +747,19 @@ const AtlasMerge: React.FC = () => {
     pollingEnabled,
     jobQuery.isError,
     jobQuery.error,
-    jobQuery.failureCount,
+    jobQuery.errorUpdatedAt,
   ]);
+
+  // 轮询恢复成功即清零计数，重试横幅随之消失
+  useEffect(() => {
+    if (!pollingEnabled || jobQuery.isError || !jobQuery.data) {
+      return;
+    }
+    pollFailureCountRef.current = 0;
+    lastPollErrorAtRef.current = 0;
+    setPollFailureCount(0);
+    setPollRetryMessage('');
+  }, [pollingEnabled, jobQuery.isError, jobQuery.data]);
 
   const handleDirectoryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -755,14 +783,6 @@ const AtlasMerge: React.FC = () => {
     }
     // 打包前按原始体积拦截：浏览器端流式压缩仍会把压缩产物留在内存里，
     // 超过后端上限的文件不应走完整个打包/上传流程再失败
-    if (stats.totalBytes > MAX_ARCHIVE_BYTES) {
-      setError(
-        `归档原始体积 ${formatBytes(stats.totalBytes)} 超过上限 ${formatBytes(MAX_ARCHIVE_BYTES)}，`
-        + '请先按 unit 拆分为多个目录分批合并（后端 tus 上传上限为 256 MB）',
-      );
-      return;
-    }
-
     setError('');
     setPollRetryMessage('');
     setAnalysis(null);
@@ -782,6 +802,14 @@ const AtlasMerge: React.FC = () => {
       const zipFile = await buildArchive(stats.files, zipName, (count) => {
         setPackReadCount(count);
       });
+      // 后端 MAX_SIZE 限的是 tus 上传物（这个压缩包），不是未压缩的 CSV 总量。
+      // CSV 压缩比很高，按原始体积预判会把"压缩后远低于上限"的大批量批次误拦。
+      if (zipFile.size > MAX_ARCHIVE_BYTES) {
+        throw new Error(
+          `归档压缩后体积 ${formatBytes(zipFile.size)} 超过上限 ${formatBytes(MAX_ARCHIVE_BYTES)}，`
+          + '请先按 unit 拆分为多个目录分批合并',
+        );
+      }
       setIsCompressing(true);
 
       setAnalyzeStep('uploading');
@@ -1093,7 +1121,7 @@ const AtlasMerge: React.FC = () => {
             />
             {pollRetryMessage
               && jobQuery.isError
-              && jobQuery.failureCount >= MAX_POLL_FAILURES && (
+              && pollFailureCount >= MAX_POLL_FAILURES && (
                 <Alert className="mt-6 flex flex-wrap items-center justify-between gap-4">
                   <AlertDescription className="min-w-0 flex-1">
                     连续 {MAX_POLL_FAILURES} 次获取合并进度失败（{pollRetryMessage}

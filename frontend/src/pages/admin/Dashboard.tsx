@@ -100,7 +100,10 @@ const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [toolLoading, setToolLoading] = useState(true);
   const [activeLoading, setActiveLoading] = useState(true);
-  const [error, setError] = useState('');
+  // 三个请求各自持有错误：共用一个 error 时，任一方重新拉取都会把别人的失败
+  // 一起清掉——横幅消失，而那份数据仍然不可用
+  const [errors, setErrors] = useState({ overview: '', tools: '', active: '' });
+  const error = errors.overview || errors.tools || errors.active;
   // 重试计数：三个 effect 都依赖它，点「重试」即可重新拉取全部统计
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -111,7 +114,7 @@ const AdminDashboard: React.FC = () => {
 
     let active = true;
     setLoading(true);
-    setError('');
+    setErrors((prev) => (prev.overview === '' ? prev : { ...prev, overview: '' }));
     api
       .getOverview()
       .then((o) => {
@@ -120,7 +123,7 @@ const AdminDashboard: React.FC = () => {
       })
       .catch(() => {
         if (!active) return;
-        setError('统计数据加载失败');
+        setErrors((prev) => ({ ...prev, overview: '统计数据加载失败' }));
       })
       .finally(() => {
         if (!active) return;
@@ -138,8 +141,8 @@ const AdminDashboard: React.FC = () => {
 
     let active = true;
     setToolLoading(true);
-    // 重新拉取前先清掉上一次的错误：否则一次瞬时失败会让整页永久停在「加载失败」
-    setError('');
+    // 只清本域的错误：清共享错误会顺手抹掉概览/活跃用户那边的失败
+    setErrors((prev) => (prev.tools === '' ? prev : { ...prev, tools: '' }));
     api
       .getToolCalls(toolDays ?? undefined)
       .then((t) => {
@@ -148,7 +151,7 @@ const AdminDashboard: React.FC = () => {
       })
       .catch(() => {
         if (!active) return;
-        setError('统计数据加载失败');
+        setErrors((prev) => ({ ...prev, tools: '统计数据加载失败' }));
       })
       .finally(() => {
         if (!active) return;
@@ -166,7 +169,7 @@ const AdminDashboard: React.FC = () => {
 
     let active = true;
     setActiveLoading(true);
-    setError('');
+    setErrors((prev) => (prev.active === '' ? prev : { ...prev, active: '' }));
     api
       .getDailyActiveUsers(activeDays)
       .then((d) => {
@@ -175,7 +178,7 @@ const AdminDashboard: React.FC = () => {
       })
       .catch(() => {
         if (!active) return;
-        setError('统计数据加载失败');
+        setErrors((prev) => ({ ...prev, active: '统计数据加载失败' }));
       })
       .finally(() => {
         if (!active) return;
