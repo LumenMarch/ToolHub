@@ -359,18 +359,18 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   // 权限列表加载失败：「全部工具」模式必须停用，否则全选集合是空数组，
-  // 保存会写回空/陈旧权限却提示成功
-  const [permissionsLoadFailed, setPermissionsLoadFailed] = useState(false);
+  // 保存会写回空/陈旧权限却提示成功。只在事件处理里读，故用 ref 而不是 state。
+  const permissionsLoadFailedRef = useRef(false);
 
   useEffect(() => {
     api
       .listPermissions()
       .then((permissions) => {
         setAllPermissions(permissions);
-        setPermissionsLoadFailed(false);
+        permissionsLoadFailedRef.current = false;
       })
       .catch(() => {
-        setPermissionsLoadFailed(true);
+        permissionsLoadFailedRef.current = true;
         toast.error('权限列表加载失败，「工具使用者」模式暂不可用');
       });
   }, [api]);
@@ -403,7 +403,7 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
 
   // 切换工具权限模式：'all' 时并入全部工具权限 id（管理权限保持不动）；'custom' 时不动已选集合
   const switchToolMode = (mode: 'all' | 'custom') => {
-    if (mode === 'all' && permissionsLoadFailed) {
+    if (mode === 'all' && permissionsLoadFailedRef.current) {
       setError('权限列表加载失败，「全部工具」模式暂不可用，请重新打开本窗口再试');
       return;
     }
@@ -417,7 +417,7 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (toolMode === 'all' && permissionsLoadFailed) {
+    if (toolMode === 'all' && permissionsLoadFailedRef.current) {
       setError('权限列表加载失败，无法保存「全部工具」模式，请重新打开本窗口再试');
       return;
     }
