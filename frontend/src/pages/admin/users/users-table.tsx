@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { DataTablePagination, DataTableToolbar } from '@/components/data-table'
@@ -132,6 +133,24 @@ export function UsersTable() {
         ]}
       />
 
+      {/* 保留旧数据（keepPreviousData）时错误分支本来是走不到的：
+          refetch 失败必须仍然可见，否则管理员会拿着过期列表做判断 */}
+      {usersQuery.isError ? (
+        <Alert variant='destructive'>
+          <AlertTitle>加载用户列表失败</AlertTitle>
+          <AlertDescription className='flex items-center gap-3'>
+            表格可能仍在展示上一次成功加载的结果。
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => void usersQuery.refetch()}
+            >
+              重试
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <div className='overflow-hidden rounded-xl border border-border'>
         <Table>
           <TableHeader>
@@ -194,24 +213,9 @@ export function UsersTable() {
                   colSpan={visibleLeafColumns.length}
                   className='h-24 text-center'
                 >
-                  {usersQuery.isError ? (
-                    <div className='flex flex-col items-center gap-3'>
-                      <span className='text-sm text-muted-foreground'>
-                        加载用户列表失败
-                      </span>
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={() => void usersQuery.refetch()}
-                      >
-                        重试
-                      </Button>
-                    </div>
-                  ) : (
-                    <span className='text-sm text-muted-foreground'>
-                      无匹配用户
-                    </span>
-                  )}
+                  <span className='text-sm text-muted-foreground'>
+                    无匹配用户
+                  </span>
                 </TableCell>
               </TableRow>
             )}

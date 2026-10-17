@@ -276,7 +276,6 @@ const ToolRow: React.FC<ToolRowProps> = ({
         !row.enabled && 'opacity-50',
         isDragging && 'z-50 border-primary opacity-90 shadow-xl',
       )}
-      {...attributes}
     >
       <div className="flex items-center gap-4">
         {/* 拖拽手柄（仅手柄响应拖拽，避免输入框/按钮误触） */}
@@ -287,6 +286,9 @@ const ToolRow: React.FC<ToolRowProps> = ({
           className="shrink-0 cursor-grab touch-none active:cursor-grabbing"
           aria-label="拖动排序"
           title="拖动调整顺序"
+          // attributes 必须与 listeners 落在同一个 activator 上：
+          // 铺到整行会让行容器变成 role=button 并包住复选框/输入框
+          {...attributes}
           {...listeners}
         >
           <GripVertical />

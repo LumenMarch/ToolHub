@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/card';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { formatDateTime } from '@/lib/format-time';
 import {
   Select,
   SelectContent,
@@ -120,9 +121,7 @@ export const LlmConfigCard: React.FC<Props> = ({ config, capabilities, onSaved }
         <CardDescription>
           逐字段覆盖 env 默认值，保存后立即生效；留空表示继承 env。
           {config.updated_at
-            ? ` 最近由 ${config.updated_by ?? '未知'} 更新于 ${new Date(
-                config.updated_at,
-              ).toLocaleString()}。`
+            ? ` 最近由 ${config.updated_by ?? '未知'} 更新于 ${formatDateTime(config.updated_at)}。`
             : ''}
         </CardDescription>
         <CardAction className="flex items-center gap-2">

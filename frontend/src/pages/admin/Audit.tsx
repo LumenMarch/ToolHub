@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -118,10 +118,23 @@ const AdminAudit: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionPrefix, setActionPrefix] = useState('');
+  // 输入框即时值 vs 已提交的筛选值：两者分开才能在不引入 effect 内 setState 的前提下防抖
   const [username, setUsername] = useState('');
+  const [usernameFilter, setUsernameFilter] = useState('');
+  const filterTimerRef = useRef<number | null>(null);
+  // 请求序号：乱序返回时只认最后一次请求，避免列表停在旧筛选结果上
+  const requestSeqRef = useRef(0);
+
+  useEffect(
+    () => () => {
+      if (filterTimerRef.current !== null) window.clearTimeout(filterTimerRef.current);
+    },
+    [],
+  );
 
   const fetchLogs = useCallback(
     (currentPage: number, currentPageSize: number) => {
+      const seq = ++requestSeqRef.current;
       setLoading(true);
       setError('');
       api
@@ -129,21 +142,39 @@ const AdminAudit: React.FC = () => {
           skip: (currentPage - 1) * currentPageSize,
           limit: currentPageSize,
           action_prefix: actionPrefix || undefined,
-          username: username || undefined,
+          username: usernameFilter || undefined,
         })
         .then((data) => {
+          if (seq !== requestSeqRef.current) return;
           setLogs(data.items);
           setTotal(data.total);
         })
-        .catch(() => setError('加载审计日志失败'))
-        .finally(() => setLoading(false));
+        .catch(() => {
+          if (seq !== requestSeqRef.current) return;
+          setError('加载审计日志失败');
+        })
+        .finally(() => {
+          if (seq !== requestSeqRef.current) return;
+          setLoading(false);
+        });
     },
-    [api, actionPrefix, username],
+    [api, actionPrefix, usernameFilter],
   );
 
   useEffect(() => {
     fetchLogs(page, pageSize);
   }, [fetchLogs, page, pageSize]);
+
+  /** 用户名筛选防抖 350ms（与 users-table 的搜索防抖一致），输入过程中不发请求。 */
+  const handleUsernameChange = (value: string) => {
+    setUsername(value);
+    setPage(1);
+    if (filterTimerRef.current !== null) window.clearTimeout(filterTimerRef.current);
+    filterTimerRef.current = window.setTimeout(() => {
+      filterTimerRef.current = null;
+      setUsernameFilter(value);
+    }, 350);
+  };
 
   const handlePageSizeChange = (newSize: number) => {
     setPageSize(newSize);
@@ -193,10 +224,7 @@ const AdminAudit: React.FC = () => {
           id="audit-username-filter"
           type="search"
           value={username}
-          onChange={(event) => {
-            setUsername(event.target.value);
-            setPage(1);
-          }}
+          onChange={(event) => handleUsernameChange(event.target.value)}
           placeholder="筛选用户名"
           aria-label="筛选用户名"
         />
@@ -210,7 +238,16 @@ const AdminAudit: React.FC = () => {
       {error && (
         <Alert variant="destructive">
           <AlertTitle>加载失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex items-center gap-3">
+            {error}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchLogs(page, pageSize)}
+            >
+              重试
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 

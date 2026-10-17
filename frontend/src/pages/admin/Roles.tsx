@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { useAdminApi } from './hooks/use-admin-api';
 import type {
@@ -74,9 +75,10 @@ const AdminRoles: React.FC = () => {
     refresh();
   };
 
+  // 这里不关闭弹窗：权限保存是第二次请求，提前卸载会让它的失败无处展示
+  // （改名已生效、权限未改的「半成功」过去会静默关闭）。
   const handleUpdate = async (roleId: number, name?: string, description?: string) => {
     await api.updateRole(roleId, { name, description });
-    setEditTarget(null);
     refresh();
   };
 
@@ -356,9 +358,21 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
   const [toolMode, setToolMode] = useState<'all' | 'custom'>('custom');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // 权限列表加载失败：「全部工具」模式必须停用，否则全选集合是空数组，
+  // 保存会写回空/陈旧权限却提示成功。只在事件处理里读，故用 ref 而不是 state。
+  const permissionsLoadFailedRef = useRef(false);
 
   useEffect(() => {
-    api.listPermissions().then(setAllPermissions).catch(() => {});
+    api
+      .listPermissions()
+      .then((permissions) => {
+        setAllPermissions(permissions);
+        permissionsLoadFailedRef.current = false;
+      })
+      .catch(() => {
+        permissionsLoadFailedRef.current = true;
+        toast.error('权限列表加载失败，「工具使用者」模式暂不可用');
+      });
   }, [api]);
 
   // 全部 tool: 前缀权限的 id，供「工具使用者」模式的全选与初始状态判断使用
@@ -389,6 +403,10 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
 
   // 切换工具权限模式：'all' 时并入全部工具权限 id（管理权限保持不动）；'custom' 时不动已选集合
   const switchToolMode = (mode: 'all' | 'custom') => {
+    if (mode === 'all' && permissionsLoadFailedRef.current) {
+      setError('权限列表加载失败，「全部工具」模式暂不可用，请重新打开本窗口再试');
+      return;
+    }
     setToolMode(mode);
     if (mode === 'all') {
       setSelectedPermIds((prev) =>
@@ -399,11 +417,17 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (toolMode === 'all' && permissionsLoadFailedRef.current) {
+      setError('权限列表加载失败，无法保存「全部工具」模式，请重新打开本窗口再试');
+      return;
+    }
     setSubmitting(true);
     setError('');
     try {
       await onSubmit(target.id, name.trim() || undefined, description.trim() || undefined);
       await api.updateRolePermissions(target.id, selectedPermIds);
+      // 两次写入都成功后才关闭；任一失败保持打开并展示错误
+      onClose();
     } catch {
       setError('保存失败');
     } finally {

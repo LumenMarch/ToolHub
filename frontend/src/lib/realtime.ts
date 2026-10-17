@@ -29,6 +29,8 @@ const WS_PATH = '/api/v1/realtime/ws';
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30000;
 const PING_INTERVAL_MS = 25000;
+/** WebSocket 通用的 Policy Violation 关闭码：后端用它表示认证失败，网关断连也会用它。 */
+const WS_POLICY_VIOLATION = 1008;
 
 function buildWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -93,6 +95,18 @@ class RealtimeClient {
     this.setState('closed');
   }
 
+  /**
+   * auth 层复核会话仍有效后恢复连接。
+   *
+   * 从当前退避值继续而不重置：网关连续用 1008 断连时退避会逐次翻倍，
+   * 避免「断开 → 立刻重连」形成重连风暴。
+   */
+  resume(): void {
+    if (this.shouldRun) return;
+    this.shouldRun = true;
+    this.scheduleReconnect();
+  }
+
   private setState(next: ConnectionState): void {
     if (this.state === next) return;
     this.state = next;
@@ -143,7 +157,8 @@ class RealtimeClient {
       }
       if (!event || typeof event.type !== 'string') return;
       if (event.type === 'pong') return;
-      for (const listener of this.listeners) {
+      // 先快照再派发：监听器内部退订会改动正在迭代的 Set
+      for (const listener of [...this.listeners]) {
         try {
           listener(event);
         } catch {
@@ -163,11 +178,12 @@ class RealtimeClient {
       this.setState('closed');
       if (!this.shouldRun) return;
 
-      // 鉴权/策略失败：停止重连，复用 unauthorized 清会话
-      if (event.code === 1008) {
+      // 不在这里直接登出：1008 语义太宽（网关/反向代理主动断连同样会用它），
+      // 直接清会话会把正常用户误踢下线。交 auth 层用 HTTP 复核会话真伪后再决定。
+      if (event.code === WS_POLICY_VIOLATION) {
         this.shouldRun = false;
         this.clearReconnect();
-        window.dispatchEvent(new Event('unauthorized'));
+        window.dispatchEvent(new Event('realtime.policy-close'));
         return;
       }
 

@@ -1,4 +1,5 @@
-import { FileCode, FileSpreadsheet } from 'lucide-react'
+import { ChevronLeft, ChevronRight, FileCode, FileSpreadsheet } from 'lucide-react'
+import { useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -7,6 +8,7 @@ import {
   CardAction,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -64,6 +66,13 @@ interface ReasonEditorProps {
   onChange: (key: string, value: string) => void
 }
 
+/**
+ * 行内原因分析输入框。
+ *
+ * 非受控输入：挂载时用 defaultValue 取一次已提交的原因，输入过程不触发任何
+ * setState，避免逐字重渲染整棵明细树；失焦时才提交到页面级 reasons，
+ * CSV / HTML 报告导出读取的仍是同一份 reasons。
+ */
 const ReasonEditor: React.FC<ReasonEditorProps> = ({
   kind,
   itemName,
@@ -72,10 +81,17 @@ const ReasonEditor: React.FC<ReasonEditorProps> = ({
   sn,
 }) => {
   const key = reasonKey(kind, itemName, sn)
+  const committed = reasons[key] ?? '待分析'
   return (
     <Textarea
-      value={reasons[key] ?? '待分析'}
-      onChange={(event) => onChange(key, event.target.value)}
+      defaultValue={committed}
+      onBlur={(event) => {
+        const next = event.target.value
+        // 值未变化就不写回，省掉一次全树重渲染
+        if (next !== committed) {
+          onChange(key, next)
+        }
+      }}
       rows={1}
       className="min-h-8 field-sizing-content text-xs"
       aria-label={`SN ${sn} 原因分析`}
@@ -293,6 +309,185 @@ const StationSlotCard: React.FC<{ result: AnalyzeResult }> = ({ result }) => (
   </Card>
 )
 
+/** 明细行分页大小：限制单页渲染的表格行数（每行都含一个原因分析输入框） */
+const DETAIL_PAGE_SIZE = 20
+
+interface DetailItemCardProps {
+  kind: 'retest' | 'defect'
+  item: RetestItemDetail | DefectItemDetail
+  reasons: ReasonMap
+  onReasonChange: (key: string, value: string) => void
+}
+
+/**
+ * 单个测试项的明细卡片。
+ *
+ * 明细行后端按 SN × 测试项返回，几千行是常见量级，整表挂载会同时创建等量
+ * 的输入框；按 DETAIL_PAGE_SIZE 分页后单页 DOM 行数恒定。
+ */
+const DetailItemCard: React.FC<DetailItemCardProps> = ({
+  item,
+  kind,
+  onReasonChange,
+  reasons,
+}) => {
+  const [paging, setPaging] = useState({ source: item.rows, page: 1 })
+  // 数据源切换（重新分析后传入新的明细对象）时按第 1 页渲染；
+  // 用派生值而不是在 effect 里 setState 重置页码，避免级联渲染
+  const page = paging.source === item.rows ? paging.page : 1
+  const goToPage = (next: number) => setPaging({ source: item.rows, page: next })
+
+  const pageCount = Math.max(1, Math.ceil(item.rows.length / DETAIL_PAGE_SIZE))
+  // 页码钳制：行数收缩后不能停留在越界页
+  const safePage = Math.min(page, pageCount)
+  const start = (safePage - 1) * DETAIL_PAGE_SIZE
+  const end = start + DETAIL_PAGE_SIZE
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">{item.name}</CardTitle>
+        <CardDescription>
+          {item.count} 个 SN（项内占比 {formatRate(item.rate)}）　规格：{item.spec}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {kind === 'retest' ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>SN</TableHead>
+                <TableHead>第一次 FAIL</TableHead>
+                <TableHead>机台 / 穴位</TableHead>
+                <TableHead>第二次 FAIL</TableHead>
+                <TableHead>机台 / 穴位</TableHead>
+                <TableHead>最终 PASS</TableHead>
+                <TableHead>机台 / 穴位</TableHead>
+                <TableHead className="w-40">原因分析</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(item as RetestItemDetail).rows.slice(start, end).map((row) => (
+                <TableRow key={row.sn}>
+                  <TableCell className="font-medium">{row.sn}</TableCell>
+                  <TableCell className="tabular-nums">
+                    {row.first_fail_value}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {row.first_fail_station} / {row.first_fail_slot}
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {row.second_fail_value}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {row.second_fail_station} / {row.second_fail_slot}
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {row.pass_value}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {row.pass_station} / {row.pass_slot}
+                  </TableCell>
+                  <TableCell>
+                    {/* key 绑定行身份：重新分析后同卡位同 SN 也要重挂载，避免沿用旧文本 */}
+                    <ReasonEditor
+                      key={reasonKey(kind, item.name, row.sn)}
+                      reasons={reasons}
+                      kind={kind}
+                      itemName={item.name}
+                      sn={row.sn}
+                      onChange={onReasonChange}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>SN</TableHead>
+                <TableHead>第一次 FAIL</TableHead>
+                <TableHead>机台 / 穴位</TableHead>
+                <TableHead>第二次测试</TableHead>
+                <TableHead>机台 / 穴位</TableHead>
+                <TableHead>第三次测试</TableHead>
+                <TableHead>机台 / 穴位</TableHead>
+                <TableHead className="w-40">原因分析</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(item as DefectItemDetail).rows.slice(start, end).map((row) => (
+                <TableRow key={row.sn}>
+                  <TableCell className="font-medium">{row.sn}</TableCell>
+                  <TableCell className="tabular-nums">
+                    {row.first_fail_value}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {row.first_fail_station} / {row.first_fail_slot}
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {row.second_test_value}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {row.second_test_station} / {row.second_test_slot}
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {row.third_test_value}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {row.third_test_station} / {row.third_test_slot}
+                  </TableCell>
+                  <TableCell>
+                    <ReasonEditor
+                      key={reasonKey(kind, item.name, row.sn)}
+                      reasons={reasons}
+                      kind={kind}
+                      itemName={item.name}
+                      sn={row.sn}
+                      onChange={onReasonChange}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+      {pageCount > 1 ? (
+        <CardFooter className="flex-wrap justify-between gap-2">
+          <p className="text-xs tabular-nums text-muted-foreground">
+            第 {safePage} / {pageCount} 页
+          </p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={safePage <= 1}
+              onClick={() => goToPage(Math.max(1, safePage - 1))}
+            >
+              <ChevronLeft data-icon="inline-start" />
+              上一页
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={safePage >= pageCount}
+              onClick={() => goToPage(Math.min(pageCount, safePage + 1))}
+            >
+              下一页
+              <ChevronRight data-icon="inline-end" />
+            </Button>
+          </div>
+        </CardFooter>
+      ) : null}
+    </Card>
+  )
+}
+
 interface DetailSectionProps {
   title: string
   description: string
@@ -321,115 +516,13 @@ const DetailSection: React.FC<DetailSectionProps> = ({
       </div>
       <Separator />
       {items.map((item) => (
-        <Card key={item.name}>
-          <CardHeader>
-            <CardTitle className="text-sm">{item.name}</CardTitle>
-            <CardDescription>
-              {item.count} 个 SN（项内占比 {formatRate(item.rate)}）　规格：{item.spec}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {kind === 'retest' ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>SN</TableHead>
-                    <TableHead>第一次 FAIL</TableHead>
-                    <TableHead>机台 / 穴位</TableHead>
-                    <TableHead>第二次 FAIL</TableHead>
-                    <TableHead>机台 / 穴位</TableHead>
-                    <TableHead>最终 PASS</TableHead>
-                    <TableHead>机台 / 穴位</TableHead>
-                    <TableHead className="w-40">原因分析</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(item as RetestItemDetail).rows.map((row) => (
-                    <TableRow key={row.sn}>
-                      <TableCell className="font-medium">{row.sn}</TableCell>
-                      <TableCell className="tabular-nums">
-                        {row.first_fail_value}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {row.first_fail_station} / {row.first_fail_slot}
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {row.second_fail_value}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {row.second_fail_station} / {row.second_fail_slot}
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {row.pass_value}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {row.pass_station} / {row.pass_slot}
-                      </TableCell>
-                      <TableCell>
-                        <ReasonEditor
-                          reasons={reasons}
-                          kind={kind}
-                          itemName={item.name}
-                          sn={row.sn}
-                          onChange={onReasonChange}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>SN</TableHead>
-                    <TableHead>第一次 FAIL</TableHead>
-                    <TableHead>机台 / 穴位</TableHead>
-                    <TableHead>第二次测试</TableHead>
-                    <TableHead>机台 / 穴位</TableHead>
-                    <TableHead>第三次测试</TableHead>
-                    <TableHead>机台 / 穴位</TableHead>
-                    <TableHead className="w-40">原因分析</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(item as DefectItemDetail).rows.map((row) => (
-                    <TableRow key={row.sn}>
-                      <TableCell className="font-medium">{row.sn}</TableCell>
-                      <TableCell className="tabular-nums">
-                        {row.first_fail_value}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {row.first_fail_station} / {row.first_fail_slot}
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {row.second_test_value}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {row.second_test_station} / {row.second_test_slot}
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {row.third_test_value}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {row.third_test_station} / {row.third_test_slot}
-                      </TableCell>
-                      <TableCell>
-                        <ReasonEditor
-                          reasons={reasons}
-                          kind={kind}
-                          itemName={item.name}
-                          sn={row.sn}
-                          onChange={onReasonChange}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+        <DetailItemCard
+          key={item.name}
+          kind={kind}
+          item={item}
+          reasons={reasons}
+          onReasonChange={onReasonChange}
+        />
       ))}
     </section>
   )

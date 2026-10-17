@@ -12,6 +12,7 @@ import { SVGRenderer } from 'echarts/renderers';
 import type { EChartsOption } from 'echarts';
 
 import { useTheme } from '../../../context/ThemeContext';
+import { escapeHtml } from '../../../lib/escape-html';
 import type {
   Bin,
   ComparisonReferenceLine,
@@ -148,7 +149,7 @@ const buildHistogramOption = (
         const b = bins[i];
         if (!b) return '';
         return (
-          `<b>${b.label}</b><br/>` +
+          `<b>${escapeHtml(b.label)}</b><br/>` +
           `样本数：${b.count}<br/>` +
           `占比：${b.percent.toFixed(1)}%`
         );
@@ -245,7 +246,7 @@ const buildPercentCurveOption = (
         const b = bins[idx];
         if (!b) return '';
         return (
-          `<div style="font-weight:bold;margin-bottom:4px">时间区间: ${b.label}</div>` +
+          `<div style="font-weight:bold;margin-bottom:4px">时间区间: ${escapeHtml(b.label)}</div>` +
           `<div>区间占比: <span style="font-weight:bold;color:#2563eb">${b.percent}%</span></div>` +
           `<div>样本数量: <span style="color:${p.muted}">${b.count}</span></div>`
         );
@@ -385,7 +386,7 @@ const buildStationBoxPlotOption = (
           const g = groups[pt.dataIndex];
           if (!g) return '';
           return (
-            `<b>${g.stationId}</b><br/>` +
+            `<b>${escapeHtml(g.stationId)}</b><br/>` +
             `样本数: ${g.count}<br/>` +
             `最大值 Max: ${g.max} S<br/>` +
             `Q3: ${g.q3} S<br/>` +
@@ -399,7 +400,7 @@ const buildStationBoxPlotOption = (
         if (pt.seriesType === 'scatter') {
           const [idx, val] = pt.data as [number, number];
           const g = groups[idx];
-          return `<b>${g?.stationId ?? ''} 离群点</b><br/>测试时间: ${val} S`;
+          return `<b>${escapeHtml(g?.stationId ?? '')} 离群点</b><br/>测试时间: ${val} S`;
         }
         return '';
       },
@@ -724,7 +725,7 @@ const buildStationQ3LineOption = (
         const g = groups[idx];
         if (!g) return '';
         return (
-          `<div style="font-weight:bold;margin-bottom:4px">机台: ${formatStationNumericName(g.stationId)}${g.stationId !== formatStationNumericName(g.stationId) ? ` (${g.stationId})` : ''}</div>` +
+          `<div style="font-weight:bold;margin-bottom:4px">机台: ${escapeHtml(formatStationNumericName(g.stationId))}${g.stationId !== formatStationNumericName(g.stationId) ? ` (${escapeHtml(g.stationId)})` : ''}</div>` +
           `<div>Q3 (上四分位): <span style="font-weight:bold;color:#2563eb">${g.q3} S</span></div>` +
           `<div>中位数 Med: ${g.median} S</div>` +
           `<div>Q1 (下四分位): ${g.q1} S</div>` +
