@@ -13,6 +13,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { AsyncZipDeflate, Zip } from 'fflate';
 import React, {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -656,6 +657,14 @@ const AtlasMerge: React.FC = () => {
   const [pollFailureCount, setPollFailureCount] = useState(0);
   // 每次失败都会刷新 errorUpdatedAt，用它保证每轮只计一次
   const lastPollErrorAtRef = useRef(0);
+  // 开新任务 / 任务丢失 / 轮询恢复成功都要清零：否则上一任务攒到阈值的计数会
+  // 让下一任务的第一次瞬时抖动就被判成"已达上限"，直接停掉自动轮询
+  const resetPollFailures = useCallback(() => {
+    pollFailureCountRef.current = 0;
+    lastPollErrorAtRef.current = 0;
+    setPollFailureCount(0);
+    setPollRetryMessage('');
+  }, []);
 
   const jobQuery = useQuery({
     queryKey: ['atlas-merge-job', jobId],
@@ -729,6 +738,7 @@ const AtlasMerge: React.FC = () => {
     if (isJobGoneError(queryError)) {
       setError('合并任务已丢失或过期，请重新分析');
       setPhase('upload');
+      resetPollFailures();
       return;
     }
     // errorUpdatedAt 每失败一次都会变，用它保证每轮只计一次
@@ -748,6 +758,7 @@ const AtlasMerge: React.FC = () => {
     jobQuery.isError,
     jobQuery.error,
     jobQuery.errorUpdatedAt,
+    resetPollFailures,
   ]);
 
   // 轮询恢复成功即清零计数，重试横幅随之消失
@@ -755,11 +766,8 @@ const AtlasMerge: React.FC = () => {
     if (!pollingEnabled || jobQuery.isError || !jobQuery.data) {
       return;
     }
-    pollFailureCountRef.current = 0;
-    lastPollErrorAtRef.current = 0;
-    setPollFailureCount(0);
-    setPollRetryMessage('');
-  }, [pollingEnabled, jobQuery.isError, jobQuery.data]);
+    resetPollFailures();
+  }, [pollingEnabled, jobQuery.isError, jobQuery.data, resetPollFailures]);
 
   const handleDirectoryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -781,10 +789,10 @@ const AtlasMerge: React.FC = () => {
       setError('请先选择 unit-archive 目录，且目录中需包含可合并的 CSV 文件');
       return;
     }
-    // 打包前按原始体积拦截：浏览器端流式压缩仍会把压缩产物留在内存里，
-    // 超过后端上限的文件不应走完整个打包/上传流程再失败
     setError('');
-    setPollRetryMessage('');
+    // 开新任务前把上一任务的轮询失败计数清零，否则新任务第一次瞬时抖动就会被
+    // 判成"已达失败上限"，直接停掉自动轮询
+    resetPollFailures();
     setAnalysis(null);
     setDownloadError('');
     setJobId(null);
