@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { readApiErrorMessage } from '@/lib/api-error'
 import { useAdminApi } from '../hooks/use-admin-api'
 import { adminUsersQueryKey } from './query-keys'
 import { type User } from './schema'
@@ -35,7 +36,8 @@ export function UsersDeleteDialog({
       void queryClient.invalidateQueries({ queryKey: adminUsersQueryKey })
     } catch (err) {
       console.error('删除用户失败', err)
-      toast.error('删除失败')
+      // 后端 400 的 detail 说明具体原因（如层级保护），直接透出而不是笼统"删除失败"
+      toast.error(readApiErrorMessage(err) ?? '删除失败')
     } finally {
       setSubmitting(false)
       setValue('')

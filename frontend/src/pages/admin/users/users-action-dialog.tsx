@@ -48,14 +48,14 @@ function buildFormSchema(isEdit: boolean, toolMode: 'all' | 'custom') {
           ctx.addIssue({
             code: 'custom',
             path: ['password'],
-            message: '新密码至少 6 位',
+            message: '密码长度至少 6 位',
           })
         }
       } else if (password.length < 6) {
         ctx.addIssue({
           code: 'custom',
           path: ['password'],
-          message: '密码至少 6 位',
+          message: '密码长度至少 6 位',
         })
       }
       // 新建且 'custom' 模式：无角色即无任何权限，要求至少勾选一个
