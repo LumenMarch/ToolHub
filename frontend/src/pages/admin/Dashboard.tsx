@@ -100,7 +100,12 @@ const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [toolLoading, setToolLoading] = useState(true);
   const [activeLoading, setActiveLoading] = useState(true);
-  const [error, setError] = useState('');
+  // 三个请求各自持有错误：共用一个 error 时，任一方重新拉取都会把别人的失败
+  // 一起清掉——横幅消失，而那份数据仍然不可用
+  const [errors, setErrors] = useState({ overview: '', tools: '', active: '' });
+  const error = errors.overview || errors.tools || errors.active;
+  // 重试计数：三个 effect 都依赖它，点「重试」即可重新拉取全部统计
+  const [reloadKey, setReloadKey] = useState(0);
 
   // 概览卡片只加载一次，不随日期范围变化。
   useEffect(() => {
@@ -109,7 +114,7 @@ const AdminDashboard: React.FC = () => {
 
     let active = true;
     setLoading(true);
-    setError('');
+    setErrors((prev) => (prev.overview === '' ? prev : { ...prev, overview: '' }));
     api
       .getOverview()
       .then((o) => {
@@ -118,7 +123,7 @@ const AdminDashboard: React.FC = () => {
       })
       .catch(() => {
         if (!active) return;
-        setError('统计数据加载失败');
+        setErrors((prev) => ({ ...prev, overview: '统计数据加载失败' }));
       })
       .finally(() => {
         if (!active) return;
@@ -128,7 +133,7 @@ const AdminDashboard: React.FC = () => {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canViewStats]);
+  }, [canViewStats, reloadKey]);
 
   // 工具调用统计：随 toolDays 变化重新拉取（null = 全部时间，不携带 days 参数）。
   useEffect(() => {
@@ -136,6 +141,8 @@ const AdminDashboard: React.FC = () => {
 
     let active = true;
     setToolLoading(true);
+    // 只清本域的错误：清共享错误会顺手抹掉概览/活跃用户那边的失败
+    setErrors((prev) => (prev.tools === '' ? prev : { ...prev, tools: '' }));
     api
       .getToolCalls(toolDays ?? undefined)
       .then((t) => {
@@ -144,7 +151,7 @@ const AdminDashboard: React.FC = () => {
       })
       .catch(() => {
         if (!active) return;
-        setError('统计数据加载失败');
+        setErrors((prev) => ({ ...prev, tools: '统计数据加载失败' }));
       })
       .finally(() => {
         if (!active) return;
@@ -154,7 +161,7 @@ const AdminDashboard: React.FC = () => {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canViewStats, toolDays]);
+  }, [canViewStats, reloadKey, toolDays]);
 
   // 每日活跃用户：随 activeDays 变化重新拉取。
   useEffect(() => {
@@ -162,6 +169,7 @@ const AdminDashboard: React.FC = () => {
 
     let active = true;
     setActiveLoading(true);
+    setErrors((prev) => (prev.active === '' ? prev : { ...prev, active: '' }));
     api
       .getDailyActiveUsers(activeDays)
       .then((d) => {
@@ -170,7 +178,7 @@ const AdminDashboard: React.FC = () => {
       })
       .catch(() => {
         if (!active) return;
-        setError('统计数据加载失败');
+        setErrors((prev) => ({ ...prev, active: '统计数据加载失败' }));
       })
       .finally(() => {
         if (!active) return;
@@ -180,7 +188,7 @@ const AdminDashboard: React.FC = () => {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canViewStats, activeDays]);
+  }, [canViewStats, reloadKey, activeDays]);
 
   // 工具调用统计：同一工具不同操作（如 analyze/download）按 slug 归并为一个条目，
   // count 相加，label 显示中文工具名；最终按 count 降序（与后端返回排序一致）。
@@ -220,7 +228,16 @@ const AdminDashboard: React.FC = () => {
       {error && (
         <Alert variant="destructive">
           <AlertTitle>加载失败</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex items-center gap-3">
+            {error}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReloadKey((key) => key + 1)}
+            >
+              重试
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 
@@ -230,7 +247,7 @@ const AdminDashboard: React.FC = () => {
           label="正在加载统计数据"
           detail="等待安全聚合"
         />
-      ) : !error && (
+      ) : (
         <>
           <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
             <PermissionGuard permission="user:read">

@@ -270,16 +270,10 @@ export function parseTestCsv(text: string, fileName?: string): ParsedDataset {
     keptIdx.push(c.idx);
   }
 
-  // 若过滤后为空（例如所有列均被判为无数值但实际是通用 CSV 数值列），回落为不过滤
-  if (columns.length === 0 && candidate.length > 0 && rawDataRows.length > 0) {
-    columns.length = 0;
-    keptIdx.length = 0;
-    skipped.length = 0;
-    for (const c of candidate) {
-      columns.push(makeColumn(c.name, c.unit, c.upper, c.lower));
-      keptIdx.push(c.idx);
-    }
-  }
+  // 这里不再做“过滤后为空则全量恢复”的兜底：那种兜底会把 SerialNumber、
+  // Station ID 这类没有任何可解析数值的纯文本列重新塞回 columns，它们
+  // values 为空但 valueCount = 行数，会污染 Data Count / 直方图 / Cpk。
+  // 纯文本列统一保留在 allColumns 中，由调用方按 hasData = false 展示。
 
   const dataRows: string[][] = [];
   const statusList: string[] = [];

@@ -9,6 +9,7 @@ import {
 import { SVGRenderer } from 'echarts/renderers';
 import type { EChartsOption } from 'echarts';
 import { useTheme } from '@/context/ThemeContext';
+import { escapeHtml } from '@/lib/escape-html';
 import { cn } from '@/lib/utils';
 
 echarts.use([
@@ -111,12 +112,6 @@ const cssColor = (variable: string): string => {
   probe.remove();
   return value;
 };
-
-/** 转义用户数据中的 HTML 特殊字符：tooltip.formatter 返回值按 HTML 渲染，分组名必须先转义。 */
-const escapeHtml = (value: string): string =>
-  value.replace(/[&<>"']/g, (ch) => (
-    ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;'
-  ));
 
 /** 按数据范围加 5% 边距后再取 1/2/5 步长，避免刻度把箱体压在中间。 */
 const computeNiceRange = (min: number, max: number) => {

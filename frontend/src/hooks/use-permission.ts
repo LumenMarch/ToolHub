@@ -14,6 +14,10 @@ export const ADMIN_PERMISSIONS: string[] = [
   'tool_meta:read',
   'tool_meta:write',
   'stats:read',
+  // 模型服务页（AdminLayout 导航项要求 llm_config:read）同样属于管理台入口，
+  // 漏掉它会让「只持有 LLM 配置权限」的角色被 AdminRoute 重定向回首页。
+  'llm_config:read',
+  'llm_config:write',
 ];
 
 /**
