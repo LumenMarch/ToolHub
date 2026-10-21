@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.auth import require_permission
+from app.core.auth import ensure_can_grant_roles, ensure_can_manage, require_permission
 from app.crud.crud_notification import create_notification
 from app.crud.crud_role import get_role_by_name, get_roles_by_ids
 from app.crud.crud_session import (
@@ -79,21 +79,6 @@ def _parse_statuses(raw: str | None) -> list[str] | None:
     return parts
 
 
-def _ensure_can_manage(admin: User, target: User) -> None:
-    """层级保护 — 不能审批/修改比自己权限更高的用户。
-
-    pending/rejected 用户通常无角色，空集合天然满足保护；
-    保留检查以覆盖（罕见的）带角色用户被驳回后重新审批的场景。
-    """
-    admin_role_names = {r.name for r in admin.roles}
-    target_role_names = {r.name for r in target.roles}
-    if not admin_role_names.issuperset(target_role_names):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot modify a user with higher privileges",
-        )
-
-
 def _safe_create_notification(db: Session, **kwargs) -> None:
     """通知写库容错：失败仅记日志，不影响审批结果与审计（与 log_action 同样式）。
 
@@ -147,6 +132,16 @@ def create_user_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already registered",
         )
+    # 提权防护：创建时显式指定的角色必须是当前管理员可授予的（approve 同源校验），
+    # 否则受限管理员可借 role_ids 一步创建超管账号。
+    if user_in.role_ids:
+        roles = get_roles_by_ids(db, list(dict.fromkeys(user_in.role_ids)))
+        if len(roles) != len(set(user_in.role_ids)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="包含不存在的角色 ID",
+            )
+        ensure_can_grant_roles(db, admin, roles)
     # 直接工具权限在 crud 写入前先校验（仅 tool:*:use），失败转 400，防部分提交
     try:
         user = create_user_by_admin(db, user_in)
@@ -208,7 +203,18 @@ def update_user_endpoint(
             )
 
     # 层级保护 — 不能修改比自己权限更高的用户（拥有自己不具备的角色）
-    _ensure_can_manage(admin, user)
+    ensure_can_manage(db, admin, user)
+
+    # 提权防护：PATCH 覆盖式设置角色同样受可授予范围限制，
+    # 否则受限管理员可直接把目标改为超管。
+    if user_in.role_ids is not None:
+        roles = get_roles_by_ids(db, list(dict.fromkeys(user_in.role_ids)))
+        if len(roles) != len(set(user_in.role_ids)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="包含不存在的角色 ID",
+            )
+        ensure_can_grant_roles(db, admin, roles)
 
     # 记录变更意图（update 前），用于安全相关吊销与权限推送
     roles_changed = user_in.role_ids is not None
@@ -276,7 +282,7 @@ def approve_user_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only pending or rejected users can be approved",
         )
-    _ensure_can_manage(admin, user)
+    ensure_can_manage(db, admin, user)
 
     # 直接工具权限：先校验（仅 tool:*:use），再与角色/状态同一事务提交，
     # 避免"审批已生效但接口报 400"的假象（与通知写库同一考量）
@@ -310,15 +316,9 @@ def approve_user_endpoint(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="包含不存在的角色 ID",
             )
-        # 提权防护：显式授予的角色必须是当前管理员自身角色的子集，
+        # 提权防护：被授予角色的权限必须是当前管理员有效权限的子集，
         # 防止低阶管理员借此给自己/他人授予超管等高权限角色。
-        admin_role_ids = {r.id for r in admin.roles}
-        granted_role_ids = {r.id for r in roles}
-        if not granted_role_ids.issubset(admin_role_ids):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="不能授予高于自身权限的角色",
-            )
+        ensure_can_grant_roles(db, admin, roles)
     else:
         # 显式空数组：不分配任何角色（通常配合 tool_permission_ids 使用，由管理员自行负责）
         roles = []
@@ -383,7 +383,7 @@ def reject_user_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only pending users can be rejected",
         )
-    _ensure_can_manage(admin, user)
+    ensure_can_manage(db, admin, user)
 
     user.status = USER_STATUS_REJECTED
     db.add(user)
@@ -439,7 +439,7 @@ def delete_user_endpoint(
             detail="Cannot delete yourself",
         )
     # 层级保护
-    _ensure_can_manage(admin, user)
+    ensure_can_manage(db, admin, user)
     deleted_username = user.username
     # 先吊销会话（通知在线客户端），再物理删除
     revoke_user_sessions(db, user)
@@ -492,7 +492,7 @@ def revoke_user_session_endpoint(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     # 层级保护 — 不能吊销比自己权限更高的用户的会话
-    _ensure_can_manage(admin, user)
+    ensure_can_manage(db, admin, user)
     user_session = get_user_session_by_id(db, session_id)
     if user_session is None or user_session.user_id != user_id:
         raise HTTPException(

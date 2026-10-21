@@ -22,21 +22,29 @@ import {
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { AuthContext } from '@/context/AuthContext'
-import { isBackendUnreachable } from '@/lib/api-error'
+import { isBackendUnreachable, readApiErrorMessage } from '@/lib/api-error'
 import { pageTitle } from '@/lib/title'
 import api from '@/api/axios'
 
 const UNREACHABLE_ERROR = '暂时无法连接，请稍后重试'
 
+/** 与后端 PASSWORD_MIN_LENGTH 保持一致（backend/app/schemas/user.py）。 */
+const PASSWORD_MIN_LENGTH = 6
+
+/** 表单反馈：错误与成功提示互斥，用单一状态避免两个 setState 交织。 */
+type Feedback = { kind: 'error' | 'notice'; text: string } | null
+
 const Login: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [feedback, setFeedback] = useState<Feedback>(null)
   const [loading, setLoading] = useState(false)
   const { login, user } = useContext(AuthContext)
   const navigate = useNavigate()
 
+  const error = feedback?.kind === 'error' ? feedback.text : ''
+  const notice = feedback?.kind === 'notice' ? feedback.text : ''
   const displayError = error
   const submitLabel = isLogin ? '登录' : '注册'
 
@@ -52,7 +60,19 @@ const Login: React.FC = () => {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
-    setError('')
+    setFeedback(null)
+
+    // 注册前的本地校验：密码下限与后端一致（6 位），省掉一次往返，
+    // 且提示文案不受 Pydantic 英文 msg 影响。登录不做长度校验——
+    // 旧账号可能是历史规则下创建的，长度由后端判定。
+    if (!isLogin && password.length < PASSWORD_MIN_LENGTH) {
+      setFeedback({
+        kind: 'error',
+        text: `密码长度至少 ${PASSWORD_MIN_LENGTH} 位`,
+      })
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -65,22 +85,40 @@ const Login: React.FC = () => {
         navigate('/')
       } else {
         await api.post('/auth/register', { username, password })
+        // 注册成功后回到登录态并清空输入，同时提示待审批——
+        // 否则用户看到表单被清空、却没有任何"已提交"的反馈。
         setIsLogin(true)
+        setUsername('')
+        setPassword('')
+        setFeedback({
+          kind: 'notice',
+          text: '请等待管理员审批通过后再登录。',
+        })
       }
     } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
         if (isBackendUnreachable(err)) {
-          setError(UNREACHABLE_ERROR)
+          setFeedback({ kind: 'error', text: UNREACHABLE_ERROR })
         } else {
-          const detail = err.response?.data?.detail
-          setError(typeof detail === 'string' ? detail : '系统发生错误。')
+          setFeedback({
+            kind: 'error',
+            text: readApiErrorMessage(err) ?? '系统发生错误。',
+          })
         }
       } else {
-        setError(UNREACHABLE_ERROR)
+        setFeedback({ kind: 'error', text: UNREACHABLE_ERROR })
       }
     } finally {
       setLoading(false)
     }
+  }
+
+  /** 登录/注册切换：清空错误与已填凭据，避免把登录页输入带到注册页（或反向）。 */
+  const toggleMode = () => {
+    setIsLogin(!isLogin)
+    setFeedback(null)
+    setUsername('')
+    setPassword('')
   }
 
   return (
@@ -103,6 +141,12 @@ const Login: React.FC = () => {
                 <Alert variant="destructive">
                   <AlertTitle>无法继续</AlertTitle>
                   <AlertDescription id="auth-error">{displayError}</AlertDescription>
+                </Alert>
+              ) : null}
+              {!displayError && notice ? (
+                <Alert role="status">
+                  <AlertTitle>注册已提交</AlertTitle>
+                  <AlertDescription>{notice}</AlertDescription>
                 </Alert>
               ) : null}
               <Field data-invalid={Boolean(displayError) || undefined}>
@@ -144,10 +188,7 @@ const Login: React.FC = () => {
             type="button"
             variant="link"
             className="px-0"
-            onClick={() => {
-              setIsLogin(!isLogin)
-              setError('')
-            }}
+            onClick={toggleMode}
           >
             {isLogin ? '没有账号？注册' : '已有账号？登录'}
           </Button>

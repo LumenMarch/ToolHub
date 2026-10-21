@@ -18,3 +18,27 @@ export function isBackendUnreachable(err: unknown): boolean {
   // 开发代理/反向代理在上游挂掉时常返回 502/503/504
   return status === 502 || status === 503 || status === 504;
 }
+
+/**
+ * 从失败响应中取出可直接展示给用户的文案。
+ *
+ * 后端 detail 有两种形态：
+ * - 字符串：HTTPException 的业务错误（如 "Cannot modify a user with higher privileges"）；
+ * - 数组：Pydantic 校验错误（[{loc, msg, type}]），取首条 msg 并去掉
+ *   "Value error, " 前缀，否则用户会看到整段英文结构体。
+ * 都取不到时返回 null，由调用方决定兜底文案。
+ */
+export function readApiErrorMessage(err: unknown): string | null {
+  if (!axios.isAxiosError(err)) return null;
+  const detail = (err.response?.data as { detail?: unknown } | undefined)?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    for (const item of detail) {
+      const msg = (item as { msg?: unknown } | null)?.msg;
+      if (typeof msg === 'string' && msg.trim()) {
+        return msg.replace(/^Value error,\s*/, '');
+      }
+    }
+  }
+  return null;
+}

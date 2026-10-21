@@ -41,6 +41,31 @@ def test_register_duplicate_username(client):
     assert resp.status_code == 400
 
 
+def test_register_rejects_password_equal_to_username(client):
+    """账号与密码相同应明确拒绝并给出中文提示，而不是让弱口令通过。
+
+    走 schema 层校验（422）：密码的长度约束会先于端点执行，
+    短口令只有在模型层拦截才能得到"账号密码不能一样"而不是长度报错。
+    """
+    resp = register(client, "abcdefgh", "abcdefgh")
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["msg"].endswith("账号密码不能一样")
+
+    # 短口令同样命中该规则，而不是先报长度
+    resp = register(client, "bob", "bob")
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["msg"].endswith("账号密码不能一样")
+
+    # 未落库
+    assert (
+        client.post(
+            "/api/v1/auth/token",
+            data={"username": "abcdefgh", "password": "abcdefgh"},
+        ).status_code
+        == 401
+    )
+
+
 def test_register_rejects_oversized_utf8_password(client):
     """密码按 bcrypt 的 UTF-8 字节上限（72 字节）校验，而非字符数。"""
     # 25 个中文字符 = 75 字节，超限拒绝
@@ -587,3 +612,27 @@ def test_registration_domain_whitelist(client, monkeypatch):
     ok = register(client, "bob@corp.com")
     assert ok.status_code == 200, ok.text
     assert ok.json()["status"] == "pending"
+
+
+def test_password_min_length_is_six_with_chinese_message(client):
+    """密码最短 6 位；不足时返回可读中文提示，而不是 Pydantic 的英文原句。"""
+    resp = register(client, "shorty", "abc")
+    assert resp.status_code == 422, resp.text
+    assert "密码长度至少 6 位" in resp.text
+    assert "String should have at least" not in resp.text
+
+    # 6 位恰好通过（且不与账号相同）
+    resp = register(client, "shorty", "abc123")
+    assert resp.status_code == 200, resp.text
+
+
+def test_admin_create_user_password_min_length_is_six(admin_client):
+    """管理员创建/重置密码与自助注册共用同一条 6 位下限。"""
+    client, token = admin_client
+    resp = client.post(
+        "/api/v1/admin/users",
+        json={"username": "shorty", "password": "abc12", "role_ids": []},
+        headers=auth_header(token),
+    )
+    assert resp.status_code == 422, resp.text
+    assert "密码长度至少 6 位" in resp.text

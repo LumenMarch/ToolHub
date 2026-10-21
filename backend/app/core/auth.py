@@ -121,6 +121,46 @@ class _PermissionChecker:
         return current_user
 
 
+def _role_permissions(role) -> set[str]:
+    return {perm.codename for perm in role.permissions}
+
+
+def ensure_can_grant_roles(db: Session, admin: User, roles: list) -> None:
+    """校验管理员可授予这些角色。
+
+    语义：角色是正交的权限包，不是层级。判断依据是"被授予角色的权限
+    必须是管理员自身有效权限的子集"，而不是"管理员必须持有同名的角色"。
+    超管因此可以授予「统计查看者」这类自己没有挂载的角色（其 stats:read
+    已在超管的权限集合内），受限管理员仍无法借审批给自己或他人提权。
+    """
+    admin_permissions = get_user_permissions(db, admin)
+    granted: set[str] = set()
+    for role in roles:
+        granted |= _role_permissions(role)
+    if not granted.issubset(admin_permissions):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不能授予高于自身权限的角色",
+        )
+
+
+def ensure_can_manage(db: Session, admin: User, target: User) -> None:
+    """层级保护：管理员不能操作有效权限高于自己的用户。
+
+    同样按有效权限集合（角色权限 ∪ 直接工具权限）比较，而非角色名子集：
+    角色名子集会让持有 [超级管理员, 工具使用者] 的超管无法删除持有
+    [统计查看者, 工具使用者] 的普通用户 —— 两种角色名互不包含，但前者
+    的权限集合完整覆盖后者。
+    """
+    admin_permissions = get_user_permissions(db, admin)
+    target_permissions = get_user_permissions(db, target)
+    if not target_permissions.issubset(admin_permissions):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify a user with higher privileges",
+        )
+
+
 def require_permission(permission: str) -> _PermissionChecker:
     """要求当前用户持有指定权限，否则返回 403。
 
