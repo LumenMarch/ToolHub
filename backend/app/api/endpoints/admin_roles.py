@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.core.auth import require_permission
+from app.core.auth import ensure_can_grant_roles, ensure_can_manage, require_permission
 from app.crud.crud_permission import get_all_permissions
 from app.crud.crud_role import (
     create_role,
@@ -268,15 +268,11 @@ def update_user_roles(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot change your own roles",
         )
-    # 层级保护 — 不能修改比自己权限更高的用户
-    admin_role_names = {r.name for r in admin.roles}
-    target_role_names = {r.name for r in user.roles}
-    if not admin_role_names.issuperset(target_role_names):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot modify a user with higher privileges",
-        )
+    # 层级保护 — 不能修改比自己权限更高的用户（按有效权限集合比较）
+    ensure_can_manage(db, admin, user)
+    # 提权防护：被授予角色的权限必须是当前管理员有效权限的子集
     roles = get_roles_by_ids(db, roles_in.role_ids)
+    ensure_can_grant_roles(db, admin, roles)
     user.roles = roles
     db.commit()
     db.refresh(user)

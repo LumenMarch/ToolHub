@@ -477,3 +477,113 @@ def test_delete_user_with_roles_regression(admin_client, db):
         ).all()
         == []
     )
+
+
+# ---------- 删除权限层级 ----------
+
+
+def test_super_admin_can_delete_user_holding_unrelated_role(admin_client, db):
+    """超管删除持"统计查看者"的用户不应因角色名子集判断被误拒。
+
+    回归：_ensure_can_manage 用"管理员角色名 ⊇ 目标角色名"判断层级，
+    超管只持有 [超级管理员, 工具使用者]，目标持有 [统计查看者, 工具使用者]
+    时子集不成立 → DELETE 返回 400，超管无法删除任何非常规角色用户。
+    """
+    client, root_token = admin_client
+    alice_id = register(client, "alice").json()["id"]
+    stats_role = db.scalars(select(Role).where(Role.name == "统计查看者")).one()
+
+    resp = client.post(
+        f"/api/v1/admin/users/{alice_id}/approve",
+        json={"role_ids": [stats_role.id]},
+        headers=auth_header(root_token),
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = client.delete(
+        f"/api/v1/admin/users/{alice_id}", headers=auth_header(root_token)
+    )
+    assert resp.status_code == 204, resp.text
+    assert db.query(User).filter(User.id == alice_id).first() is None
+
+
+def test_limited_admin_cannot_delete_super_admin(admin_client, db):
+    """提权防护仍然生效：受限管理员不能删除权限高于自己的超管。"""
+    client, root_token = admin_client
+    ua_role = db.scalars(select(Role).where(Role.name == "用户管理员")).one()
+    created = client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "user-admin",
+            "password": "ua-123456",
+            "role_ids": [ua_role.id],
+        },
+        headers=auth_header(root_token),
+    )
+    assert created.status_code == 201, created.text
+    ua_token = login(client, "user-admin", "ua-123456").json()["access_token"]
+
+    # 受限管理员尝试删除引导超管（id=1）
+    resp = client.delete("/api/v1/admin/users/1", headers=auth_header(ua_token))
+    assert resp.status_code == 400, resp.text
+    assert db.query(User).filter(User.id == 1).first() is not None
+
+
+def test_limited_admin_cannot_escalate_via_role_ids_patch(admin_client, db):
+    """受限管理员不能通过 PATCH role_ids 把他人提升为超管（绕过 approve 的提权校验）。"""
+    client, root_token = admin_client
+    ua_role = db.scalars(select(Role).where(Role.name == "用户管理员")).one()
+    super_role = db.scalars(select(Role).where(Role.name == "超级管理员")).one()
+
+    created = client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "user-admin",
+            "password": "ua-123456",
+            "role_ids": [ua_role.id],
+        },
+        headers=auth_header(root_token),
+    )
+    assert created.status_code == 201, created.text
+    ua_token = login(client, "user-admin", "ua-123456").json()["access_token"]
+
+    target = client.post(
+        "/api/v1/admin/users",
+        json={"username": "bob", "password": "bob-123456", "role_ids": []},
+        headers=auth_header(root_token),
+    ).json()
+
+    resp = client.patch(
+        f"/api/v1/admin/users/{target['id']}",
+        json={"role_ids": [super_role.id]},
+        headers=auth_header(ua_token),
+    )
+    assert resp.status_code == 400, resp.text
+    assert "不能授予高于自身权限的角色" in resp.json()["detail"]
+
+
+def test_limited_admin_cannot_escalate_via_create_role_ids(admin_client, db):
+    """受限管理员不能通过 POST /admin/users 创建自带超管角色的账号。"""
+    client, root_token = admin_client
+    ua_role = db.scalars(select(Role).where(Role.name == "用户管理员")).one()
+    super_role = db.scalars(select(Role).where(Role.name == "超级管理员")).one()
+
+    client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "user-admin",
+            "password": "ua-123456",
+            "role_ids": [ua_role.id],
+        },
+        headers=auth_header(root_token),
+    )
+    ua_token = login(client, "user-admin", "ua-123456").json()["access_token"]
+
+    resp = client.post(
+        "/api/v1/admin/users",
+        json={"username": "eve", "password": "eve-123456", "role_ids": [super_role.id]},
+        headers=auth_header(ua_token),
+    )
+    assert resp.status_code == 400, resp.text
+    assert "不能授予高于自身权限的角色" in resp.json()["detail"]
+    assert db.query(User).filter(User.username == "eve").first() is None
