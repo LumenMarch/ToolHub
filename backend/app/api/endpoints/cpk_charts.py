@@ -2,10 +2,11 @@ import base64
 import os
 import tempfile
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -14,6 +15,28 @@ from app.models.user import User
 from app.services.audit import log_action
 
 router = APIRouter()
+
+MAX_ITEM_CHARS = 200
+MAX_TOTAL_ITEM_CHARS = 50_000
+MAX_IMAGE_B64_CHARS = 8 * 1024 * 1024
+
+ItemName = Annotated[str, StringConstraints(max_length=MAX_ITEM_CHARS)]
+ImageB64 = Annotated[str, StringConstraints(max_length=MAX_IMAGE_B64_CHARS)]
+
+
+class _UnlinkingFileResponse(FileResponse):
+    """响应发送结束后删除临时文件，包括 Starlette 提前返回的 400/416 路径。"""
+
+    def __init__(self, *args, cleanup_path: Path, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cleanup_path = cleanup_path
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._cleanup_path.unlink(missing_ok=True)
+
 
 # 行列常量（行号与原报告一致，宽高改为自适应计算）
 HEADER_ROW = 1
@@ -26,7 +49,9 @@ HEADER_FONT_SIZE = 20.0
 CHART_ASPECT = 1000 / 300  # 3.333
 
 
-def _estimate_text_width(text: str, font_size: float) -> float:
+def _estimate_text_width(
+    text: str, font_size: float, stop_at: float | None = None
+) -> float:
     """估算文本宽度（points），中文按 0.95*fontSize，ASCII 按 0.6*fontSize。"""
     w = 0.0
     for ch in text:
@@ -36,6 +61,8 @@ def _estimate_text_width(text: str, font_size: float) -> float:
             w += font_size * 0.35
         else:
             w += font_size * 0.58
+        if stop_at is not None and w > stop_at:
+            return w
     return w
 
 
@@ -48,7 +75,7 @@ def _compute_adaptive_layout(items: list[str], header_a: str, header_b: str):
     # Item 列：基于所有 Item 名称 + 表头 "Item" 在 15pt 下的宽度，留 24pt 内边距
     max_item_w = _estimate_text_width("Item", ITEM_FONT_SIZE)
     for name in items:
-        w = _estimate_text_width(name, ITEM_FONT_SIZE)
+        w = _estimate_text_width(name, ITEM_FONT_SIZE, stop_at=520)
         if w > max_item_w:
             max_item_w = w
     # 文本换行时仍需可读，Item 列允许换行，故按单行宽度 + 边距后 clamp
@@ -87,7 +114,7 @@ def _compute_adaptive_layout(items: list[str], header_a: str, header_b: str):
 
 
 class ItemCheckReportRequest(BaseModel):
-    items: list[str] = Field(
+    items: list[ItemName] = Field(
         ..., min_length=1, max_length=500, description="勾选的测试项名称，按展示顺序"
     )
     fileNameA: str = Field(
@@ -96,13 +123,19 @@ class ItemCheckReportRequest(BaseModel):
     fileNameB: str | None = Field(
         default=None, max_length=255, description="数据 B 文件名，用于表头 C 列"
     )
-    imagesA: list[str] = Field(
+    imagesA: list[ImageB64] = Field(
         ...,
         description="数据 A 的 PNG 图，base64 编码，与 items 一一对应，空字符串表示无图",
     )
-    imagesB: list[str] | None = Field(
+    imagesB: list[ImageB64] | None = Field(
         default=None, description="数据 B 的 PNG 图，base64 编码，与 items 一一对应"
     )
+
+    @model_validator(mode="after")
+    def _bound_total_items(self) -> "ItemCheckReportRequest":
+        if sum(len(s) for s in self.items) > MAX_TOTAL_ITEM_CHARS:
+            raise ValueError("items 总长度超过限制")
+        return self
 
 
 def _decode_b64_maybe_empty(s: str) -> bytes | None:
@@ -136,7 +169,6 @@ def _decode_b64_maybe_empty(s: str) -> bytes | None:
 def create_item_check_report(
     request: Request,
     body: ItemCheckReportRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(require_tool_permission("cpk-charts")),
 ):
@@ -278,15 +310,12 @@ def create_item_check_report(
         detail={
             "item_count": len(items),
             "has_b": bool(header_b),
-            "file_a": header_a,
-            "file_b": header_b,
         },
     )
 
-    background_tasks.add_task(lambda p=tmp_path: os.unlink(p) if p.exists() else None)
-
-    return FileResponse(
+    return _UnlinkingFileResponse(
         path=str(tmp_path),
+        cleanup_path=tmp_path,
         media_type="application/vnd.apple.numbers",
         filename=out_name,
     )

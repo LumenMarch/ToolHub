@@ -113,6 +113,10 @@ class Settings(BaseSettings):
     TASK_ARTIFACT_BLOB_MAX_DISK_RATIO: float = Field(default=0.2, gt=0, lt=1)
     TASK_ARTIFACT_CLEANUP_INTERVAL_HOURS: float = Field(default=6, gt=0)
 
+    # 每个主体的 tus 暂存配额：未完成句柄的声明长度之和与句柄数量
+    UPLOAD_MAX_STAGED_BYTES_PER_USER: int = Field(default=1024 * 1024 * 1024, gt=0)
+    UPLOAD_MAX_HANDLES_PER_USER: int = Field(default=200, gt=0)
+
     # 资产核对任务
     ASSET_COMPARISON_MAX_ACTIVE_JOBS: int = 1
     ASSET_COMPARISON_JOB_TTL_HOURS: int = 24

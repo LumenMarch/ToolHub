@@ -285,7 +285,17 @@ def test_approve_reject_create_notifications(admin_client, db):
     assert rejected.title == "注册申请被拒绝"
     payload = json.loads(rejected.payload)
     assert payload["status"] == "rejected"
-    assert payload["reason"] == "域名不符"
+    # reason 仅写审计，不得出现在用户可见通知中
+    assert "reason" not in payload
+    audits = client.get(
+        "/api/v1/admin/audit?action=user.reject",
+        headers=auth_header(admin_token),
+    ).json()
+    assert any(
+        json.loads(row["detail"]).get("reason") == "域名不符"
+        for row in audits["items"]
+        if row.get("detail")
+    )
 
 
 def test_register_pending_notifies_only_user_write(admin_client, db):

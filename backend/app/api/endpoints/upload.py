@@ -19,6 +19,7 @@ from app.services.upload.store import (
     UploadLengthExceededError,
     UploadNotFoundError,
     UploadOffsetMismatchError,
+    UploadQuotaExceededError,
     UploadStore,
     UploadWriteConflictError,
 )
@@ -156,7 +157,10 @@ async def tus_create(
         meta["sha256"] = digest.sha256
     meta["user_id"] = current_user.id
 
-    upload_id = store.create(upload_length, metadata=meta)
+    try:
+        upload_id = store.create(upload_length, metadata=meta)
+    except UploadQuotaExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
 
     headers = {
         "Location": f"/api/v1/upload/tus/{upload_id}",
@@ -296,6 +300,8 @@ async def resolve_upload_cache(
         )
     except UploadNotFoundError:
         return {"cache_hit": False, "upload_id": None}
+    except UploadQuotaExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {
         "cache_hit": True,
         "upload_id": upload_id,

@@ -107,7 +107,7 @@ class LlmConfigResponse(BaseModel):
 
 
 class LlmStatusResponse(BaseModel):
-    """工具页可用性门控 + 管理台观测面板共用。"""
+    """管理台观测面板：配置、探活、队列、缓存与指标。"""
 
     enabled: bool
     configured: bool
@@ -122,3 +122,13 @@ class LlmStatusResponse(BaseModel):
     gate: dict[str, int]
     cache: dict[str, object]
     metrics: dict[str, object]
+
+
+class LlmAvailabilityResponse(BaseModel):
+    """工具页可用性门控：只暴露按钮态所需的最小字段。"""
+
+    enabled: bool
+    configured: bool
+    available: bool
+    cooldownActive: bool
+    lastError: str | None

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
@@ -22,6 +22,9 @@ from app.seed import (
 
 # 增大 Starlette multipart 上传限制（默认 max_part_size 仅 1MB，Excel 文件轻松超标）
 MultiPartParser.max_part_size = 100 * 1024 * 1024  # 单个 part 最大 100MB
+
+# 单个 JSON 请求体上限：图片类工具最大允许 80MB base64，再留少量信封余量
+MAX_JSON_BODY_BYTES = 96 * 1024 * 1024
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -82,6 +85,22 @@ app.add_middleware(
         "Upload-Offset",
     ],
 )
+
+
+@app.middleware("http")
+async def limit_json_body(request: Request, call_next):
+    """在 JSON 解码前按 Content-Length 拒绝超大请求体。"""
+    if request.headers.get("content-type", "").startswith("application/json"):
+        length = request.headers.get("content-length")
+        if length is not None:
+            try:
+                too_large = int(length) > MAX_JSON_BODY_BYTES
+            except ValueError:
+                too_large = True
+            if too_large:
+                return JSONResponse({"detail": "请求体超过限制"}, status_code=413)
+    return await call_next(request)
+
 
 # Mount all API routes from the single API aggregator
 app.include_router(api_router, prefix="/api/v1")

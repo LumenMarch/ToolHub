@@ -11,12 +11,14 @@ Excel QUARTILE.INC 以及 polars quantile(interpolation="linear") 一致。
 
 from __future__ import annotations
 
-import os
-import tempfile
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
 import polars as pl
+
+# GB18030 回退需要整文件解码；限制回退文件大小，避免内存放大到不可控
+MAX_ENCODED_CSV_BYTES = 32 * 1024 * 1024
 
 # Tukey fences 的 IQR 乘数（1.5×IQR），业界标准
 IQR_FACTOR = 1.5
@@ -122,7 +124,8 @@ def _read_csv(path: Path) -> pl.DataFrame:
     polars 对非 UTF-8 字节采用 lossy 替换而非报错，无法靠异常触发回退，
     因此先对采样字节做严格的 UTF-8 校验：不合法则按 GB18030 解码再解析。
     """
-    head = path.read_bytes()[:SAMPLE_BYTES]
+    with path.open("rb") as fh:
+        head = fh.read(SAMPLE_BYTES)
     separator = _detect_separator(head)
     if not _is_valid_utf8(head):
         return _read_csv_encoded(path, separator)
@@ -140,7 +143,15 @@ def _is_valid_utf8(data: bytes) -> bool:
 
 
 def _read_csv_encoded(path: Path, separator: str) -> pl.DataFrame:
-    """非 UTF-8 文件：按 GB18030 解码后写入临时 UTF-8 文件再解析。"""
+    """非 UTF-8 文件：按 GB18030 解码后在内存中转为 UTF-8 解析。
+
+    GB18030 回退需要整文件解码，内存放大明显，因此对回退路径单独设上限；
+    不再写入系统临时目录，避免进程异常退出后遗留无主副本。
+    """
+    if path.stat().st_size > MAX_ENCODED_CSV_BYTES:
+        raise BoxPlotValidationError(
+            "非 UTF-8 编码的 CSV 文件过大，请另存为 UTF-8 后重试"
+        )
     data = path.read_bytes()
     try:
         text = data.decode("gb18030")
@@ -148,18 +159,17 @@ def _read_csv_encoded(path: Path, separator: str) -> pl.DataFrame:
         raise BoxPlotValidationError(
             "无法识别 CSV 编码（已尝试 UTF-8 与 GB18030）"
         ) from exc
+    del data
 
     layout = _detect_export_layout(text, separator)
-    fd, tmp_name = tempfile.mkstemp(suffix=".csv")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-            f.write(text)
-        return _parse_csv(tmp_name, separator, layout)
-    finally:
-        os.unlink(tmp_name)
+    buf = io.BytesIO(text.encode("utf-8"))
+    del text
+    return _parse_csv(buf, separator, layout)
 
 
-def _parse_csv(path: Path, separator: str, layout: _CsvLayout | None) -> pl.DataFrame:
+def _parse_csv(
+    path: Path | io.BytesIO, separator: str, layout: _CsvLayout | None
+) -> pl.DataFrame:
     """按布局偏移读取 CSV；解析错误统一转译为校验错误。"""
     layout = layout or _CsvLayout()
     kwargs: dict[str, int] = {}

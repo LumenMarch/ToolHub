@@ -226,7 +226,6 @@ class AssetComparisonJobManager:
         scan_id: str,
     ) -> tuple[dict, bool]:
         create_started_at = perf_counter()
-        self.cleanup()
         with self._lock, SessionLocal() as db:
             existing = db.scalars(
                 select(AssetComparisonJob).where(
@@ -381,6 +380,8 @@ class AssetComparisonJobManager:
             annotation_revision=0,
         )
         self._notify_job(job_id=job_id, user_id=user_id, status="queued")
+        # 请求已通过 scan 校验且任务已落库，才触发按调用者作用域的保留策略
+        self.cleanup(user_id=user_id)
         self._executor.submit(self._execute_worker, job_id)
         return response, False
 
@@ -776,7 +777,7 @@ class AssetComparisonJobManager:
     def shutdown(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def cleanup(self) -> None:
+    def cleanup(self, *, user_id: int | None = None) -> None:
         now = _utcnow()
         expired_job_files = []
         # 提交后再推送，避免持锁 publish；收集 (job_id, user_id, status)
@@ -814,23 +815,40 @@ class AssetComparisonJobManager:
                 expired_job_files.append((job.user_id, job.id))
                 expired_notifies.append((job.id, job.user_id, job.status))
 
+            retained_query = select(AssetComparisonJob).where(
+                AssetComparisonJob.status.in_(RETAINED_JOB_STATUSES)
+            )
+            if user_id is not None:
+                retained_query = retained_query.where(
+                    AssetComparisonJob.user_id == user_id
+                )
             terminal_jobs = db.scalars(
-                select(AssetComparisonJob)
-                .where(AssetComparisonJob.status.in_(RETAINED_JOB_STATUSES))
-                .order_by(AssetComparisonJob.updated_at.desc())
+                retained_query.order_by(AssetComparisonJob.updated_at.desc())
             ).all()
-            for job in terminal_jobs[settings.ASSET_COMPARISON_MAX_STORED_JOBS :]:
+            if user_id is None:
+                # 全局巡检也按 owner 分组，各自使用自己的配额，绝不跨用户驱逐
+                job_groups: dict[int, list[AssetComparisonJob]] = {}
+                for job in terminal_jobs:
+                    job_groups.setdefault(job.user_id, []).append(job)
+                overflow = [
+                    job
+                    for jobs in job_groups.values()
+                    for job in jobs[settings.ASSET_COMPARISON_MAX_STORED_JOBS :]
+                ]
+            else:
+                overflow = terminal_jobs[settings.ASSET_COMPARISON_MAX_STORED_JOBS :]
+            for job in overflow:
                 self._delete_job_files(job.user_id, job.id)
                 db.delete(job)
             db.commit()
 
         # 过期终态通知：前端已停轮询，需靠 job.terminal 刷新 UI
-        for job_id, user_id, status in expired_notifies:
-            self._notify_job(job_id=job_id, user_id=user_id, status=status)
+        for job_id, notify_user_id, status in expired_notifies:
+            self._notify_job(job_id=job_id, user_id=notify_user_id, status=status)
 
-        for user_id, job_id in expired_job_files:
-            self._delete_job_files(user_id, job_id)
-        self._cleanup_storage_limit()
+        for owner_id, expired_job_id in expired_job_files:
+            self._delete_job_files(owner_id, expired_job_id)
+        self._cleanup_storage_limit(user_id=user_id)
 
     def _begin_execute(self, job_id: str) -> int | None:
         notify: tuple[str, int, str] | None = None
@@ -1653,25 +1671,34 @@ class AssetComparisonJobManager:
             ignore_errors=ignore_errors,
         )
 
-    def _cleanup_storage_limit(self) -> None:
+    def _cleanup_storage_limit(self, *, user_id: int | None = None) -> None:
         with self._lock, SessionLocal() as db:
+            jobs_query = select(AssetComparisonJob).where(
+                AssetComparisonJob.status.in_(RETAINED_JOB_STATUSES)
+            )
+            if user_id is not None:
+                jobs_query = jobs_query.where(AssetComparisonJob.user_id == user_id)
             jobs = db.scalars(
-                select(AssetComparisonJob)
-                .where(AssetComparisonJob.status.in_(RETAINED_JOB_STATUSES))
-                .order_by(AssetComparisonJob.updated_at.asc())
+                jobs_query.order_by(AssetComparisonJob.updated_at.asc())
             ).all()
-            sizes = {}
-            for job in jobs:
-                sizes[job.id] = self._artifact_store.task_size(
+            sizes = {
+                job.id: self._artifact_store.task_size(
                     user_id=job.user_id,
                     tool=TASK_TOOL,
                     task_id=job.id,
                 )
-            total_size = sum(sizes.values())
+                for job in jobs
+            }
+            # 按 owner 分组独立核算，任一用户的体积不会挤占其他用户的配额
+            job_groups: dict[int, list[AssetComparisonJob]] = {}
             for job in jobs:
-                if total_size <= settings.ASSET_COMPARISON_MAX_STORAGE_BYTES:
-                    break
-                total_size -= sizes[job.id]
-                self._delete_job_files(job.user_id, job.id)
-                db.delete(job)
+                job_groups.setdefault(job.user_id, []).append(job)
+            for group in job_groups.values():
+                total_size = sum(sizes[job.id] for job in group)
+                for job in group:
+                    if total_size <= settings.ASSET_COMPARISON_MAX_STORAGE_BYTES:
+                        break
+                    total_size -= sizes[job.id]
+                    self._delete_job_files(job.user_id, job.id)
+                    db.delete(job)
             db.commit()

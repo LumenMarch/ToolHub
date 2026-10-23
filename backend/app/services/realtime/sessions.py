@@ -40,6 +40,8 @@ def revoke_user_sessions(db: Session, user: User) -> User:
         session_revoked_event(user_id=int(user.id)),
         user_id=int(user.id),
     )
+    # 兜底关闭已建立的 WS，避免客户端忽略事件后继续接收推送
+    realtime_hub.close_user(int(user.id))
     return user
 
 

@@ -18,6 +18,8 @@ from app.services.tt_time.models import (
 )
 from app.services.tt_time.parsing import format_station_number
 
+TT_MAX_BINS = 5000
+
 
 def _percentile(sorted_vals: list[float], p: float) -> float:
     """线性插值分位数 (PERCENTILE.INC)。"""
@@ -127,18 +129,32 @@ def calculate_tt_summary(
 
     # 5. 分箱统计
     bw = max(1.0, bin_width)
+    if not math.isfinite(bw):
+        bw = 1.0
     lo0 = math.floor(min_v / bw) * bw
     hiN = math.ceil(max_v / bw) * bw
-    bin_count = max(1, math.ceil((hiN - lo0) / bw))
+    span = hiN - lo0
+    if span / bw > TT_MAX_BINS:
+        # 超出分箱预算时按上限等分整个跨度，避免恶意时间跨度放大内存与 CPU
+        bw = span / TT_MAX_BINS
+        lo0 = math.floor(min_v / bw) * bw
+        hiN = math.ceil(max_v / bw) * bw
+    bin_count = min(TT_MAX_BINS, max(1, math.ceil((hiN - lo0) / bw)))
+
+    counts = [0] * bin_count
+    for t in all_tts:  # all_tts 已排序，单趟分桶 O(rows)
+        idx = int((t - lo0) // bw)
+        if idx < 0:
+            idx = 0
+        elif idx >= bin_count:
+            idx = bin_count - 1
+        counts[idx] += 1
 
     histogram_bins: list[HistogramBin] = []
     for i in range(bin_count):
         b_lo = lo0 + i * bw
         b_hi = b_lo + bw
-        if i == bin_count - 1:
-            cnt = sum(1 for t in all_tts if b_lo <= t <= b_hi)
-        else:
-            cnt = sum(1 for t in all_tts if b_lo <= t < b_hi)
+        cnt = counts[i]
         pct = (cnt / filtered_rows) * 100.0 if filtered_rows > 0 else 0.0
         label = f"{int(b_lo)}S" if bw == 1 else f"{int(b_lo)}–{int(b_hi)} S"
         histogram_bins.append(
