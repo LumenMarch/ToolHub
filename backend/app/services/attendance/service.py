@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import zipfile
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -34,6 +35,23 @@ ATTENDANCE_HEADERS = (
     "记录时间",
 )
 SHIFT_SHEET_NAME = "辦公室人員及隨線人員班別明細1"
+
+# 通行记录的有效列数：A 列编号，B..K 为十列表头，其余列不参与计算。
+# 同时作为 iter_rows 的 max_col，避免按工作簿声明的 <dimension> 宽度物化每一行。
+ATTENDANCE_COLUMNS = 14
+# 班别文件需要读到第 20 列（index 19：晚餐時間）。
+SHIFT_COLUMNS = 20
+# 数据行之前的表头行数：第 1 行标题，第 2 行表头。
+HEADER_ROWS = 2
+
+# 不可信工作簿的资源上限。没有这些约束时，几 KB 的输入就能通过
+# 解压膨胀、伪造 <dimension> 宽度或伪造行号放大成 GB 级内存与小时级 CPU。
+# 正常月度通行记录实测约 2 万行、20 MB 解压后大小，下列上限留有一个数量级以上余量。
+MAX_WORKBOOK_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+MAX_WORKBOOK_SHEETS = 32
+# 单个工作簿可迭代的数据行数与保留的记录数上限（稀疏行号空洞也计入）。
+MAX_ATTENDANCE_ROWS = 500_000
+
 OUTPUT_HEADERS = (
     "通行记录ID",
     "编号",
@@ -56,6 +74,51 @@ OUTPUT_HEADERS = (
 
 class AttendanceValidationError(ValueError):
     """出勤文件无法安全处理时抛出的校验错误。"""
+
+
+def _check_uncompressed_budget(content: bytes) -> None:
+    """拒绝解压后超过预算的 .xlsx。
+
+    OOXML 是 zip，压缩比可以轻松达到上千倍，所以上传字节数不能作为内存上限；
+    zipfile 会把读取长度限制在中央目录声明的 file_size，这里先汇总该值。
+    """
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            total_bytes = 0
+            for info in archive.infolist():
+                total_bytes += info.file_size
+                if total_bytes > MAX_WORKBOOK_UNCOMPRESSED_BYTES:
+                    raise AttendanceValidationError(
+                        "工作簿解压后超过 "
+                        f"{MAX_WORKBOOK_UNCOMPRESSED_BYTES} 字节上限，已拒绝处理"
+                    )
+    except zipfile.BadZipFile as exc:
+        raise AttendanceValidationError(
+            "工作簿无法读取，请确认文件未损坏且格式与扩展名一致"
+        ) from exc
+
+
+def _check_sheet_count(sheet_names: list[str]) -> None:
+    if len(sheet_names) > MAX_WORKBOOK_SHEETS:
+        raise AttendanceValidationError(
+            f"工作簿包含 {len(sheet_names)} 个工作表，超过 {MAX_WORKBOOK_SHEETS} 个上限"
+        )
+
+
+def _check_declared_rows(
+    declared_max_row: int | None,
+    sheet_name: str,
+) -> None:
+    """拒绝声明末行超限的工作表。
+
+    openpyxl 的只读模式直接采用 sheet XML 里 <dimension ref> 的末行号，
+    并对中间缺失的行号逐行补齐，所以伪造的末行会变成同等数量的循环。
+    """
+    limit = HEADER_ROWS + MAX_ATTENDANCE_ROWS
+    if declared_max_row is not None and declared_max_row > limit:
+        raise AttendanceValidationError(
+            f"工作表“{sheet_name}”声明的末行 {declared_max_row} 超过上限 {limit}"
+        )
 
 
 @dataclass(frozen=True)
@@ -235,6 +298,7 @@ class AttendanceService:
         return output
 
     def _load_shifts(self, content: bytes) -> dict[str, ShiftSchedule]:
+        _check_uncompressed_budget(content)
         try:
             workbook = load_workbook(
                 BytesIO(content),
@@ -247,18 +311,21 @@ class AttendanceService:
             ) from exc
 
         try:
+            _check_sheet_count(workbook.sheetnames)
             if SHIFT_SHEET_NAME not in workbook.sheetnames:
                 raise AttendanceValidationError(
                     f"班别文件缺少工作表“{SHIFT_SHEET_NAME}”"
                 )
 
             worksheet = workbook[SHIFT_SHEET_NAME]
+            _check_declared_rows(worksheet.max_row, SHIFT_SHEET_NAME)
             headers = [
                 self._normalize_header(value)
                 for value in next(
                     worksheet.iter_rows(
                         min_row=2,
                         max_row=2,
+                        max_col=SHIFT_COLUMNS,
                         values_only=True,
                     ),
                     (),
@@ -279,8 +346,13 @@ class AttendanceService:
 
             shifts: dict[str, ShiftSchedule] = {}
             for row_number, row in enumerate(
-                worksheet.iter_rows(min_row=3, values_only=True),
-                start=3,
+                worksheet.iter_rows(
+                    min_row=HEADER_ROWS + 1,
+                    max_row=HEADER_ROWS + MAX_ATTENDANCE_ROWS,
+                    max_col=SHIFT_COLUMNS,
+                    values_only=True,
+                ),
+                start=HEADER_ROWS + 1,
             ):
                 emp_id = self._normalize_employee_id(row[1] if len(row) > 1 else None)
                 if not emp_id:
@@ -342,16 +414,22 @@ class AttendanceService:
 
         try:
             sheet_order = workbook.sheet_names()
+            _check_sheet_count(sheet_order)
             records: list[AttendanceRecord] = []
             for worksheet in workbook.sheets():
                 if worksheet.nrows < 2:
                     raise AttendanceValidationError(f"工作表“{worksheet.name}”缺少表头")
+                if worksheet.nrows > HEADER_ROWS + MAX_ATTENDANCE_ROWS:
+                    raise AttendanceValidationError(
+                        f"工作表“{worksheet.name}”行数 {worksheet.nrows} "
+                        f"超过上限 {HEADER_ROWS + MAX_ATTENDANCE_ROWS}"
+                    )
                 self._validate_attendance_headers(
-                    worksheet.row_values(1),
+                    worksheet.row_values(1, 0, ATTENDANCE_COLUMNS),
                     worksheet.name,
                 )
-                for row_index in range(2, worksheet.nrows):
-                    row = worksheet.row_values(row_index)
+                for row_index in range(HEADER_ROWS, worksheet.nrows):
+                    row = worksheet.row_values(row_index, 0, ATTENDANCE_COLUMNS)
                     if len(row) <= 1 or not row[1]:
                         continue
                     records.append(
@@ -362,6 +440,10 @@ class AttendanceService:
                             workbook.datemode,
                         )
                     )
+                    if len(records) > MAX_ATTENDANCE_ROWS:
+                        raise AttendanceValidationError(
+                            f"通行记录超过 {MAX_ATTENDANCE_ROWS} 行上限，已拒绝处理"
+                        )
         finally:
             workbook.release_resources()
 
@@ -373,6 +455,7 @@ class AttendanceService:
         self,
         content: bytes,
     ) -> tuple[list[str], list[AttendanceRecord]]:
+        _check_uncompressed_budget(content)
         try:
             workbook = load_workbook(
                 BytesIO(content),
@@ -385,21 +468,32 @@ class AttendanceService:
             ) from exc
 
         try:
+            _check_sheet_count(workbook.sheetnames)
             sheet_order = list(workbook.sheetnames)
             records: list[AttendanceRecord] = []
+            last_row = HEADER_ROWS + MAX_ATTENDANCE_ROWS
             for worksheet in workbook.worksheets:
                 header_row = next(
                     worksheet.iter_rows(
                         min_row=2,
                         max_row=2,
+                        max_col=ATTENDANCE_COLUMNS,
                         values_only=True,
                     ),
                     (),
                 )
                 self._validate_attendance_headers(header_row, worksheet.title)
+                _check_declared_rows(worksheet.max_row, worksheet.title)
+                # max_row 同时充当行号空洞与记录数的硬上限：
+                # 未传时 openpyxl 会用不可信的 <dimension> 末行号逐行补齐。
                 for row_number, row in enumerate(
-                    worksheet.iter_rows(min_row=3, values_only=True),
-                    start=3,
+                    worksheet.iter_rows(
+                        min_row=HEADER_ROWS + 1,
+                        max_row=last_row,
+                        max_col=ATTENDANCE_COLUMNS,
+                        values_only=True,
+                    ),
+                    start=HEADER_ROWS + 1,
                 ):
                     if len(row) <= 1 or not row[1]:
                         continue
@@ -424,8 +518,8 @@ class AttendanceService:
         row_number: int,
         datemode: int | None = None,
     ) -> AttendanceRecord:
-        values = list(row)
-        while len(values) < 14:
+        values = list(row[:ATTENDANCE_COLUMNS])
+        while len(values) < ATTENDANCE_COLUMNS:
             values.append("")
 
         emp_id = self._normalize_employee_id(values[1])
@@ -628,7 +722,7 @@ class AttendanceService:
 
             output_rows: list[AttendanceOutputRow] = []
             for record in sheet_records:
-                row_data = list(record.original_data[:14])
+                row_data = list(record.original_data[:ATTENDANCE_COLUMNS])
                 while len(row_data) < 16:
                     row_data.append("")
 
