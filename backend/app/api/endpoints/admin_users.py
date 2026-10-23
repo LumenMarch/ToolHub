@@ -222,6 +222,12 @@ def update_user_endpoint(
     password_changed = user_in.password is not None
     deactivated = user_in.is_active is False
 
+    update_detail = user_in.model_dump(exclude_none=True, exclude={"password"})
+    if password_changed:
+        update_detail["passwordChanged"] = True
+    if deactivated or password_changed:
+        update_detail["sessionsRevoked"] = True
+
     # 直接工具权限：在任何写入之前先校验（仅 tool:*:use），
     # 校验失败返回 400，避免"角色已提交但接口报错"的部分提交
     if tool_perms_changed:
@@ -244,8 +250,8 @@ def update_user_endpoint(
         action="user.update",
         target_type="user",
         target_id=user.id,
-        # 排除 password，防止明文密码写入审计日志
-        detail=user_in.model_dump(exclude_none=True, exclude={"password"}),
+        # 排除 password，防止明文密码写入审计日志；只记录非敏感变更标记
+        detail=update_detail,
     )
 
     # 停用 / 重置密码：递增 token_version，踢掉全部旧会话
@@ -406,16 +412,13 @@ def reject_user_endpoint(
         detail=detail,
     )
     notify_user_status_updated(int(user.id), USER_STATUS_REJECTED)
-    # 通知中心落库：驳回结果通知当事用户（含 reason，若有；写失败不影响驳回结果）
-    reject_payload: dict = {"status": USER_STATUS_REJECTED}
-    if reject_in is not None and reject_in.reason:
-        reject_payload["reason"] = reject_in.reason
+    # reason 仅用于审计留痕（见 UserRejectRequest），不得复制到用户可见通知
     _safe_create_notification(
         db,
         user_id=int(user.id),
         type="user.status.updated",
         title="注册申请被拒绝",
-        payload=reject_payload,
+        payload={"status": USER_STATUS_REJECTED},
     )
     return _user_to_response(user, db)
 

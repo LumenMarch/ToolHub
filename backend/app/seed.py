@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.db.session import SessionLocal
 from app.models.permission import Permission
 from app.models.role import Role
-from app.models.user import User
+from app.models.user import USER_STATUS_APPROVED, User
 
 # 每个工具一条 tool:<id>:use（id 与前端 tools.ts 的 toolsConfig 完全一致）：
 # 细粒度授权后，工具使用权限不再由粗粒度的 tool:use 控制。
@@ -281,11 +281,31 @@ def migrate_retired_tool_permissions() -> None:
         db.close()
 
 
-def ensure_initial_admin() -> str | None:
-    """用户表为空时引导创建初始管理员；返回错误信息或 None。
+def _has_approved_administrator(db: Session) -> bool:
+    """是否存在持有 user:write 且已审批通过的用户。"""
+    from app.crud.crud_role import get_user_ids_with_permission
 
-    - 用户表非空：不做任何事（存量库已有用户），返回 None；
-    - 用户表为空且 INITIAL_ADMIN_USERNAME / INITIAL_ADMIN_PASSWORD
+    admin_ids = get_user_ids_with_permission(db, "user:write")
+    if not admin_ids:
+        return False
+    approved_id = db.scalar(
+        select(User.id)
+        .where(User.id.in_(admin_ids), User.status == USER_STATUS_APPROVED)
+        .limit(1)
+    )
+    return approved_id is not None
+
+
+def ensure_initial_admin() -> str | None:
+    """用户表没有任何已审批管理员时引导创建初始管理员；返回错误信息或 None。
+
+    判定依据是「是否存在持有 user:write 且 approved 的用户」，而不是用户表
+    是否为空：匿名注册产生的 pending 行不能让引导被永久跳过。若配置的
+    初始管理员用户名已被占用（例如该 pending 用户），返回持久错误信息，
+    使健康检查保持 503，直到管理员处理冲突或修正配置。
+
+    - 已存在 approved 且持有 user:write 的用户：返回 None；
+    - 没有此类用户且 INITIAL_ADMIN_USERNAME / INITIAL_ADMIN_PASSWORD
       均配置：创建 approved 用户并分配"超级管理员"+"工具使用者"角色；
     - 仅配置其中一项：视为配置错误，返回错误信息；
     - 均未配置：返回错误信息（系统将无法审批新注册用户），
@@ -299,12 +319,10 @@ def ensure_initial_admin() -> str | None:
     from app.core.config import settings
     from app.core.security import get_password_hash
     from app.crud.crud_role import get_role_by_name
-    from app.crud.crud_user import count_users
-    from app.models.user import USER_STATUS_APPROVED, User
 
     db = SessionLocal()
     try:
-        if count_users(db) > 0:
+        if _has_approved_administrator(db):
             return None
 
         username = (settings.INITIAL_ADMIN_USERNAME or "").strip()

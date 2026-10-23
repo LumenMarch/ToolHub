@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 
 import jwt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from jwt.exceptions import InvalidTokenError
+from starlette.websockets import WebSocketState
 
 from app.core.config import settings
 from app.core.security import _token_version_from_payload
@@ -23,8 +26,8 @@ router = APIRouter()
 
 def _resolve_user_id_from_cookie(
     websocket: WebSocket,
-) -> tuple[int, str | None] | None:
-    """从会话 Cookie 解析 (用户 id, 会话 jti)；无效则返回 None。
+) -> tuple[int, str | None, int | None] | None:
+    """从会话 Cookie 解析 (用户 id, 会话 jti, token 过期时间)；无效则返回 None。
 
     校验与 HTTP get_current_user 一致：sub/tv 之外，若 token 带 sid 声明
     则要求对应 UserSession 存在且未吊销（单会话吊销不递增 token_version，
@@ -46,6 +49,8 @@ def _resolve_user_id_from_cookie(
             return None
         token_version = _token_version_from_payload(payload)
         sid = payload.get("sid")
+        exp = payload.get("exp")
+        expires_at = int(exp) if isinstance(exp, (int, float)) else None
     except InvalidTokenError:
         return None
 
@@ -63,7 +68,7 @@ def _resolve_user_id_from_cookie(
             user_session = get_user_session_by_jti(db, str(sid))
             if user_session is None or user_session.revoked_at is not None:
                 return None
-        return int(user.id), str(sid) if sid is not None else None
+        return int(user.id), str(sid) if sid is not None else None, expires_at
     finally:
         db.close()
 
@@ -80,9 +85,16 @@ async def realtime_ws(websocket: WebSocket) -> None:
             return
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
-    user_id, sid = resolved
+    user_id, sid, expires_at = resolved
 
+    # 握手时记录 exp；hub 投递前据此拦截已过期 token
+    websocket._toolhub_expires_at = expires_at  # type: ignore[attr-defined]
     await realtime_hub.connect(user_id, websocket, sid=sid)
+
+    expiry_task: asyncio.Task[None] | None = None
+    if expires_at is not None:
+        expiry_task = asyncio.create_task(_close_when_expired(websocket, expires_at))
+
     try:
         while True:
             message = await websocket.receive()
@@ -97,4 +109,18 @@ async def realtime_ws(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        if expiry_task is not None:
+            expiry_task.cancel()
         realtime_hub.disconnect(user_id, websocket)
+
+
+async def _close_when_expired(websocket: WebSocket, expires_at: int) -> None:
+    """token 到期时主动关闭连接，避免客户端忽略事件后无限续用。"""
+    delay = max(0.0, expires_at - time.time())
+    await asyncio.sleep(delay)
+    if websocket.client_state != WebSocketState.CONNECTED:
+        return
+    try:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    except Exception:
+        pass

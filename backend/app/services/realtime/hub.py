@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import threading
+import time
 from collections import defaultdict
 from typing import Any
 from uuid import uuid4
@@ -84,6 +85,49 @@ class RealtimeHub:
             sockets.discard(websocket)
             if not sockets:
                 self._connections.pop(user_id, None)
+
+    def close_user(self, user_id: int) -> None:
+        """主动关闭某用户的全部 WS 连接（全局吊销 / 删除用户等）。
+
+        与 publish 一样投递到事件循环执行，保证先投递的 session.revoked
+        事件先发送，随后摘除并关闭连接。可从同步线程调用。
+        """
+        loop = self._resolve_loop()
+        if loop is None:
+            return
+
+        def schedule() -> None:
+            loop.create_task(self._close_user_sockets(user_id))
+
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+
+        if running is loop:
+            schedule()
+        else:
+            loop.call_soon_threadsafe(schedule)
+
+    async def _close_user_sockets(self, user_id: int) -> None:
+        """从注册表摘除并关闭某用户的全部连接。"""
+        with self._lock:
+            sockets = list(self._connections.pop(user_id, ()))
+            for websocket in sockets:
+                sid = getattr(websocket, "_toolhub_session_sid", None)
+                if sid is None:
+                    continue
+                sid_sockets = self._connections_by_sid.get(sid)
+                if sid_sockets:
+                    sid_sockets.discard(websocket)
+                    if not sid_sockets:
+                        self._connections_by_sid.pop(sid, None)
+        for websocket in sockets:
+            try:
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.close(code=1008)
+            except Exception:
+                logger.debug("realtime hub: 关闭用户连接失败 user_id={}", user_id)
 
     def close_user_session(self, sid: str) -> None:
         """主动关闭指定会话的全部 WS 连接（单会话吊销后踢下线）。
@@ -241,6 +285,13 @@ class RealtimeHub:
             dead: list[WebSocket] = []
             for websocket in sockets:
                 try:
+                    expires_at = getattr(websocket, "_toolhub_expires_at", None)
+                    if expires_at is not None and time.time() >= expires_at:
+                        # token 已过期：摘除并关闭，不再投递任何事件
+                        dead.append(websocket)
+                        if websocket.client_state == WebSocketState.CONNECTED:
+                            await websocket.close(code=1008)
+                        continue
                     if websocket.client_state != WebSocketState.CONNECTED:
                         dead.append(websocket)
                         continue

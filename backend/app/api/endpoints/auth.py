@@ -24,6 +24,7 @@ from app.crud.crud_user import create_user, get_user_by_username, update_last_lo
 from app.models.user import USER_STATUS_REJECTED
 from app.schemas.user import Token, UserCreate, UserResponse
 from app.services.audit import log_action
+from app.services.realtime.hub import realtime_hub
 from app.services.realtime.sessions import notify_user_pending
 
 router = APIRouter()
@@ -111,6 +112,7 @@ def _revoke_current_session(request: Request, db: Session) -> None:
     user_session = get_user_session_by_jti(db, str(sid))
     if user_session is not None:
         revoke_user_session(db, user_session)
+        realtime_hub.close_user_session(str(sid))
 
 
 def _set_session_cookie(response: Response, access_token: str) -> None:
