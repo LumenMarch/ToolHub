@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import shutil
+import threading
 import time
 import uuid
 from collections.abc import AsyncIterable
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import portalocker
 
+from app.core.config import settings
 from app.services.task_artifacts import (
     CachedBlob,
     ContentDigest,
@@ -65,6 +67,12 @@ class UploadChecksumMismatchError(ValueError):
     pass
 
 
+class UploadQuotaExceededError(ValueError):
+    """主体的暂存上传数量或字节配额已用尽。"""
+
+    pass
+
+
 class UploadStore:
     """tus 上传的本地文件存储。"""
 
@@ -77,6 +85,7 @@ class UploadStore:
         self.artifact_store = artifact_store or task_artifact_store
         self.root = root or self.artifact_store.upload_root
         self.root.mkdir(parents=True, exist_ok=True)
+        self._quota_lock = threading.Lock()
 
     # ------------------------------------------------------------------ helpers
 
@@ -118,11 +127,33 @@ class UploadStore:
         except portalocker.LockException:
             pass
 
+    def _ensure_quota(self, user_id: int | None, upload_length: int) -> None:
+        """按主体校验暂存句柄数量与未完成声明字节；调用方需持有 _quota_lock。"""
+        if user_id is None:
+            return
+        handle_count = 0
+        staged_bytes = 0
+        for upload_id in self._list_upload_ids():
+            try:
+                meta = self._read_meta(upload_id)
+            except (UploadNotFoundError, OSError, ValueError):
+                continue
+            if meta.get("user_id") != user_id:
+                continue
+            handle_count += 1
+            if not meta.get("completed"):
+                staged_bytes += int(meta.get("upload_length", 0))
+        if handle_count + 1 > settings.UPLOAD_MAX_HANDLES_PER_USER:
+            raise UploadQuotaExceededError("上传句柄数量超过配额")
+        if staged_bytes + upload_length > settings.UPLOAD_MAX_STAGED_BYTES_PER_USER:
+            raise UploadQuotaExceededError("上传暂存空间超过配额")
+
     # --------------------------------------------------------------- public API
 
     def create(self, upload_length: int, metadata: dict | None = None) -> str:
         """创建新上传。返回 upload_id（uuid hex，32 字符）。"""
         metadata = metadata or {}
+        user_id = metadata.get("user_id")
         upload_id = uuid.uuid4().hex
 
         meta = {
@@ -130,7 +161,7 @@ class UploadStore:
             "filename": metadata.get("filename", ""),
             "content_type": metadata.get("content_type", "application/octet-stream"),
             "created_at": time.time(),
-            "user_id": metadata.get("user_id"),
+            "user_id": user_id,
             "expected_md5": metadata.get("md5"),
             "expected_sha256": metadata.get("sha256"),
             "md5": None,
@@ -139,9 +170,11 @@ class UploadStore:
             "completed": False,
         }
 
-        self._write_meta(upload_id, meta)
-        # 创建空数据文件
-        self._data_path(upload_id).touch()
+        with self._quota_lock:
+            self._ensure_quota(user_id, upload_length)
+            self._write_meta(upload_id, meta)
+            # 创建空数据文件
+            self._data_path(upload_id).touch()
         return upload_id
 
     def create_cached_reference(
@@ -156,33 +189,35 @@ class UploadStore:
         upload_id = uuid.uuid4().hex
         now = time.time()
         data_path = self._data_path(upload_id)
-        try:
+        with self._quota_lock:
+            self._ensure_quota(user_id, 0)
             try:
-                os.link(blob.path, data_path)
-            except OSError:
-                shutil.copy2(blob.path, data_path)
-            self._write_meta(
-                upload_id,
-                {
-                    "upload_length": blob.digest.size,
-                    "filename": filename,
-                    "content_type": content_type or "application/octet-stream",
-                    "created_at": now,
-                    "user_id": user_id,
-                    "expected_md5": blob.digest.md5,
-                    "expected_sha256": blob.digest.sha256,
-                    "md5": blob.digest.md5,
-                    "sha256": blob.digest.sha256,
-                    "cache_hit": True,
-                    "completed": True,
-                },
-            )
-        except FileNotFoundError as exc:
-            data_path.unlink(missing_ok=True)
-            raise UploadNotFoundError("上传缓存已失效") from exc
-        except Exception:
-            data_path.unlink(missing_ok=True)
-            raise
+                try:
+                    os.link(blob.path, data_path)
+                except OSError:
+                    shutil.copy2(blob.path, data_path)
+                self._write_meta(
+                    upload_id,
+                    {
+                        "upload_length": blob.digest.size,
+                        "filename": filename,
+                        "content_type": content_type or "application/octet-stream",
+                        "created_at": now,
+                        "user_id": user_id,
+                        "expected_md5": blob.digest.md5,
+                        "expected_sha256": blob.digest.sha256,
+                        "md5": blob.digest.md5,
+                        "sha256": blob.digest.sha256,
+                        "cache_hit": True,
+                        "completed": True,
+                    },
+                )
+            except FileNotFoundError as exc:
+                data_path.unlink(missing_ok=True)
+                raise UploadNotFoundError("上传缓存已失效") from exc
+            except Exception:
+                data_path.unlink(missing_ok=True)
+                raise
         return upload_id
 
     def find_cached_blob(
