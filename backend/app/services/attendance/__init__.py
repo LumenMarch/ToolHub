@@ -11,6 +11,7 @@ from app.services.attendance.cache import (
     AttendanceResultCache,
     AttendanceResultExpiredError,
     AttendanceResultNotFoundError,
+    AttendanceResultTooLargeError,
     CachedAttendanceResult,
     attendance_result_cache,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "AttendanceResultCache",
     "AttendanceResultExpiredError",
     "AttendanceResultNotFoundError",
+    "AttendanceResultTooLargeError",
     "AttendanceService",
     "AttendanceSummary",
     "AttendanceValidationError",

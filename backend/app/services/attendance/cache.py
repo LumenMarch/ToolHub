@@ -26,6 +26,10 @@ class AttendanceResultExpiredError(LookupError):
     """请求的出勤结果已过期。"""
 
 
+class AttendanceResultTooLargeError(ValueError):
+    """结果本身超过缓存上限，无法缓存。"""
+
+
 @dataclass(frozen=True)
 class CachedAttendanceResult:
     result_id: str
@@ -68,6 +72,13 @@ class AttendanceResultCache:
         filename: str,
         content: bytes,
     ) -> CachedAttendanceResult:
+        # 单结果超过缓存上限：明确失败，不写入 artifact。
+        # 否则 _evict_overflow 会把刚写入的条目连同旧条目一起淘汰，
+        # put 却仍返回该条目 → 调用方拿到一个指向已删除目录的 result_id。
+        if len(content) > self.max_bytes:
+            raise AttendanceResultTooLargeError(
+                f"分析结果大小 {len(content)} 字节超过缓存上限 {self.max_bytes} 字节，无法缓存"
+            )
         now_monotonic = time.monotonic()
         result_id = secrets.token_urlsafe(32)
         expires_at = datetime.now(UTC) + timedelta(seconds=self.ttl_seconds)
@@ -100,6 +111,11 @@ class AttendanceResultCache:
             self._entries[entry.result_id] = entry
             self._total_bytes += entry.size
             self._evict_overflow()
+            # 兜底：淘汰策略变化后也不允许返回已被淘汰的条目。
+            if entry.result_id not in self._entries:
+                raise AttendanceResultTooLargeError(
+                    "分析结果写入后即被缓存淘汰，无法返回"
+                )
         return entry
 
     def get(self, result_id: str, user_id: int) -> CachedAttendanceResult:
