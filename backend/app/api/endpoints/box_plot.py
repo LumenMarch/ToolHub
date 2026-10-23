@@ -108,8 +108,8 @@ def preview_columns(
         target_type="tool",
         target_id="box-plot",
         detail={
-            "filename": filename,
             "rows": df.height,
+            "columns": len(columns),
             "sampled": df.height > SAMPLE_ROWS,
         },
     )
@@ -179,10 +179,8 @@ def analyze_box_plot(
         target_type="tool",
         target_id="box-plot",
         detail={
-            "filename": filename,
-            "value_column": req.value_col,
-            "group_column": req.group_col,
             "quartile_method": req.quartile_method,
+            "grouped": req.group_col is not None,
             "groups": len(stats),
             "used_rows": used_rows,
         },
