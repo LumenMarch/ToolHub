@@ -340,6 +340,11 @@ def ensure_initial_admin() -> str | None:
                 "未配置初始管理员：INITIAL_ADMIN_USERNAME / "
                 "INITIAL_ADMIN_PASSWORD 未设置，系统将无法审批新注册用户"
             )
+        if len(password) < 8 or password.strip().lower() == username.strip().lower():
+            return (
+                "配置错误：INITIAL_ADMIN_PASSWORD 至少 8 位，"
+                "且不得与 INITIAL_ADMIN_USERNAME 相同"
+            )
 
         super_admin = get_role_by_name(db, "超级管理员")
         tool_user = get_role_by_name(db, "工具使用者")

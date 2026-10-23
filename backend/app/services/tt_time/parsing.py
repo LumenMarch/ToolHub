@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import re
 import zipfile
 from datetime import datetime
@@ -10,12 +11,13 @@ from typing import Any
 
 import polars as pl
 
+from app.core.constants import MAX_UPLOAD_BYTES
 from app.services.tt_time.models import TtTimeValidationError
 
-MAX_PARSE_BYTES = 32 * 1024 * 1024
-MAX_ROWS = 500_000
-MAX_COLUMNS = 64
-MAX_WORKBOOK_UNCOMPRESSED = 256 * 1024 * 1024
+# 上传最大体积与文件后缀无关：所有格式统一使用 admission 上限。
+# 不再单独限制行数/列数；解析规模由文件体积与解析器自身决定。
+MAX_FILE_BYTES = MAX_UPLOAD_BYTES
+MAX_WORKBOOK_UNCOMPRESSED = MAX_UPLOAD_BYTES
 
 _TIME_RE = re.compile(
     r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$"
@@ -113,7 +115,8 @@ def _parse_timestamp_fast(val: Any) -> float | None:
 
 def _assert_parse_budget(path: Path, suffix: str) -> None:
     """在物化之前校验文件体积、解压体积与行列预算。"""
-    if path.stat().st_size > MAX_PARSE_BYTES:
+    max_bytes = MAX_FILE_BYTES
+    if path.stat().st_size > max_bytes:
         raise TtTimeValidationError("文件超出解析上限")
     if suffix in {".xlsx", ".xls"} and zipfile.is_zipfile(path):
         try:
@@ -133,37 +136,52 @@ def load_tt_dataframe(path: Path, original_filename: str = "") -> pl.DataFrame:
 
     if suffix in {".xlsx", ".xls"}:
         try:
-            raw_df = pl.read_excel(path, read_options={"n_rows": MAX_ROWS + 1})
+            raw_df = pl.read_excel(path)
         except Exception as exc:
             raise TtTimeValidationError(
                 "无法解析 Excel 文件，请确认文件格式完整"
             ) from exc
-        if raw_df.height > MAX_ROWS or raw_df.width > MAX_COLUMNS:
-            raise TtTimeValidationError("行数或列数超出上限")
     elif suffix in {".csv", ".tsv", ".txt"}:
         try:
             # 探测表头所在行
             with path.open("r", encoding="utf-8", errors="replace") as f:
                 lines = [f.readline() for _ in range(30)]
             header_idx = -1
+            header_fields: list[str] = []
             for idx, line in enumerate(lines):
                 if "Station ID" in line:
                     header_idx = idx
+                    try:
+                        header_fields = next(csv.reader([line]))
+                    except csv.Error:
+                        header_fields = line.rstrip("\n").split(",")
                     break
             skip_rows = max(0, header_idx) if header_idx >= 0 else 0
+            required = {"Station ID", "StartTime", "EndTime"}
+            selected_columns = (
+                [
+                    index
+                    for index, name in enumerate(header_fields)
+                    if name.strip() in required
+                    or name.strip() == "Test Pass/Fail Status"
+                ]
+                if header_idx >= 0
+                and required.issubset({name.strip() for name in header_fields})
+                else None
+            )
             raw_df = pl.read_csv(
                 path,
                 skip_rows=skip_rows,
                 has_header=True,
-                n_rows=MAX_ROWS + 1,
+                columns=selected_columns,
                 infer_schema_length=1000,
                 truncate_ragged_lines=True,
                 ignore_errors=True,
             )
+        except TtTimeValidationError:
+            raise
         except Exception as exc:
             raise TtTimeValidationError(f"无法解析 CSV 文件: {exc}") from exc
-        if raw_df.height > MAX_ROWS or raw_df.width > MAX_COLUMNS:
-            raise TtTimeValidationError("行数或列数超出上限")
     else:
         raise TtTimeValidationError(f"不支持的文件格式: {suffix or '(无扩展名)'}")
 

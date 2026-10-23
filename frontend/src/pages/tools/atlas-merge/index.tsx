@@ -20,6 +20,7 @@ import React, {
 } from 'react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { MAX_UPLOAD_BYTES } from '@/config/limits';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -106,8 +107,6 @@ type AnalyzeStep = 'packing' | 'uploading' | 'processing';
 const POLL_INTERVAL_MS = 1600;
 /** 连续轮询网络失败上限，超过即停止并提示（避免无限轮询）。 */
 const MAX_POLL_FAILURES = 3;
-/** 归档原始字节上限：后端 tus 端点 MAX_SIZE = 256 MB，超出必然被拒。 */
-const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 
 /** 判断查询错误是否为「任务已不存在」：404 未找到、410 已过期。 */
 const isJobGoneError = (error: unknown): boolean => {
@@ -810,11 +809,11 @@ const AtlasMerge: React.FC = () => {
       const zipFile = await buildArchive(stats.files, zipName, (count) => {
         setPackReadCount(count);
       });
-      // 后端 MAX_SIZE 限的是 tus 上传物（这个压缩包），不是未压缩的 CSV 总量。
+      // 后端 MAX_UPLOAD_BYTES 限的是 tus 上传物（这个压缩包），不是未压缩的 CSV 总量。
       // CSV 压缩比很高，按原始体积预判会把"压缩后远低于上限"的大批量批次误拦。
-      if (zipFile.size > MAX_ARCHIVE_BYTES) {
+      if (zipFile.size > MAX_UPLOAD_BYTES) {
         throw new Error(
-          `归档压缩后体积 ${formatBytes(zipFile.size)} 超过上限 ${formatBytes(MAX_ARCHIVE_BYTES)}，`
+          `归档压缩后体积 ${formatBytes(zipFile.size)} 超过上限 ${formatBytes(MAX_UPLOAD_BYTES)}，`
           + '请先按 unit 拆分为多个目录分批合并',
         );
       }

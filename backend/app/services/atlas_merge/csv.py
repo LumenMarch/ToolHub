@@ -6,6 +6,11 @@
 
 from __future__ import annotations
 
+from app.services.excel_safety import (
+    FORMULA_LEADING_WHITESPACE,
+    FORMULA_PREFIXES,
+)
+
 # 字段两端 trim 用的精确字符集：水平空白（空格 + 制表符）。
 # 注意与裸 strip() 的区别：\r\n/\r 已在解析前归一化为 \n，
 # 而引号内的换行属于字段内容，不能用 strip() 把字段首尾的 \n 误剥掉。
@@ -89,5 +94,24 @@ def write(rows: list[list[str]]) -> str:
 
 
 def _quote(field: str) -> str:
-    escaped = field.replace('"', '""')
+    escaped = _neutralize_formula(field).replace('"', '""')
     return f'"{escaped}"'
+
+
+def _neutralize_formula(field: str) -> str:
+    """阻止 CSV 单元格被表格软件当作公式执行。
+
+    以 ``'='``、``'+'``、``'-'``、``'@'`` 开头的文本前置单引号；
+    纯数字字面量（如 ``-2``、``+1.5``）保持原样，避免破坏下游数值解析。
+    """
+    stripped = field.lstrip(FORMULA_LEADING_WHITESPACE)
+    if not stripped or not stripped.startswith(FORMULA_PREFIXES):
+        return field
+    if stripped[0] in {"+", "-"}:
+        try:
+            float(stripped)
+        except ValueError:
+            pass
+        else:
+            return field
+    return f"'{field}"

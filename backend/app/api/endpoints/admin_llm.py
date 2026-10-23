@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.core.auth import require_permission
+from app.core.rate_limit import rate_limit
 from app.crud.crud_llm_config import apply_update, clear_overrides, get_config
 from app.models.user import User
 from app.schemas.llm import LlmConfigResponse, LlmConfigUpdate
@@ -139,12 +140,23 @@ def delete_llm_config(
     return _config_response(db)
 
 
-@router.post("/probe")
+@router.post(
+    "/probe",
+    dependencies=[
+        Depends(
+            rate_limit(
+                6,
+                60,
+                detail="探活请求过于频繁，请稍后再试",
+            )
+        )
+    ],
+)
 async def probe_llm(
     db: Session = Depends(deps.get_db),
-    _: User = Depends(require_permission("llm_config:read")),
+    _: User = Depends(require_permission("llm_config:write")),
 ) -> Any:
-    """强制探活一次，供管理台「测试连接」按钮使用。"""
+    """强制探活一次，供管理台「测试连接」按钮使用（仅配置管理员）。"""
     outcome = await llm_gateway.probe(force=True)
     profile = resolve_profile(db)
     return {

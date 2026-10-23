@@ -11,6 +11,8 @@ from loguru import logger
 from starlette.formparsers import MultiPartParser
 
 from app.api.api_router import api_router
+from app.core.config import settings
+from app.core.constants import MAX_UPLOAD_BYTES
 from app.db.base_class import Base
 from app.db.session import engine, ensure_schema_compat
 from app.seed import (
@@ -20,8 +22,9 @@ from app.seed import (
     run_seed,
 )
 
-# 增大 Starlette multipart 上传限制（默认 max_part_size 仅 1MB，Excel 文件轻松超标）
-MultiPartParser.max_part_size = 100 * 1024 * 1024  # 单个 part 最大 100MB
+# 单个 multipart part 与 tus 单文件共用同一上限（当前实现仅用 tus，
+# 这里保持一致，避免未来新增 multipart 端点时出现第二套限制）。
+MultiPartParser.max_part_size = MAX_UPLOAD_BYTES  # 1 GiB
 
 # 单个 JSON 请求体上限：图片类工具最大允许 80MB base64，再留少量信封余量
 MAX_JSON_BODY_BYTES = 96 * 1024 * 1024
@@ -67,9 +70,9 @@ app = FastAPI(
 
 # Configure CORS
 origins = [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:5175",
+    origin.strip()
+    for origin in settings.CORS_ALLOWED_ORIGINS.split(",")
+    if origin.strip()
 ]
 
 app.add_middleware(

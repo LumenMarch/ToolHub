@@ -17,9 +17,6 @@ from pathlib import Path
 
 import polars as pl
 
-# GB18030 回退需要整文件解码；限制回退文件大小，避免内存放大到不可控
-MAX_ENCODED_CSV_BYTES = 32 * 1024 * 1024
-
 # Tukey fences 的 IQR 乘数（1.5×IQR），业界标准
 IQR_FACTOR = 1.5
 # R7：Hyndman-Fan type 7（numpy / Excel QUARTILE.INC / polars linear）
@@ -145,13 +142,9 @@ def _is_valid_utf8(data: bytes) -> bool:
 def _read_csv_encoded(path: Path, separator: str) -> pl.DataFrame:
     """非 UTF-8 文件：按 GB18030 解码后在内存中转为 UTF-8 解析。
 
-    GB18030 回退需要整文件解码，内存放大明显，因此对回退路径单独设上限；
-    不再写入系统临时目录，避免进程异常退出后遗留无主副本。
+    不再单独限制回退文件大小，统一由上传入口的 1 GiB 上限控制；
+    不写入系统临时目录，避免进程异常退出后遗留无主副本。
     """
-    if path.stat().st_size > MAX_ENCODED_CSV_BYTES:
-        raise BoxPlotValidationError(
-            "非 UTF-8 编码的 CSV 文件过大，请另存为 UTF-8 后重试"
-        )
     data = path.read_bytes()
     try:
         text = data.decode("gb18030")

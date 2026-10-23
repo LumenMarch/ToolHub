@@ -25,11 +25,17 @@ import { describeThinkingCaps } from './fields';
 interface Props {
   status: LlmStatus | undefined;
   effective: LlmEffectiveConfig;
+  canProbe: boolean;
   onProbed: () => void;
 }
 
 /** 运行状态面板：管理员看「现在到底能不能用、慢在哪、失败在哪」。 */
-export const LlmStatusCard: React.FC<Props> = ({ status, effective, onProbed }) => {
+export const LlmStatusCard: React.FC<Props> = ({
+  status,
+  effective,
+  canProbe,
+  onProbed,
+}) => {
   const blockedReason = llmUnavailableReason(status);
   const caps = status?.lastProbe?.capabilities ?? null;
   const overSlots = overSlotsWarning(caps, effective.maxConcurrency);
@@ -46,7 +52,7 @@ export const LlmStatusCard: React.FC<Props> = ({ status, effective, onProbed }) 
           <Badge variant={blockedReason ? 'destructive' : 'secondary'}>
             {blockedReason ? '不可用' : '可用'}
           </Badge>
-          <TestConnectionButton onProbed={onProbed} />
+          {canProbe ? <TestConnectionButton onProbed={onProbed} /> : null}
         </CardAction>
       </CardHeader>
       <CardContent>
