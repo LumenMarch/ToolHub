@@ -23,6 +23,7 @@ from app.services.attendance import (
     OUTPUT_HEADERS,
     AttendanceResultExpiredError,
     AttendanceResultNotFoundError,
+    AttendanceResultTooLargeError,
     AttendanceService,
     AttendanceValidationError,
     attendance_result_cache,
@@ -176,11 +177,16 @@ def analyze_attendance(
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"出勤整理_完整_{timestamp}.xlsx"
-    cached_result = attendance_result_cache.put(
-        user_id=current_user.id,
-        filename=filename,
-        content=output,
-    )
+    # 处理已完成，源上传不再需要；持久化缓存结果失败也不应导致上传泄漏
+    _delete_owned_uploads(req, current_user.id)
+    try:
+        cached_result = attendance_result_cache.put(
+            user_id=current_user.id,
+            filename=filename,
+            content=output,
+        )
+    except AttendanceResultTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
 
     log_action(
         db,
@@ -191,8 +197,6 @@ def analyze_attendance(
         target_id="attendance",
         detail={"result_id": cached_result.result_id},
     )
-    # 处理完成后删除源上传，避免磁盘泄漏
-    _delete_owned_uploads(req, current_user.id)
 
     return AttendanceAnalyzeResponse(
         result_id=cached_result.result_id,
