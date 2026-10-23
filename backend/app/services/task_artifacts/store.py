@@ -174,6 +174,7 @@ class TaskArtifactStore:
             tool=tool,
             task_id=task_id,
         ).resolve()
+        self._validate_relative_path(relative_path)
         path = (task_dir / relative_path).resolve()
         if task_dir not in path.parents:
             raise ValueError("任务产物路径超出任务目录")
@@ -445,6 +446,14 @@ class TaskArtifactStore:
         if not SAFE_SEGMENT_PATTERN.fullmatch(value):
             raise ValueError(f"{field} 包含不支持的字符")
         return value
+
+    @staticmethod
+    def _validate_relative_path(relative_path: str) -> None:
+        if not relative_path or relative_path.startswith("/"):
+            raise ValueError("任务产物路径必须是相对路径")
+        for segment in relative_path.split("/"):
+            if segment in {"", ".", ".."}:
+                raise ValueError("任务产物路径包含非法片段")
 
     @staticmethod
     def _read_json(path: Path, fallback: Any = None) -> Any:
