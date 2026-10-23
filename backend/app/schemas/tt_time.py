@@ -106,7 +106,13 @@ class StationComparisonTableModel(BaseModel):
 
 class TtTimeProcessRequest(BaseModel):
     upload_id: str = Field(description="Tus 上传文件 ID")
-    bin_width: float = Field(default=10.0, description="分箱宽度（秒）")
+    bin_width: float = Field(
+        default=10.0,
+        gt=0,
+        le=3600,
+        allow_inf_nan=False,
+        description="分箱宽度（秒）",
+    )
     station_filter: str = Field(default="all", description="机台筛选")
     exclude_fail: bool = Field(default=True, description="是否过滤不良品")
 

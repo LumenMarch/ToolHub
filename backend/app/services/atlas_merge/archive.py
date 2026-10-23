@@ -37,6 +37,9 @@ def _validate_entry_name(name: str) -> str:
     if normalized.startswith("/") or _DRIVE_PATTERN.match(normalized):
         raise ArchiveExtractError(f"压缩包包含绝对路径 entry: {name!r}")
     parts = normalized.split("/")
+    # 仅允许目录 entry 的末尾空段，其余空段/`.`/`..` 一律拒绝
+    if any(part in {"", "."} for part in parts[:-1]) or parts[-1] == ".":
+        raise ArchiveExtractError(f"压缩包包含非法路径（空段或 . 段）: {name!r}")
     if any(part == ".." for part in parts):
         raise ArchiveExtractError(f"压缩包包含非法路径（拒绝 .. 穿越）: {name!r}")
     return normalized
@@ -87,12 +90,17 @@ def extract_archive_zip(content: bytes, dest_dir: Path) -> Path:
         stripped_names = _strip_common_prefix(safe_names)
 
         dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_root = dest_dir.resolve()
         total_bytes = 0
         for raw, dest_rel in zip(raw_names, stripped_names, strict=True):
             # 目录 entry（原始名以 / 结尾）或剥离前缀后落空的 entry 跳过
             if raw.endswith("/") or not dest_rel:
                 continue
-            target = dest_dir / dest_rel
+            # 剥离公共前缀后必须重新校验，防止 "a//abs" 变成绝对路径
+            safe_rel = _validate_entry_name(dest_rel)
+            target = (dest_root / safe_rel).resolve()
+            if not target.is_relative_to(dest_root):
+                raise ArchiveExtractError(f"压缩包 entry 越出解压根目录: {raw!r}")
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(raw, "r") as src, target.open("wb") as out:
                 while chunk := src.read(_COPY_CHUNK):

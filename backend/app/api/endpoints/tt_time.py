@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -56,6 +57,23 @@ router = APIRouter()
 
 store = UploadStore()
 
+# 限制并发解析，避免同步端点占满共享 anyio 线程池
+_PROCESS_GATE = threading.BoundedSemaphore(2)
+_upload_locks: dict[str, threading.Lock] = {}
+_upload_locks_guard = threading.Lock()
+
+
+def _lock_for(upload_id: str) -> threading.Lock:
+    with _upload_locks_guard:
+        return _upload_locks.setdefault(upload_id, threading.Lock())
+
+
+def _release_upload_lock(upload_id: str, lock: threading.Lock) -> None:
+    lock.release()
+    with _upload_locks_guard:
+        if not lock.locked():
+            _upload_locks.pop(upload_id, None)
+
 
 def _get_owned_file_path(upload_id: str, user_id: int) -> tuple[Path, str]:
     """校验上传归属并返回 (文件路径, 原始文件名)。"""
@@ -80,6 +98,13 @@ def process_tt_time(
     """基于 Tus 上传的原始日志文件，使用 Polars 高性能多线程计算测试时间统计。"""
     file_path, filename = _get_owned_file_path(req.upload_id, current_user.id)
 
+    lock = _lock_for(req.upload_id)
+    if not lock.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail="该上传正在处理中")
+    if not _PROCESS_GATE.acquire(blocking=False):
+        _release_upload_lock(req.upload_id, lock)
+        raise HTTPException(status_code=429, detail="处理队列已满，请稍后重试")
+
     started = time.monotonic()
     try:
         df = load_tt_dataframe(file_path, filename)
@@ -94,6 +119,9 @@ def process_tt_time(
     except Exception as exc:
         logger.error("tt-time process failed: {}", exc)
         raise HTTPException(status_code=500, detail=f"计算服务异常: {exc}") from exc
+    finally:
+        _PROCESS_GATE.release()
+        _release_upload_lock(req.upload_id, lock)
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
 

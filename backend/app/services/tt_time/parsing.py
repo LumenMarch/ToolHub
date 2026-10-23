@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,11 @@ from typing import Any
 import polars as pl
 
 from app.services.tt_time.models import TtTimeValidationError
+
+MAX_PARSE_BYTES = 32 * 1024 * 1024
+MAX_ROWS = 500_000
+MAX_COLUMNS = 64
+MAX_WORKBOOK_UNCOMPRESSED = 256 * 1024 * 1024
 
 _TIME_RE = re.compile(
     r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$"
@@ -105,17 +111,35 @@ def _parse_timestamp_fast(val: Any) -> float | None:
         return None
 
 
+def _assert_parse_budget(path: Path, suffix: str) -> None:
+    """在物化之前校验文件体积、解压体积与行列预算。"""
+    if path.stat().st_size > MAX_PARSE_BYTES:
+        raise TtTimeValidationError("文件超出解析上限")
+    if suffix in {".xlsx", ".xls"} and zipfile.is_zipfile(path):
+        try:
+            with zipfile.ZipFile(path) as zf:
+                if sum(i.file_size for i in zf.infolist()) > MAX_WORKBOOK_UNCOMPRESSED:
+                    raise TtTimeValidationError("工作簿解压后体积超出上限")
+        except zipfile.BadZipFile as exc:
+            raise TtTimeValidationError(
+                "无法解析 Excel 文件，请确认文件格式完整"
+            ) from exc
+
+
 def load_tt_dataframe(path: Path, original_filename: str = "") -> pl.DataFrame:
     """加载测试日志文件并提取 Station ID、StartTime、EndTime、status 与测试耗时 tt。"""
     suffix = Path(original_filename or path.name).suffix.lower()
+    _assert_parse_budget(path, suffix)
 
     if suffix in {".xlsx", ".xls"}:
         try:
-            raw_df = pl.read_excel(path)
+            raw_df = pl.read_excel(path, read_options={"n_rows": MAX_ROWS + 1})
         except Exception as exc:
             raise TtTimeValidationError(
                 "无法解析 Excel 文件，请确认文件格式完整"
             ) from exc
+        if raw_df.height > MAX_ROWS or raw_df.width > MAX_COLUMNS:
+            raise TtTimeValidationError("行数或列数超出上限")
     elif suffix in {".csv", ".tsv", ".txt"}:
         try:
             # 探测表头所在行
@@ -131,12 +155,15 @@ def load_tt_dataframe(path: Path, original_filename: str = "") -> pl.DataFrame:
                 path,
                 skip_rows=skip_rows,
                 has_header=True,
+                n_rows=MAX_ROWS + 1,
                 infer_schema_length=1000,
                 truncate_ragged_lines=True,
                 ignore_errors=True,
             )
         except Exception as exc:
             raise TtTimeValidationError(f"无法解析 CSV 文件: {exc}") from exc
+        if raw_df.height > MAX_ROWS or raw_df.width > MAX_COLUMNS:
+            raise TtTimeValidationError("行数或列数超出上限")
     else:
         raise TtTimeValidationError(f"不支持的文件格式: {suffix or '(无扩展名)'}")
 
