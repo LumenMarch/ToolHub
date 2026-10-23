@@ -1,5 +1,6 @@
 import uuid
 from datetime import timedelta
+from urllib.parse import urlparse
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -113,6 +114,29 @@ def _revoke_current_session(request: Request, db: Session) -> None:
     if user_session is not None:
         revoke_user_session(db, user_session)
         realtime_hub.close_user_session(str(sid))
+
+
+def _assert_trusted_session_origin(request: Request) -> None:
+    """拒绝跨站发起的登录请求，防止跨站表单悄悄写入受害者 Cookie。"""
+    if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+        raise HTTPException(status_code=403, detail="拒绝跨站登录请求")
+    source = request.headers.get("origin") or request.headers.get("referer")
+    if not source:
+        # 非浏览器客户端（CLI/测试）不携带 Origin；浏览器表单与 fetch 会携带
+        return
+    parsed = urlparse(source)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=403, detail="拒绝跨站登录请求")
+    candidate = f"{parsed.scheme}://{parsed.netloc}".lower()
+    host = request.headers.get("host", "")
+    same_origin = f"{request.url.scheme}://{host}".lower() if host else ""
+    allowed = {
+        origin.strip().rstrip("/").lower()
+        for origin in settings.CORS_ALLOWED_ORIGINS.split(",")
+        if origin.strip()
+    }
+    if candidate != same_origin and candidate not in allowed:
+        raise HTTPException(status_code=403, detail="拒绝跨站登录请求")
 
 
 def _set_session_cookie(response: Response, access_token: str) -> None:
@@ -254,6 +278,7 @@ def login_for_session(
     db: Session = Depends(deps.get_db),
     form_data: OAuth2PasswordRequestForm = Depends(),
 ):
+    _assert_trusted_session_origin(request)
     user = _authenticate_user(db, form_data)
     sid = _register_login_session(db, request, user)
     # 登录响应即携带当前会话标识，前端据此判断后续 session.revoked 是否命中本设备

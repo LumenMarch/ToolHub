@@ -27,7 +27,7 @@ export const llmAvailabilityQueryOptions = queryOptions({
  */
 export const llmStatusQueryOptions = queryOptions({
   queryKey: llmStatusQueryKey,
-  queryFn: () => api.get<LlmStatus>('/llm/status?probe=true').then((r) => r.data),
+  queryFn: () => api.get<LlmStatus>('/llm/status').then((r) => r.data),
   staleTime: 30 * 1000,
   retry: 1,
 });

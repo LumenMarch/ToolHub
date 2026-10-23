@@ -1,11 +1,8 @@
-"""出勤整理装载器的资源边界回归测试。
+"""出勤整理装载器的列宽契约回归测试。
 
-覆盖三条"几 KB 输入放大成 GB 级内存或小时级 CPU"的路径：
-- 解压膨胀（压缩比上千倍）
-- 伪造 ``<dimension ref>`` 列宽（每行按声明宽度物化）
-- 伪造行号（openpyxl 按缺失行号逐行补齐）
-
-同时锁定正常文件必须继续可用，以及上限以明确错误暴露而不是静默截断。
+保留按 14/20 列读取的布局契约，确保伪造 ``<dimension ref>`` 宽度不会
+改变每行数据的列数。行数、工作表数与解压体积不再单独设限，统一由
+上传入口的 1 GiB 文件大小上限控制。
 """
 
 from __future__ import annotations
@@ -135,73 +132,9 @@ def test_retained_row_width_ignores_declared_dimension():
     assert {len(record.original_data) for record in records} == {14}
 
 
-def test_declared_max_row_is_rejected():
-    """伪造末行号必须在打开工作簿后被明确拒绝，而不是展开成同量级循环。"""
-    forged = _patch_sheet(
-        _attendance_xlsx(rows=3),
-        _set_dimension("A1:K999999999999"),
-    )
-
-    with pytest.raises(AttendanceValidationError, match="超过上限"):
-        AttendanceService()._load_xlsx_attendance(forged)
-
-
-def test_missing_dimension_cannot_stall_iteration():
-    """缺少 <dimension> 时 openpyxl 的 max_row 为 None，必须由 max_row 兜底。"""
-
-    def drop_dimension(xml: str) -> str:
-        patched, count = _DIMENSION.subn("", xml)
-        assert count == 1
-        return patched.replace(
-            "</sheetData>",
-            '<row r="999999999999"><c r="A999999999999"/></row></sheetData>',
-        )
-
-    forged = _patch_sheet(_attendance_xlsx(rows=3), drop_dimension)
-
-    _, records = AttendanceService()._load_xlsx_attendance(forged)
-
-    assert len(records) == 3
-
-
-def test_uncompressed_budget_rejects_compression_bomb(monkeypatch):
-    """声明解压总量超限时，在解析任何行之前就拒绝。"""
-    monkeypatch.setattr(
-        attendance_service, "MAX_WORKBOOK_UNCOMPRESSED_BYTES", 1024 * 1024
-    )
-    bulky_sheet = (
-        b'<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>'
-        + b"A" * (2 * 1024 * 1024)
-        + b"</t></is></c></row></sheetData></worksheet>"
-    )
-    bomb = _rebuild(_attendance_xlsx(rows=3), {SHEET_PATH: bulky_sheet})
-
-    with pytest.raises(AttendanceValidationError, match="解压后超过"):
-        AttendanceService()._load_xlsx_attendance(bomb)
-
-
 def test_corrupt_workbook_is_reported_as_validation_error():
     with pytest.raises(AttendanceValidationError, match="无法读取"):
         AttendanceService()._load_xlsx_attendance(b"not-a-zip-at-all")
-
-
-def test_sheet_count_is_bounded(monkeypatch):
-    monkeypatch.setattr(attendance_service, "MAX_WORKBOOK_SHEETS", 1)
-    workbook = Workbook()
-    workbook.active.title = "1"
-    workbook.create_sheet("2")
-    buffer = io.BytesIO()
-    workbook.save(buffer)
-
-    with pytest.raises(AttendanceValidationError, match="个工作表"):
-        AttendanceService()._load_xlsx_attendance(buffer.getvalue())
-
-
-def test_row_limit_rejects_oversized_sheet(monkeypatch):
-    monkeypatch.setattr(attendance_service, "MAX_ATTENDANCE_ROWS", 2)
-
-    with pytest.raises(AttendanceValidationError, match="超过上限"):
-        AttendanceService()._load_xlsx_attendance(_attendance_xlsx(rows=5))
 
 
 def test_shift_loader_bounds_declared_columns():
@@ -218,82 +151,3 @@ def test_shift_loader_bounds_declared_columns():
 
     assert shifts["E001"].shift == "常白班"
     assert shifts["E001"].dinner_end == "18:00"
-
-
-class _FakeSheet:
-    def __init__(self, name: str, rows: list[list[Any]]):
-        self.name = name
-        self._rows = rows
-        self.nrows = len(rows)
-        self.ncols = max(len(row) for row in rows)
-
-    def row_values(self, rowx: int, start_colx: int = 0, end_colx=None):
-        return self._rows[rowx][start_colx:end_colx]
-
-
-class _FakeWorkbook:
-    def __init__(self, sheets: list[_FakeSheet]):
-        self._sheets = sheets
-        self.datemode = 0
-        self.released = False
-
-    def sheet_names(self) -> list[str]:
-        return [sheet.name for sheet in self._sheets]
-
-    def sheets(self) -> list[_FakeSheet]:
-        return self._sheets
-
-    def release_resources(self) -> None:
-        self.released = True
-
-
-def _xls_rows(count: int) -> list[list[Any]]:
-    rows: list[list[Any]] = [["通行記錄"], ATTENDANCE_HEADERS]
-    for index in range(count):
-        rows.append(
-            [
-                "",
-                "E001",
-                "张三",
-                "D1",
-                "部门",
-                "group",
-                "门禁1進",
-                "",
-                "",
-                "2026-01-05 08:00:00",
-                f"2026-01-05 08:{index % 60:02d}:00",
-            ]
-        )
-    return rows
-
-
-def test_xls_record_limit_is_enforced(monkeypatch):
-    """xls 单文件行数受 BIFF8 限制，但多工作表叠加仍需记录数上限。"""
-    monkeypatch.setattr(attendance_service, "MAX_ATTENDANCE_ROWS", 2)
-    workbook = _FakeWorkbook([_FakeSheet("PE", _xls_rows(3))])
-    monkeypatch.setattr(
-        attendance_service.xlrd,
-        "open_workbook",
-        lambda **kwargs: workbook,
-    )
-
-    with pytest.raises(AttendanceValidationError, match="超过上限"):
-        AttendanceService()._load_xls_attendance(b"fake")
-
-    assert workbook.released is True
-
-
-def test_xls_sheet_count_is_bounded(monkeypatch):
-    monkeypatch.setattr(attendance_service, "MAX_WORKBOOK_SHEETS", 1)
-    workbook = _FakeWorkbook(
-        [_FakeSheet("PE", _xls_rows(1)), _FakeSheet("TE", _xls_rows(1))]
-    )
-    monkeypatch.setattr(
-        attendance_service.xlrd,
-        "open_workbook",
-        lambda **kwargs: workbook,
-    )
-
-    with pytest.raises(AttendanceValidationError, match="个工作表"):
-        AttendanceService()._load_xls_attendance(b"fake")

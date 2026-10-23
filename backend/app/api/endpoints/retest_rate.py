@@ -56,9 +56,17 @@ def analyze_retest_rate(
     current_user: User = Depends(require_tool_permission("retest-rate")),
 ) -> AnalyzeResponse:
     """按 SN 汇总多份测试 CSV，返回重测率/不良率统计与明细。"""
-    paths = [
-        _get_owned_file_path(upload_id, current_user.id) for upload_id in req.upload_ids
-    ]
+    paths: list[Path] = []
+    seen_inodes: set[tuple[int, int]] = set()
+    for upload_id in dict.fromkeys(req.upload_ids):
+        path = _get_owned_file_path(upload_id, current_user.id)
+        stat = path.stat()
+        identity = (stat.st_dev, stat.st_ino)
+        if identity in seen_inodes:
+            # cache/resolve 会为同一内容重复铸造句柄，按 inode 去重
+            continue
+        seen_inodes.add(identity)
+        paths.append(path)
 
     try:
         result = analyze_files(paths)

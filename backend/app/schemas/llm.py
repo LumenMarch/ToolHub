@@ -6,10 +6,15 @@ camelCase（与前端其它工具接口一致）。api_key 一律只回掩码。
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.core.config import settings
 
 LlmProviderName = Literal["openai_compat", "ollama"]
 
@@ -53,16 +58,68 @@ class LlmConfigUpdate(BaseModel):
     @field_validator("base_url")
     @classmethod
     def _require_absolute_url(cls, value: str | None) -> str | None:
-        """拦下「192.168.2.3:8888/v1」这种漏写协议的写法。
+        """校验协议、凭据、目标主机与传输安全。
 
-        不补协议、只报错：默默补 http:// 会把一个手误变成明文传输，
-        这种事应该让人看见。
+        管理台覆盖值只能指向运维批准的目标：``LLM_ALLOWED_HOSTS`` 为空时
+        仅允许回环地址；远程主机必须使用 HTTPS 且解析结果不得落在内网/
+        回环/链路本地/保留地址。白名单命中时跳过地址段检查，但仍禁止
+        在 URL 中携带凭据、禁止对远程主机使用明文 HTTP。
         """
         if value is None:
             return None
         stripped = value.strip()
-        if not stripped.startswith(("http://", "https://")):
-            raise ValueError("服务地址必须以 http:// 或 https:// 开头")
+        parts = urlsplit(stripped)
+        if parts.scheme not in {"http", "https"} or not parts.hostname:
+            raise ValueError("服务地址必须以 http:// 或 https:// 开头且包含主机名")
+        if parts.username or parts.password:
+            raise ValueError("服务地址不得包含用户名或密码")
+        try:
+            port = parts.port
+        except ValueError as exc:
+            raise ValueError("服务地址端口无效") from exc
+
+        host = parts.hostname.lower()
+        loopback_hosts = {"localhost", "127.0.0.1", "::1"}
+        try:
+            loopback_host = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback_host = host in loopback_hosts
+        allowed = {
+            item.strip().lower()
+            for item in settings.LLM_ALLOWED_HOSTS.split(",")
+            if item.strip()
+        }
+        approved = host in allowed or (port is not None and f"{host}:{port}" in allowed)
+        if not approved:
+            if not loopback_host and parts.scheme != "https":
+                raise ValueError("远程模型服务地址必须使用 https")
+            if loopback_host:
+                return stripped
+            try:
+                infos = socket.getaddrinfo(
+                    host,
+                    port or (443 if parts.scheme == "https" else 80),
+                    type=socket.SOCK_STREAM,
+                )
+            except OSError as exc:
+                raise ValueError("服务地址无法解析") from exc
+            for info in infos:
+                address = info[4][0].split("%", 1)[0]
+                ip = ipaddress.ip_address(address)
+                if (
+                    ip.is_private
+                    or ip.is_loopback
+                    or ip.is_link_local
+                    or ip.is_reserved
+                    or ip.is_multicast
+                    or ip.is_unspecified
+                ):
+                    raise ValueError(
+                        "服务地址解析到内网/回环/链路本地地址，"
+                        "需由运维加入 LLM_ALLOWED_HOSTS"
+                    )
+        elif not loopback_host and parts.scheme != "https":
+            raise ValueError("远程模型服务地址必须使用 https")
         return stripped
 
 

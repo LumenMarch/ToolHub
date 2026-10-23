@@ -620,7 +620,14 @@ class LlmGateway:
             if not force and fresh:
                 return self._probe  # type: ignore[return-value]
             now = time.monotonic()
-            if not profile.configured:
+            if not profile.enabled:
+                outcome = ProbeOutcome(
+                    ok=False,
+                    reachable=False,
+                    error="模型服务已被管理员关闭",
+                    checked_at=now,
+                )
+            elif not profile.configured:
                 outcome = ProbeOutcome(
                     ok=False,
                     reachable=False,
@@ -673,7 +680,16 @@ class LlmGateway:
         profile = await resolve_profile_async()
         runtime = self._runtimes.get(asyncio.get_running_loop())
         gate = runtime.gate if runtime is not None else None
-        outcome = await self.probe() if probe and profile.configured else None
+        if probe and profile.configured:
+            outcome = await self.probe()
+        elif (
+            self._probe is not None
+            and time.monotonic() - self._probe.checked_at
+            < profile.health_cache_ttl_seconds
+        ):
+            outcome = self._probe
+        else:
+            outcome = None
         listed = outcome.models if outcome is not None else []
         cooldown_active = time.monotonic() < self._cooldown_until
         # available 是前端按钮态的唯一契约字段：冷却中或探活已明确失败

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_any_tool_permission
+from app.core.constants import MAX_UPLOAD_BYTES
 from app.models.user import User
 from app.services.task_artifacts import ContentDigest
 from app.services.upload.store import (
@@ -27,10 +28,8 @@ from app.services.upload.store import (
 router = APIRouter()
 store = UploadStore()
 
-# 256 MB：atlas-merge 周批数据包（unit-archive zip）实测可达约 58MB，
-# 默认 100MB 偏紧，留出余量避免接近上限时上传失败。
-# 该值同时用于 Tus-Max-Size 能力声明与缓存解析的大小上限。
-MAX_SIZE = 256 * 1024 * 1024  # 256 MB
+# 单文件上传上限统一由 app.core.constants.MAX_UPLOAD_BYTES 定义（1 GiB），
+# 同时用于 Tus-Max-Size 能力声明与缓存解析的大小上限。
 
 
 class UploadCacheResolveRequest(BaseModel):
@@ -39,7 +38,7 @@ class UploadCacheResolveRequest(BaseModel):
         default="application/octet-stream",
         max_length=255,
     )
-    size: int = Field(..., gt=0, le=MAX_SIZE)
+    size: int = Field(..., gt=0, le=MAX_UPLOAD_BYTES)
     md5: str = Field(..., pattern=r"^[A-Fa-f0-9]{32}$")
     sha256: str = Field(..., pattern=r"^[A-Fa-f0-9]{64}$")
 
@@ -87,7 +86,7 @@ async def tus_options() -> Response:
     headers = {
         "Tus-Version": "1.0.0",
         "Tus-Extension": "creation,termination",
-        "Tus-Max-Size": str(MAX_SIZE),
+        "Tus-Max-Size": str(MAX_UPLOAD_BYTES),
         "Access-Control-Allow-Headers": (
             "Tus-Resumable, Upload-Length, Upload-Metadata, "
             "Upload-Offset, Content-Type, Authorization"
@@ -130,10 +129,10 @@ async def tus_create(
             detail="Upload-Length 必须大于 0",
         )
 
-    if upload_length > MAX_SIZE:
+    if upload_length > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=f"文件大小超过限制 ({MAX_SIZE} 字节)",
+            detail=f"文件大小超过限制 ({MAX_UPLOAD_BYTES} 字节)",
         )
 
     metadata_raw = request.headers.get("Upload-Metadata", "")

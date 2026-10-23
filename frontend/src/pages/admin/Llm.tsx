@@ -4,6 +4,7 @@ import { RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useLlmStatus } from '@/hooks/useLlmStatus';
+import { usePermission } from '@/hooks/use-permission';
 import type { LlmConfigResponse } from '@/types/llm';
 import AdminLoadingState from './components/AdminLoadingState';
 import { useAdminApi } from './hooks/use-admin-api';
@@ -19,6 +20,8 @@ import { LlmStatusCard } from './llm/LlmStatusCard';
  */
 const AdminLlm: React.FC = () => {
   const api = useAdminApi();
+  const { has } = usePermission();
+  const canProbe = has('llm_config:write');
   const { data: status, refetch: refetchStatus } = useLlmStatus();
   const [config, setConfig] = useState<LlmConfigResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,6 +73,7 @@ const AdminLlm: React.FC = () => {
       <LlmStatusCard
         status={status}
         effective={config.effective}
+        canProbe={canProbe}
         onProbed={() => void refetchStatus()}
       />
       <LlmConfigCard

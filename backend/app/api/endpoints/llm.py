@@ -10,9 +10,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
 
+from app.api import deps
 from app.core.auth import require_any_tool_permission, require_permission
+from app.crud.crud_role import get_user_permissions
 from app.models.user import User
 from app.schemas.llm import LlmAvailabilityResponse, LlmStatusResponse
 from app.services.llm import llm_gateway
@@ -25,9 +28,15 @@ async def get_llm_status(
     probe: bool = Query(
         default=False, description="是否顺带探活上游（结果按 TTL 复用）"
     ),
-    _: User = Depends(require_permission("llm_config:read")),
+    db: Session = Depends(deps.get_db),
+    user: User = Depends(require_permission("llm_config:read")),
 ) -> Any:
     """返回模型服务的配置摘要、队列深度、指标与探活结果（仅配置管理员）。"""
+    if probe and "llm_config:write" not in get_user_permissions(db, user):
+        raise HTTPException(
+            status_code=403,
+            detail="强制探活需要 llm_config:write 权限",
+        )
     return await llm_gateway.status(probe=probe)
 
 

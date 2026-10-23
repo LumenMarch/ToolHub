@@ -10,6 +10,8 @@ from loguru import logger
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
 
+from app.core.constants import MAX_UPLOAD_BYTES
+
 # 自动生成的密钥持久化位置（仓库根 .env，已纳入 .gitignore）
 _ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
@@ -81,6 +83,10 @@ class Settings(BaseSettings):
     AUTH_COOKIE_NAME: str = "toolhub_session"
     # 生产强制 Secure cookie；本地 HTTP 开发用 AUTH_COOKIE_SECURE=false 覆盖。
     AUTH_COOKIE_SECURE: bool = True
+    # 允许跨域/发起登录会话请求的浏览器 Origin（逗号分隔）；同源请求始终允许
+    CORS_ALLOWED_ORIGINS: str = (
+        "http://localhost:5173,http://localhost:5174,http://localhost:5175"
+    )
     # 仅当部署在可信反向代理之后时开启：开启后审计与限流信任
     # X-Forwarded-For 头；直连部署时该头可被客户端伪造。
     TRUST_PROXY_HEADERS: bool = False
@@ -114,7 +120,7 @@ class Settings(BaseSettings):
     TASK_ARTIFACT_CLEANUP_INTERVAL_HOURS: float = Field(default=6, gt=0)
 
     # 每个主体的 tus 暂存配额：未完成句柄的声明长度之和与句柄数量
-    UPLOAD_MAX_STAGED_BYTES_PER_USER: int = Field(default=1024 * 1024 * 1024, gt=0)
+    UPLOAD_MAX_STAGED_BYTES_PER_USER: int = Field(default=MAX_UPLOAD_BYTES * 2, gt=0)
     UPLOAD_MAX_HANDLES_PER_USER: int = Field(default=200, gt=0)
 
     # 资产核对任务
@@ -131,6 +137,9 @@ class Settings(BaseSettings):
     # vLLM、Ollama /v1 兼容层）或 ollama（Ollama 原生 /api/chat）。
     LLM_ENABLED: bool = True
     LLM_PROVIDER: str = "openai_compat"
+    # 管理台可覆盖的目标主机白名单（逗号分隔 host 或 host:port）。
+    # 为空时仅允许回环地址；远程主机必须显式加入此列表。
+    LLM_ALLOWED_HOSTS: str = ""
     LLM_BASE_URL: str = "http://127.0.0.1:8080/v1"
     LLM_API_KEY: str = ""
     LLM_MODEL: str = "ggml-org/gemma-3-4b-it-qat-GGUF:Q4_0"
@@ -216,8 +225,8 @@ class Settings(BaseSettings):
 
     # 初始管理员：用户表为空且两项均配置时，启动自动创建超级管理员；
     # 仅配置一项视为配置错误，健康检查将返回 503。
-    INITIAL_ADMIN_USERNAME: str = "admin"
-    INITIAL_ADMIN_PASSWORD: str = "admin"
+    INITIAL_ADMIN_USERNAME: str = ""
+    INITIAL_ADMIN_PASSWORD: str = ""
 
     # 待审批/被驳回注册用户保留天数，超过后周期清理任务物理删除。
     REGISTRATION_PENDING_TTL_DAYS: int = Field(default=7, ge=1)

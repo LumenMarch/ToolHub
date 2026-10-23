@@ -29,9 +29,15 @@ class _SlidingWindowLimiter:
     # 内部状态超过该数量时做一次整体清理，防止长期运行内存膨胀
     _PRUNE_THRESHOLD = 4096
 
-    def __init__(self, max_requests: int, window_seconds: float) -> None:
+    def __init__(
+        self,
+        max_requests: int,
+        window_seconds: float,
+        detail: str = "注册请求过于频繁，请稍后再试",
+    ) -> None:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
+        self.detail = detail
         self._hits: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
         # 上次整体清理的单调时钟；清理最多每窗口执行一次，避免每请求全量扫描
@@ -48,7 +54,7 @@ class _SlidingWindowLimiter:
             if len(queue) >= self.max_requests:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="注册请求过于频繁，请稍后再试",
+                    detail=self.detail,
                 )
             queue.append(now)
             if (
@@ -82,7 +88,11 @@ class _SlidingWindowLimiter:
 _limiters: list[_SlidingWindowLimiter] = []
 
 
-def rate_limit(max_requests: int, window_seconds: float) -> _SlidingWindowLimiter:
+def rate_limit(
+    max_requests: int,
+    window_seconds: float,
+    detail: str = "注册请求过于频繁，请稍后再试",
+) -> _SlidingWindowLimiter:
     """构造 FastAPI 依赖：按 IP 对调用方限流，超限抛 429。
 
     用法:
@@ -92,7 +102,7 @@ def rate_limit(max_requests: int, window_seconds: float) -> _SlidingWindowLimite
             ...
         ):
     """
-    limiter = _SlidingWindowLimiter(max_requests, window_seconds)
+    limiter = _SlidingWindowLimiter(max_requests, window_seconds, detail)
     _limiters.append(limiter)
     return limiter
 
