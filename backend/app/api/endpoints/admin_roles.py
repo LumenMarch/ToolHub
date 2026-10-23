@@ -4,18 +4,20 @@ from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.core.auth import ensure_can_grant_roles, ensure_can_manage, require_permission
-from app.crud.crud_permission import get_all_permissions
+from app.crud.crud_permission import get_all_permissions, get_permissions_by_ids
 from app.crud.crud_role import (
     create_role,
     delete_role,
     get_all_roles,
     get_role_by_id,
     get_roles_by_ids,
+    get_user_permissions,
     set_role_permissions,
     update_role,
 )
 from app.crud.crud_user import get_user_by_id
 from app.models.user import User
+from app.seed import ROLES
 from app.services.audit import log_action
 from app.services.realtime.sessions import (
     notify_permissions_updated,
@@ -23,6 +25,8 @@ from app.services.realtime.sessions import (
 )
 
 router = APIRouter()
+
+BUILTIN_ROLE_NAMES = frozenset(ROLES)
 
 
 # ===== 输出 Schema =====
@@ -196,11 +200,34 @@ def update_role_permissions(
     db: Session = Depends(deps.get_db),
     admin: User = Depends(require_permission("role:write")),
 ):
-    """设置角色权限（覆盖式）。"""
+    """设置角色权限（覆盖式）。内置角色的权限由代码定义，不允许通过接口修改。"""
     role = get_role_by_id(db, role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="角色不存在")
-    updated = set_role_permissions(db, role, perm_in.permission_ids)
+    if role.name in BUILTIN_ROLE_NAMES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="内置角色的权限由代码定义，不能通过接口修改",
+        )
+    if role in admin.roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change the permissions of a role assigned to yourself",
+        )
+    unique_ids = list(dict.fromkeys(perm_in.permission_ids))
+    requested = get_permissions_by_ids(db, unique_ids)
+    if len(requested) != len(unique_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="包含不存在的权限 ID",
+        )
+    requested_codenames = {p.codename for p in requested}
+    if requested_codenames - get_user_permissions(db, admin):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不能授予高于自身权限的权限",
+        )
+    updated = set_role_permissions(db, role, unique_ids)
     log_action(
         db,
         request=request,
@@ -271,7 +298,13 @@ def update_user_roles(
     # 层级保护 — 不能修改比自己权限更高的用户（按有效权限集合比较）
     ensure_can_manage(db, admin, user)
     # 提权防护：被授予角色的权限必须是当前管理员有效权限的子集
-    roles = get_roles_by_ids(db, roles_in.role_ids)
+    unique_ids = list(dict.fromkeys(roles_in.role_ids))
+    roles = get_roles_by_ids(db, unique_ids)
+    if len(roles) != len(unique_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="包含不存在的角色 ID",
+        )
     ensure_can_grant_roles(db, admin, roles)
     user.roles = roles
     db.commit()

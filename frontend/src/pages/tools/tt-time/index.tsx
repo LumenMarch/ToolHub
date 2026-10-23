@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTusUpload } from '@/hooks/useTusUpload';
-import { llmUnavailableReason, useLlmStatus } from '@/hooks/useLlmStatus';
+import { llmUnavailableReason, useLlmAvailability } from '@/hooks/useLlmStatus';
 import { LoadingSignal } from '@/components/LoadingSignal';
 import type { HistogramMode } from './charts';
 import type { AnalysisContext, Bin, Stats } from './lib';
@@ -236,7 +236,7 @@ const TtTimeTool: React.FC = () => {
   }, [adviceMutation]);
 
   // 模型服务不可用时直接把按钮置灰并说明原因，而不是让用户填完参数点下去才吃个 503
-  const { data: llmStatus } = useLlmStatus();
+  const { data: llmStatus } = useLlmAvailability();
   const llmBlockedReason = llmUnavailableReason(llmStatus);
 
   if (phase === 'upload' || phase === 'analyzing') {

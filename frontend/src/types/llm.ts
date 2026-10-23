@@ -24,6 +24,15 @@ export interface LlmCapabilities {
   modelFtype: string | null;
 }
 
+export interface LlmAvailability {
+  enabled: boolean;
+  configured: boolean;
+  /** 唯一该看的字段：按钮可点还是置灰 */
+  available: boolean;
+  cooldownActive: boolean;
+  lastError: string | null;
+}
+
 export interface LlmStatus {
   enabled: boolean;  configured: boolean;
   /** 唯一该看的字段：按钮可点还是置灰 */

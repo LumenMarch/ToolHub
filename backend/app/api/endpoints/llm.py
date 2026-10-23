@@ -12,9 +12,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.auth import get_current_user
+from app.core.auth import require_any_tool_permission, require_permission
 from app.models.user import User
-from app.schemas.llm import LlmStatusResponse
+from app.schemas.llm import LlmAvailabilityResponse, LlmStatusResponse
 from app.services.llm import llm_gateway
 
 router = APIRouter()
@@ -23,9 +23,24 @@ router = APIRouter()
 @router.get("/status", response_model=LlmStatusResponse)
 async def get_llm_status(
     probe: bool = Query(
-        default=True, description="是否顺带探活上游（结果按 TTL 复用）"
+        default=False, description="是否顺带探活上游（结果按 TTL 复用）"
     ),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_permission("llm_config:read")),
 ) -> Any:
-    """返回模型服务的配置摘要、队列深度、指标与探活结果。"""
+    """返回模型服务的配置摘要、队列深度、指标与探活结果（仅配置管理员）。"""
     return await llm_gateway.status(probe=probe)
+
+
+@router.get("/availability", response_model=LlmAvailabilityResponse)
+async def get_llm_availability(
+    _: User = Depends(require_any_tool_permission()),
+) -> Any:
+    """工具页可读的最小可用性视图：不含探活详情、模型清单、队列与指标。"""
+    status = await llm_gateway.status(probe=False)
+    return {
+        "enabled": status["enabled"],
+        "configured": status["configured"],
+        "available": status["available"],
+        "cooldownActive": status["cooldownActive"],
+        "lastError": status["lastError"],
+    }
