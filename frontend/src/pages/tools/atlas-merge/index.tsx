@@ -472,7 +472,7 @@ const AnalysisInProgress: React.FC<{
                 ? '上传中'
                 : '打包中'}
           </p>
-          <h2 className="mt-1 text-lg font-medium tracking-tight">
+          <h2 className="mt-1 text-lg font-semibold tracking-tight">
             {step === 'processing'
               ? '正在合并测试日志'
               : step === 'uploading'
@@ -951,7 +951,7 @@ const AtlasMerge: React.FC = () => {
                   </p>
                   <h2
                     id="atlas-archive-title"
-                    className="mt-1 text-lg font-medium tracking-tight"
+                    className="mt-1 text-lg font-semibold tracking-tight"
                   >
                     选择测试日志目录
                   </h2>
@@ -1041,7 +1041,7 @@ const AtlasMerge: React.FC = () => {
                 <aside className="flex min-w-0 flex-col justify-between border-t bg-muted p-6 lg:border-l lg:border-t-0">
                   <div>
                     <FolderTree className="size-5 text-muted-foreground" />
-                    <h3 className="mt-4 text-base font-medium">合并白名单</h3>
+                    <h3 className="mt-4 text-md font-semibold">合并白名单</h3>
                     <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                       仅打包以下 3 类 CSV，其余日志（device.log、*.plist、
                       Datalogger、*_flow.log 等）一律丢弃，上传体积可从
@@ -1163,7 +1163,7 @@ const AtlasMerge: React.FC = () => {
                       </p>
                       <h2
                         id="atlas-result-title"
-                        className="mt-1 text-lg font-medium tracking-tight"
+                        className="mt-1 text-lg font-semibold tracking-tight"
                       >
                         结果可以复核
                       </h2>
@@ -1199,7 +1199,7 @@ const AtlasMerge: React.FC = () => {
                 <aside className="flex min-w-0 flex-col justify-between border-t bg-muted p-6 lg:border-l lg:border-t-0">
                   <div>
                     <Download className="size-5 text-muted-foreground" />
-                    <h3 className="mt-4 text-base font-medium">导出合并结果</h3>
+                    <h3 className="mt-4 text-md font-semibold">导出合并结果</h3>
                     <p className="mt-2 break-words text-xs leading-relaxed text-muted-foreground">
                       {analysis.download_filename}
                     </p>

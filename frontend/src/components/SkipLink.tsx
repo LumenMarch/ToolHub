@@ -13,7 +13,7 @@ export function SkipLink({ targetId, label = '跳到主要内容' }: SkipLinkPro
   return (
     <a
       href={`#${targetId}`}
-      className="sr-only rounded-lg focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-3 focus:border focus:bg-background focus:px-3 focus:py-1.5 focus:text-sm focus:font-medium focus:shadow-md focus:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="sr-only rounded-md focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-3 focus:border focus:border-border focus:bg-background focus:px-3 focus:py-1.5 focus:text-sm focus:font-medium focus:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       {label}
     </a>

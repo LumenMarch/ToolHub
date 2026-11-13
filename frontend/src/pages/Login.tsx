@@ -122,14 +122,16 @@ const Login: React.FC = () => {
   }
 
   return (
-    <div className="relative flex min-h-dvh flex-col items-center justify-center bg-background p-6">
-      <div className="absolute top-4 right-4">
+    <div className="relative flex min-h-dvh flex-col items-center justify-center bg-background p-4 sm:p-6">
+      <div className="absolute top-3 right-3">
         <ThemeToggle />
       </div>
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-[360px]">
         <CardHeader>
           <BrandMark />
-          <CardTitle>{isLogin ? '登录' : '注册'}</CardTitle>
+          <CardTitle className="text-lg">
+            {isLogin ? '登录' : '注册'}
+          </CardTitle>
           <CardDescription>
             {isLogin ? '使用账号进入工具台。' : '提交注册后等待管理员审批。'}
           </CardDescription>

@@ -1528,7 +1528,7 @@ const AssetComparison: React.FC = () => {
               <div className="flex min-h-[32rem] flex-1 items-center justify-center px-6 text-center">
                 <div>
                   <Database className="mx-auto size-12 text-muted-foreground" />
-                  <p className="mt-4 text-lg font-medium">等待核对结果</p>
+                  <p className="mt-4 text-lg font-semibold">等待核对结果</p>
                   <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
                     准备数据源并启动任务后，这里会显示逐行差异证据。
                   </p>
