@@ -58,21 +58,21 @@ const Layout: React.FC = () => {
 
   return (
     <div className="flex min-h-dvh flex-col bg-background">
-      <header className="sticky top-0 z-50 border-b bg-background">
+      <header className="sticky top-0 z-40 border-b border-border-subtle bg-background/95 backdrop-blur-sm">
         <SkipLink targetId="main-content" />
-        <div className="flex h-14 items-center gap-3 px-4">
-          <Link to="/" className="shrink-0">
+        <div className="mx-auto flex h-12 w-full max-w-[var(--ds-content-max)] items-center gap-2.5 px-3 sm:px-6">
+          <Link to="/" className="shrink-0" aria-label="返回工具台">
             <BrandMark />
           </Link>
           {isToolRoute && activeTool ? (
             <>
-              <Separator orientation="vertical" className="hidden h-4 sm:block" />
-              <span className="hidden truncate text-sm font-medium sm:inline">
+              <Separator orientation="vertical" className="hidden h-3.5 sm:block" />
+              <span className="hidden truncate text-sm text-muted-foreground sm:inline">
                 {activeTool.name}
               </span>
             </>
           ) : null}
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-0.5">
             <ThemeToggle />
             <NotificationBell />
             {user?.username ? (
@@ -97,21 +97,21 @@ const Layout: React.FC = () => {
       </header>
 
       <main id="main-content" className="flex flex-1 flex-col">
-        {isToolRoute ? (
-          <div className="flex flex-1 flex-col gap-6 p-6">
-            {activeTool ? (
-              <PageHeader
-                title={activeTool.name}
-                description={activeTool.description}
-              />
-            ) : null}
+        <div className="mx-auto flex w-full max-w-[var(--ds-content-max)] flex-1 flex-col gap-5 p-4 sm:p-6">
+          {isToolRoute ? (
+            <>
+              {activeTool ? (
+                <PageHeader
+                  title={activeTool.name}
+                  description={activeTool.description}
+                />
+              ) : null}
+              <Outlet />
+            </>
+          ) : (
             <Outlet />
-          </div>
-        ) : (
-          <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col p-6">
-            <Outlet />
-          </div>
-        )}
+          )}
+        </div>
       </main>
     </div>
   )

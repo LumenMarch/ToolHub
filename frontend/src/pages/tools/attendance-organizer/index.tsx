@@ -208,7 +208,7 @@ const AnalysisInProgress: React.FC<{
                 ? '完成中'
                 : '上传中'}
           </p>
-          <h2 className="mt-1 text-lg font-medium tracking-tight">
+          <h2 className="mt-1 text-lg font-semibold tracking-tight">
             {step === 'processing'
               ? '正在核对通行记录'
               : isCompletingUpload
@@ -861,7 +861,7 @@ const AttendanceOrganizer: React.FC = () => {
                       </p>
                       <h2
                         id="attendance-result-title"
-                        className="mt-1 text-lg font-medium tracking-tight"
+                        className="mt-1 text-lg font-semibold tracking-tight"
                       >
                         结果可以复核
                       </h2>
@@ -936,7 +936,7 @@ const AttendanceOrganizer: React.FC = () => {
                 <aside className="flex min-w-0 flex-col justify-between border-t bg-muted p-6 lg:border-l lg:border-t-0">
                   <div>
                     <Download className="size-5 text-muted-foreground" />
-                    <h3 className="mt-4 text-base font-medium">导出完整工作簿</h3>
+                    <h3 className="mt-4 text-md font-semibold">导出完整工作簿</h3>
                     <p className="mt-2 break-words text-xs leading-relaxed text-muted-foreground">
                       {analysis.download_filename}
                     </p>

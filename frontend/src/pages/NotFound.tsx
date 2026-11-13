@@ -19,18 +19,18 @@ const NotFound: React.FC = () => {
   const location = useLocation()
 
   return (
-    <Empty className="border">
+    <Empty className="border border-dashed bg-card py-10">
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <Compass />
         </EmptyMedia>
-        <EmptyTitle>页面不存在</EmptyTitle>
+        <EmptyTitle className="text-md">页面不存在</EmptyTitle>
         <EmptyDescription>
           没有找到「{location.pathname}」对应的页面，链接可能已过期，或对应工具已被停用。
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button asChild variant="outline" size="sm">
+        <Button asChild size="sm">
           <Link to="/">
             <Home data-icon="inline-start" />
             返回工具台

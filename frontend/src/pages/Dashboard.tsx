@@ -31,22 +31,28 @@ const ToolCard: React.FC<{ tool: ToolDefinition; index: number }> = ({
   return (
     <Link
       to={tool.path}
-      className="block animate-in fade-in-0 slide-in-from-bottom-1 animation-duration-200 fill-mode-backwards ease-out-strong"
+      className="block rounded-lg animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-backwards duration-(--ds-duration-slow) ease-enter"
       style={{
         animationDelay: `${Math.min(index * CARD_STAGGER_MS, CARD_STAGGER_CAP_MS)}ms`,
       }}
     >
-      <Card
-        size="sm"
-        className="h-full transition-[background-color,transform] duration-150 ease-out-strong hover:bg-muted/40 motion-safe:active:translate-y-px"
-      >
-        <CardHeader>
+      <Card className="group h-full transition-[border-color,background-color,transform] duration-(--ds-duration-fast) ease-standard hover:border-primary/40 hover:bg-accent-soft/30 motion-safe:active:scale-[.995]">
+        <CardHeader className="gap-3">
           <div className="flex items-start justify-between gap-3">
-            <Icon className="size-4 text-muted-foreground" />
-            <ArrowUpRight className="size-4 text-muted-foreground" />
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors duration-(--ds-duration-fast) group-hover:bg-accent-soft group-hover:text-primary">
+              <Icon className="size-4" />
+            </span>
+            <ArrowUpRight
+              aria-hidden="true"
+              className="size-4 shrink-0 text-faint transition-[color,transform] duration-(--ds-duration-fast) ease-standard group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-primary"
+            />
           </div>
-          <CardTitle>{tool.name}</CardTitle>
-          <CardDescription>{tool.description}</CardDescription>
+          <div className="flex flex-col gap-1">
+            <CardTitle>{tool.name}</CardTitle>
+            <CardDescription className="line-clamp-2 leading-relaxed">
+              {tool.description}
+            </CardDescription>
+          </div>
         </CardHeader>
       </Card>
     </Link>
@@ -58,17 +64,19 @@ const ToolGridSkeleton: React.FC = () => (
   <div
     role="status"
     aria-label="正在加载工具列表"
-    className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+    className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
   >
-    {Array.from({ length: 6 }, (_, index) => (
-      <Card key={index} size="sm" aria-hidden="true">
-        <CardHeader>
+    {Array.from({ length: 8 }, (_, index) => (
+      <Card key={index} aria-hidden="true">
+        <CardHeader className="gap-3">
           <div className="flex items-start justify-between gap-3">
-            <Skeleton className="size-4 rounded-md" />
-            <Skeleton className="size-4 rounded-md" />
+            <Skeleton className="size-8 rounded-md" />
+            <Skeleton className="size-4 rounded-sm" />
           </div>
-          <Skeleton className="h-5 w-1/3" />
-          <Skeleton className="h-4 w-5/6" />
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-3.5 w-5/6" />
+          </div>
         </CardHeader>
       </Card>
     ))}
@@ -79,13 +87,19 @@ const Dashboard: React.FC = () => {
   const { visibleTools, isPending, hasAccess } = useVisibleTools()
 
   return (
-    <div className="flex flex-col gap-8">
-      <PageHeader title="工具" description="选择一个工具开始工作。" />
+    <div className="flex flex-1 flex-col gap-6">
+      <PageHeader title="工具" description="选择一个工具开始工作。">
+        {!isPending && visibleTools.length > 0 ? (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {visibleTools.length} 个工具
+          </span>
+        ) : null}
+      </PageHeader>
 
       {isPending ? (
         <ToolGridSkeleton />
       ) : visibleTools.length === 0 ? (
-        <Empty className="border">
+        <Empty className="border border-dashed bg-card">
           <EmptyHeader>
             <EmptyMedia variant="icon">
               <Wrench />
@@ -99,7 +113,7 @@ const Dashboard: React.FC = () => {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {visibleTools.map((tool, index) => (
             <ToolCard key={tool.id} tool={tool} index={index} />
           ))}

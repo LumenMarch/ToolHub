@@ -1,6 +1,6 @@
 import * as React from "react"
 
-const MOBILE_BREAKPOINT = 768
+const MOBILE_BREAKPOINT = 1024
 
 export function useIsMobile() {
   // 惰性初始化取首帧真实宽度：否则窄屏会先按桌面态渲染一帧再切换，出现可见跳动

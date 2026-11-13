@@ -34,17 +34,17 @@ const PendingApproval: React.FC = () => {
   }
 
   return (
-    <div className="relative flex min-h-dvh flex-col items-center justify-center bg-background p-6">
-      <div className="absolute top-4 right-4">
+    <div className="relative flex min-h-dvh flex-col items-center justify-center bg-background p-4 sm:p-6">
+      <div className="absolute top-3 right-3">
         <ThemeToggle />
       </div>
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-[400px]">
         <CardHeader>
           <BrandMark />
-          <CardTitle>账号待审批</CardTitle>
+          <CardTitle className="text-lg">账号待审批</CardTitle>
         </CardHeader>
         <CardContent>
-          <Alert>
+          <Alert variant="info">
             <AlertTitle>审核中</AlertTitle>
             <AlertDescription>
               你好，{user?.username}。注册申请已提交，审批通过后会自动进入工具台。

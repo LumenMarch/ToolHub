@@ -97,7 +97,7 @@ const AdminLayout: React.FC = () => {
           </div>
           {/* 折叠按钮放侧边栏这边：展开时居品牌行右端，收起时独占图标栏顶部。
               移动端另在顶栏保留入口（抽屉收起时侧栏不可见）。 */}
-          <SidebarTrigger className="hidden shrink-0 md:inline-flex group-data-[collapsible=icon]:mx-auto" />
+          <SidebarTrigger className="hidden shrink-0 lg:inline-flex group-data-[collapsible=icon]:mx-auto" />
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
@@ -139,13 +139,13 @@ const AdminLayout: React.FC = () => {
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        <header className="flex h-14 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="md:hidden" />
-          <Separator orientation="vertical" className="mr-2 h-4 md:hidden" />
-          <h1 className="min-w-0 truncate text-sm font-medium">
+        <header className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border-subtle bg-background/95 px-4 backdrop-blur-sm">
+          <SidebarTrigger className="lg:hidden" />
+          <Separator orientation="vertical" className="mr-2 h-3.5 lg:hidden" />
+          <h1 className="min-w-0 truncate text-md font-semibold tracking-tight">
             {currentLabel}
           </h1>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-0.5">
             <ThemeToggle />
             <NotificationBell />
             {user?.username ? (
@@ -159,8 +159,10 @@ const AdminLayout: React.FC = () => {
             </Button>
           </div>
         </header>
-        <div id="admin-content" className="flex-1 p-6">
-          <Outlet />
+        <div id="admin-content" className="flex-1 p-4 sm:p-6">
+          <div className="mx-auto flex w-full max-w-[var(--ds-content-max)] flex-col">
+            <Outlet />
+          </div>
         </div>
       </SidebarInset>
     </SidebarProvider>

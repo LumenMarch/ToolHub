@@ -47,34 +47,39 @@
 
 ## 3. 设计语言与审美规范 (Design Language)
 
-可见界面采用 shadcn/ui `radix-nova` 默认视觉，决策见 `docs/adr/0006-shadcn-nova-visual-language.md`。不再使用 Kinetic Brutalism。
+可见界面以 `docs/design-standards.md` 为唯一视觉规范：紧凑型桌面密度、4px 网格、靛蓝主色、中性表面分层。shadcn/ui `radix-nova` 仅提供组件结构与行为，不再代表最终视觉；ADR-0006 中关于中性 `primary` 与默认密度的部分由本章替代。
 
 ### 3.1. 排版与字标
 - **字体**: Geist Variable 用于界面；Geist Mono 用于代码与等宽数据。标题与正文同一无衬线家族。
+- **字号**: 正文 13px、次级说明 12px、字段标签 11px、页面标题 18px、KPI 22–28px；数字使用 `tabular-nums`。
 - **字标**: 主字「工具」（`font-semibold`），旁注「Tool」（`text-muted-foreground`）。`document.title` 用「工具」或「{页面} · 工具」。
-- **层级**: 常规标题（如 Page Header 的 `text-2xl font-semibold`），不用展示级超大标题。
+- **层级**: Page Header 使用 `text-lg font-semibold tracking-tight`，不用展示级超大标题。
 
 ### 3.2. 色彩与主题
-- 使用 nova 语义 token：`background`、`foreground`、`primary`、`muted`、`border`、`sidebar`。
-- `primary` 为中性黑/白，不使用酸性黄绿或独立品牌色覆盖层。
-- 主题为 `light | dark | system` 三态，根节点 class 驱动。
-- 成功 / 危险 / 警告继续使用 `status-*` 语义 token，并伴随文字说明。
+- Token 在 `frontend/src/styles/tokens.css` 中按三层组织：`--ds-*` 语义原值、shadcn 别名、Tailwind `@theme` 映射。
+- 表面分三级：`background`（页面底）、`card`/`surface`（卡片与输入框）、`muted`/`surface-2`（次级表面与悬停底）；边框分 `border` 与 `border-subtle`。
+- `primary` 为靛蓝品牌色（亮色 `#4f46e5`、暗色 `#a5b4fc`）；主色只用于主操作、选中、焦点与链接，不做大面积背景。
+- 成功 / 危险 / 警告 / 信息使用 `status-*` 语义 token，成对使用强色与 `-surface` 底色，并始终伴随文字或图标。
+- 主题为 `light | dark | system` 三态，根节点 class 与 `color-scheme` 驱动；首屏内联脚本先应用，避免闪烁。
+- 图表使用 `--chart-1` … `--chart-7` 固定顺序色。
 
 ### 3.3. 动效
-- 只保留组件自带过渡、toast、dialog 与 focus 反馈。
-- 不为页面入场编排 GSAP 或标题切片。
+- 悬停与颜色 120ms，按下与选中 180ms，视图进入 240ms，弹层进入 320ms、退出 180–220ms；缓动使用 `--ds-ease-*`。
+- 按下反馈用 `scale(.98)`，不做位移；不弹跳、不无限循环。
+- `prefers-reduced-motion: reduce` 下只保留淡入，去掉位移、旋转与循环动画。
 
 ### 3.4. 表单与控件
-- 表单使用 shadcn `Field` / `FieldGroup` 与标准 `Input` / `Textarea` / `Select`。
-- 主操作使用 `Button`；空状态使用 `Empty`；提示使用 `Alert`；加载使用 `Spinner` 或 `Skeleton`。
+- 表单使用 shadcn `Field` / `FieldGroup` 与标准 `Input` / `Textarea` / `Select`；标签始终可见，错误用 `aria-describedby` 关联。
+- 控件高度：`sm` 24px、`md` 28px、`lg` 32px；行高 compact 40px；触控目标不小于 44px。
+- 主操作使用 `Button`；一个视图只保留一个 Primary。空状态使用 `Empty`；提示使用 `Alert`；加载使用 `Spinner` 或 `Skeleton`。
 - 图标库为 Lucide；按钮内图标用 `data-icon`，不另加尺寸 class。
 
 ### 3.5. 页面结构
 - **登录 / 待审批**: 居中 `Card`，无分屏叙事区。
-- **用户区**: 顶栏启动器（字标、当前工具名、主题、通知、用户、退出）；无全站 Sidebar。
-- **主控台**: 工具 `Card` 网格。
-- **工具页**: Layout 根据 `toolsConfig` 渲染 Page Header，内容区 `p-6`；工具自行管理表单、表格与图表。
-- **Admin**: 官方 `Sidebar` + `SidebarInset`。
+- **用户区**: 48px 顶栏启动器（字标、当前工具名、主题、通知、用户、退出）；无全站 Sidebar。
+- **主控台**: 工具 `Card` 网格，卡片默认边框、无投影，悬停只改变边框与表面。
+- **工具页**: Layout 根据 `toolsConfig` 渲染 Page Header；内容容器最大宽度 `1200px`，页面边距 16–24px；工具自行管理表单、表格与图表。
+- **Admin**: 官方 `Sidebar` + `SidebarInset`，侧栏与页面同底，用细线与悬停底分区。
 
 ### 3.6. 设计令牌与样式入口 (Design Tokens)
 - `frontend/src/styles/tokens.css` 是全局样式、字体声明和原始设计值的唯一来源。

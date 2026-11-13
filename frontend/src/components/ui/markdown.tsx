@@ -17,7 +17,7 @@ const markdownComponents: Components = {
     <p className={cn(blockBase, "leading-relaxed")} {...props} />
   ),
   h1: ({ node: _node, ...props }: MdProps<"h1">) => (
-    <h1 className={cn("my-2 text-base font-semibold tracking-tight")} {...props} />
+    <h1 className={cn("my-2 text-md font-semibold tracking-tight")} {...props} />
   ),
   h2: ({ node: _node, ...props }: MdProps<"h2">) => (
     <h2 className={cn("my-2 text-sm font-semibold tracking-tight")} {...props} />
