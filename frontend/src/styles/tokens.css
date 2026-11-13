@@ -48,9 +48,9 @@
 
   /* 图表序列色：固定顺序，不按页面重排 */
   --ds-chart-1: light-dark(#4f46e5, #a5b4fc);
-  --ds-chart-2: light-dark(#0ea5e9, #7dd3fc);
-  --ds-chart-3: light-dark(#10b981, #6ee7b7);
-  --ds-chart-4: light-dark(#f59e0b, #fcd34d);
+  --ds-chart-2: light-dark(#0284c7, #7dd3fc);
+  --ds-chart-3: light-dark(#059669, #6ee7b7);
+  --ds-chart-4: light-dark(#b45309, #fcd34d);
   --ds-chart-5: light-dark(#ec4899, #f9a8d4);
   --ds-chart-6: light-dark(#8b5cf6, #c4b5fd);
   --ds-chart-7: light-dark(#64748b, #94a3b8);
