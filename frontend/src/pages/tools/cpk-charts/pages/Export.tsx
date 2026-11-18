@@ -11,11 +11,12 @@ import {
 } from '@/components/ui/empty';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import useOppStore, { getActive, getCorrPair, getMerged, getSharedPair } from '../store/useOppStore';
+import useOppStore, { getMerged } from '../store/useOppStore';
 import { shortName } from '../lib/stats';
+import type { ParsedDataset } from '../lib/dataset';
+import { useCurrentAnalysis } from '../lib/useCurrentAnalysis';
 import { exportChartPng, exportComparedByName, exportCorrelationPng } from '../lib/export';
 import { buildItemCheckImages, exportItemCheckReport } from '../lib/itemCheckReport';
-import type { ParsedDataset } from '../lib/csv';
 type ExportState = { kind: 'single' } | { kind: 'all'; done: number; total: number } | { kind: 'itemCheck'; done: number; total: number } | null;
 
 const Export: React.FC = () => {
@@ -58,15 +59,19 @@ const Export: React.FC = () => {
     return !!((a && (a.upper !== null || a.lower !== null)) || (b && (b.upper !== null || b.lower !== null)));
   };
 
-  const shared = getSharedPair({ datasetA, datasetB, compareMode, selectedName, settings, excludeFail } as never);
-  const activeA = useMemo(() => {
-    if (shared) return { index: shared.idxA, analysis: shared.pair.a };
-    return getActive(datasetA, selectedName, settings, excludeFail);
-  }, [shared, datasetA, selectedName, settings, excludeFail]);
-  const activeB = useMemo(() => {
-    if (shared) return { index: shared.idxB, analysis: shared.pair.b };
-    return getActive(datasetB, selectedName, settings, excludeFail);
-  }, [shared, datasetB, selectedName, settings, excludeFail]);
+  const current = useCurrentAnalysis({
+    datasetA,
+    datasetB,
+    selectedName,
+    corrYName,
+    settings,
+    compareMode,
+    excludeFail,
+    chartType,
+    onError: setError,
+  });
+  const activeA = current.a;
+  const activeB = current.b;
 
   const handleExportCurrent = async () => {
     if (!activeA && !activeB) return;
@@ -83,7 +88,7 @@ const Export: React.FC = () => {
   };
 
   const handleExportCorrelation = async () => {
-    const pair = getCorrPair(datasetA, selectedName, corrYName, settings, excludeFail) ?? getCorrPair(datasetB, selectedName, corrYName, settings, excludeFail);
+    const pair = current.pair;
     if (!pair) return;
     setExporting({ kind: 'single' });
     try {

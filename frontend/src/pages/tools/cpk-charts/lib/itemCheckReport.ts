@@ -1,9 +1,15 @@
 // Item Check 报告导出：按勾选 Item 生成三列 .numbers（Item | 数据A图 | 数据B图），表头为文件名
 import type { AxiosResponse } from 'axios';
 import api from '../../../../api/axios';
-import { analyzeColumn, analyzeColumnPair, type ChartSettings } from './stats';
+import {
+  analyzeColumn,
+  analyzeColumnPair,
+  type ChartSettings,
+  type ColumnAnalysis,
+  type TestColumn,
+} from './stats';
 import { renderCdfSvg, renderHistogramSvg, renderTimeSeriesSvg, svgToPng } from './export';
-import { getEffectiveRawRows, type ParsedDataset } from './csv';
+import { loadColumn, type ParsedDataset } from './dataset';
 
 const CONCURRENCY = 4;
 
@@ -28,10 +34,63 @@ async function blobToBase64(blob: Blob): Promise<string> {
 export type ReportView = 'histogram' | 'cdf' | 'timeseries';
 
 /** 按视图类型选择 SVG 渲染器。 */
-function renderSvgFor(analysis: ReturnType<typeof analyzeColumn>, settings: ChartSettings, view: ReportView): string {
+function renderSvgFor(analysis: ColumnAnalysis, settings: ChartSettings, view: ReportView): string {
   if (view === 'cdf') return renderCdfSvg(analysis, settings);
   if (view === 'timeseries') return renderTimeSeriesSvg(analysis, settings);
   return renderHistogramSvg(analysis, settings);
+}
+
+/** 有效列：手动规格限覆盖列自带的上下限。 */
+function effectiveColumn(column: TestColumn, settings: ChartSettings): TestColumn {
+  return {
+    ...column,
+    upper: settings.upperLimit !== null ? settings.upperLimit : column.upper,
+    lower: settings.lowerLimit !== null ? settings.lowerLimit : column.lower,
+  };
+}
+
+async function singleAnalysis(
+  dataset: ParsedDataset,
+  index: number,
+  settings: ChartSettings,
+  excludeFail: boolean,
+): Promise<ColumnAnalysis> {
+  const data = await loadColumn(dataset, index);
+  return analyzeColumn(
+    effectiveColumn(dataset.columns[index], settings),
+    data,
+    excludeFail ? dataset.statusPass : null,
+    settings.binCount,
+    settings.lowerRange,
+    settings.upperRange,
+    settings.showLimits,
+  );
+}
+
+async function pairedAnalysis(
+  datasetA: ParsedDataset,
+  indexA: number,
+  datasetB: ParsedDataset,
+  indexB: number,
+  settings: ChartSettings,
+  excludeFail: boolean,
+): Promise<{ a: ColumnAnalysis; b: ColumnAnalysis }> {
+  const [dataA, dataB] = await Promise.all([
+    loadColumn(datasetA, indexA),
+    loadColumn(datasetB, indexB),
+  ]);
+  return analyzeColumnPair(
+    effectiveColumn(datasetA.columns[indexA], settings),
+    dataA,
+    excludeFail ? datasetA.statusPass : null,
+    effectiveColumn(datasetB.columns[indexB], settings),
+    dataB,
+    excludeFail ? datasetB.statusPass : null,
+    settings.binCount,
+    settings.lowerRange,
+    settings.upperRange,
+    settings.showLimits,
+  );
 }
 
 export async function buildItemCheckImages(
@@ -46,6 +105,7 @@ export async function buildItemCheckImages(
   const total = names.length;
   const imagesA: string[] = new Array(total).fill('');
   const imagesB: string[] = new Array(total).fill('');
+  const filterFail = Boolean(excludeFail);
 
   let done = 0;
   for (let start = 0; start < total; start += CONCURRENCY) {
@@ -59,38 +119,25 @@ export async function buildItemCheckImages(
         const hasB = idxB >= 0 && !!datasetB;
         // 两侧均有该 Item 时，使用共享 X 轴域保证刻度完全一致
         if (hasA && hasB && datasetA && datasetB) {
-          const colA0 = datasetA.columns[idxA];
-          const colB0 = datasetB.columns[idxB];
-          const effA = { ...colA0, upper: settings.upperLimit !== null ? settings.upperLimit : colA0.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : colA0.lower };
-          const effB = { ...colB0, upper: settings.upperLimit !== null ? settings.upperLimit : colB0.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : colB0.lower };
-          const rawA = getEffectiveRawRows(datasetA, idxA, excludeFail);
-          const rawB = getEffectiveRawRows(datasetB, idxB, excludeFail);
-          const pair = analyzeColumnPair(effA, rawA, effB, rawB, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
-          const svgA = renderSvgFor(pair.a, settings, view);
-          const svgB = renderSvgFor(pair.b, settings, view);
-          const [pngA, pngB] = await Promise.all([svgToPng(svgA), svgToPng(svgB)]);
-          imagesA[pos] = await blobToBase64(pngA);
-          imagesB[pos] = await blobToBase64(pngB);
+          const pair = await pairedAnalysis(datasetA, idxA, datasetB, idxB, settings, filterFail);
+          const [pngA, pngB] = await Promise.all([
+            svgToPng(renderSvgFor(pair.a, settings, view)),
+            svgToPng(renderSvgFor(pair.b, settings, view)),
+          ]);
+          [imagesA[pos], imagesB[pos]] = await Promise.all([
+            blobToBase64(pngA),
+            blobToBase64(pngB),
+          ]);
           return;
         }
         // 单侧或仅一侧有该 Item，回退为单列分析
         if (hasA && datasetA) {
-          const col = datasetA.columns[idxA];
-          const eff = { ...col, upper: settings.upperLimit !== null ? settings.upperLimit : col.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : col.lower };
-          const raw = getEffectiveRawRows(datasetA, idxA, excludeFail);
-          const analysis = analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
-          const svg = renderSvgFor(analysis, settings, view);
-          const png = await svgToPng(svg);
-          imagesA[pos] = await blobToBase64(png);
+          const analysis = await singleAnalysis(datasetA, idxA, settings, filterFail);
+          imagesA[pos] = await blobToBase64(await svgToPng(renderSvgFor(analysis, settings, view)));
         }
         if (hasB && datasetB) {
-          const col = datasetB.columns[idxB];
-          const eff = { ...col, upper: settings.upperLimit !== null ? settings.upperLimit : col.upper, lower: settings.lowerLimit !== null ? settings.lowerLimit : col.lower };
-          const raw = getEffectiveRawRows(datasetB, idxB, excludeFail);
-          const analysis = analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
-          const svg = renderSvgFor(analysis, settings, view);
-          const png = await svgToPng(svg);
-          imagesB[pos] = await blobToBase64(png);
+          const analysis = await singleAnalysis(datasetB, idxB, settings, filterFail);
+          imagesB[pos] = await blobToBase64(await svgToPng(renderSvgFor(analysis, settings, view)));
         }
       }),
     );
