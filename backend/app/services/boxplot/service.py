@@ -12,6 +12,7 @@ Excel QUARTILE.INC 以及 polars quantile(interpolation="linear") 一致。
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,6 +49,14 @@ _ATLAS_META_PREFIXES = (
     "Lower Limited",
     "Measurement Units",
 )
+
+# 测试结果列名（与 cpk-charts 的识别口径一致）
+_FAIL_STATUS_COLUMN_RE = re.compile(
+    r"(?:test\s*)?pass\s*/\s*fail\s*status|test\s*status|^status$",
+    re.IGNORECASE,
+)
+# 仅排除明确失败；PASS、空值及其它状态保持原样
+_FAIL_STATUS_VALUES = ("FAIL",)
 
 
 @dataclass(frozen=True)
@@ -273,6 +282,35 @@ def exclude_atlas_meta_rows(df: pl.DataFrame) -> tuple[pl.DataFrame, int]:
     for prefix in _ATLAS_META_PREFIXES:
         part = series.str.starts_with(prefix).fill_null(False)
         mask = part if mask is None else (mask | part)
+    count = int(mask.sum())
+    if count == 0:
+        return df, 0
+    return df.filter(~mask), count
+
+
+def find_fail_status_column(df: pl.DataFrame) -> str | None:
+    """识别测试结果列；优先完整的 Test Pass/Fail Status 表头。
+
+    普通箱线图数据没有该列时返回 None，调用方据此跳过过滤。
+    """
+    candidates = [
+        name for name in df.columns if _FAIL_STATUS_COLUMN_RE.search(name.strip())
+    ]
+    if not candidates:
+        return None
+    for name in candidates:
+        if name.strip().lower() == "test pass/fail status":
+            return name
+    return candidates[0]
+
+
+def filter_fail_rows(df: pl.DataFrame, status_col: str) -> tuple[pl.DataFrame, int]:
+    """排除状态值为 FAIL 的行（大小写与首尾空白不敏感）。
+
+    返回 (过滤后的表, 排除行数)；空值与其它状态不计入排除。
+    """
+    status = df[status_col].cast(pl.Utf8).str.strip_chars().str.to_uppercase()
+    mask = status.is_in(list(_FAIL_STATUS_VALUES)).fill_null(False)
     count = int(mask.sum())
     if count == 0:
         return df, 0

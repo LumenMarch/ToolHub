@@ -36,6 +36,8 @@ from app.services.boxplot.service import (
     BoxPlotValidationError,
     compute_groups,
     exclude_atlas_meta_rows,
+    filter_fail_rows,
+    find_fail_status_column,
     list_group_values,
     read_tabular,
     scan_columns,
@@ -160,9 +162,15 @@ def analyze_box_plot(
 
     df, _ = exclude_atlas_meta_rows(df)
 
+    fail_column = find_fail_status_column(df)
+    analysis_df = df
+    excluded_fail_rows = 0
+    if req.exclude_fail and fail_column is not None:
+        analysis_df, excluded_fail_rows = filter_fail_rows(df, fail_column)
+
     try:
         stats, used_rows, skipped_rows = compute_groups(
-            df,
+            analysis_df,
             req.value_col,
             req.group_col,
             quartile_method=req.quartile_method,
@@ -183,6 +191,8 @@ def analyze_box_plot(
             "grouped": req.group_col is not None,
             "groups": len(stats),
             "used_rows": used_rows,
+            "exclude_fail": req.exclude_fail,
+            "excluded_fail_rows": excluded_fail_rows,
         },
     )
     logger.info(
@@ -198,6 +208,8 @@ def analyze_box_plot(
         total_rows=df.height,
         used_rows=used_rows,
         skipped_rows=skipped_rows,
+        excluded_fail_rows=excluded_fail_rows,
+        fail_column=fail_column,
         groups=[
             GroupStatModel(
                 name=stat.name,
