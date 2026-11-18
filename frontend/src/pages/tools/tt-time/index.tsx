@@ -1,22 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Database } from 'lucide-react';
 
 import api from '@/api/axios';
-import FileDropZone from '@/components/FileDropZone';
-import LoadingOverlay from '@/components/LoadingOverlay';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTusUpload } from '@/hooks/useTusUpload';
 import { llmUnavailableReason, useLlmAvailability } from '@/hooks/useLlmStatus';
-import { LoadingSignal } from '@/components/LoadingSignal';
 import type { HistogramMode } from './charts';
 import type { AnalysisContext, Bin, Stats } from './lib';
 import { makeAnalysisContext } from './analysisWiring';
 import { streamTtTimeAnalysis } from './analysisStream';
 import type { ActiveModule, BackendProcessResponse, Phase } from './types';
 import { TtTimeReadyView } from './TtTimeReadyView';
+import { TtTimeUploadView } from './TtTimeUploadView';
 
 const DEFAULT_BIN_WIDTH = 10;
 
@@ -349,70 +345,15 @@ const TtTimeTool: React.FC = () => {
   const llmBlockedReason = llmUnavailableReason(llmStatus);
 
   if (phase === 'upload' || phase === 'analyzing') {
-    // 大文件真正耗时的两段——计算指纹（hashing）和缓存检查（cache-checking）——以前没有任何反馈，
-    // 上传进度条只在上传阶段渲染，用户看到的是「选完文件后界面一动不动」。
-    // 四个阶段统一交给全屏进度浮层，和 OPP 的解析浮层保持一致。
-    const stage = tusUpload.status;
-    const isLoading =
-      stage === 'hashing' ||
-      stage === 'cache-checking' ||
-      stage === 'uploading' ||
-      stage === 'confirming';
-    const loadingMessage =
-      stage === 'hashing'
-        ? '正在校验文件指纹…'
-        : stage === 'cache-checking'
-          ? '正在查找服务端缓存…'
-          : stage === 'confirming'
-            ? '正在确认上传结果…'
-            : '正在上传文件…';
-    // 指纹与上传阶段有字节级进度；缓存检查/服务端确认是等待，进度给满
-    const loadingProgress = stage === 'hashing' || stage === 'uploading' ? tusUpload.progress / 100 : 1;
-    const progressText =
-      stage === 'hashing' || stage === 'uploading' ? `（${Math.round(tusUpload.progress)}%）` : '';
     return (
-      <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col gap-6">
-        <LoadingOverlay
-          loading={isLoading}
-          progress={loadingProgress}
-          message={loadingMessage}
-          detail={fileName ? `${fileName}${progressText}` : undefined}
-        />
-        <Card>
-          <CardHeader>
-            <CardTitle>上传测试日志</CardTitle>
-            <CardDescription>
-              支持超大数据文件秒级解析，采用 Polars 高性能多线程计算引擎。
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <FileDropZone
-              id="tt-time-file"
-              label="测试日志文件"
-              description="拖拽或点击选择 Export-*.csv、.xlsx 或 .xls 文件"
-              accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-              file={null}
-              disabled={isLoading || phase === 'analyzing'}
-              onSelect={onFileSelect}
-            />
-            {phase === 'analyzing' ? (
-              <div className="flex items-center justify-center gap-3 py-6 text-sm text-muted-foreground">
-                <LoadingSignal label="分析中" ariaLabel="后端 Polars 引擎正在分析数据" />
-                <span>后端 Polars 引擎正在多线程分析数据...</span>
-              </div>
-            ) : null}
-            {errorMessage ? (
-              <Alert variant="destructive">
-                <AlertDescription>{errorMessage}</AlertDescription>
-              </Alert>
-            ) : null}
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Database className="size-4 shrink-0" />
-              支持列：Station ID、StartTime、EndTime、Test Pass/Fail Status（可选）
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      <TtTimeUploadView
+        phase={phase}
+        fileName={fileName}
+        errorMessage={errorMessage}
+        uploadStatus={tusUpload.status}
+        uploadProgress={tusUpload.progress}
+        onSelect={onFileSelect}
+      />
     );
   }
 
