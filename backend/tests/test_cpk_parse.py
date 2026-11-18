@@ -119,3 +119,12 @@ def test_parses_xlsx_with_same_layout(tmp_path: Path) -> None:
     assert dataset.columns[0].unit == "V"
     assert dataset.status_pass is not None
     assert dataset.status_pass.to_list() == [1, 0]
+
+
+def test_rejects_unsafe_upload_id_for_cache_paths(tmp_path: Path) -> None:
+    from app.services.cpk_charts.parser import cache_path
+
+    with pytest.raises(OppParseError):
+        cache_path(tmp_path, "../escape", "json")
+    with pytest.raises(OppParseError):
+        cache_path(tmp_path, "a/b", "parquet")

@@ -50,6 +50,15 @@ _STATUS = re.compile(
 
 ExcelSuffix = {".xlsx", ".xls"}
 CsvSuffix = {".csv", ".tsv", ".txt"}
+# tus 上传 id 只由安全字符组成；拼路径前再校验一次，避免把请求参数直接当文件名
+UPLOAD_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def cache_path(directory: Path, upload_id: str, suffix: str) -> Path:
+    """拼接解析缓存路径；非法上传 id 一律拒绝。"""
+    if not UPLOAD_ID_RE.fullmatch(upload_id):
+        raise OppParseError("非法上传标识")
+    return directory / f"{upload_id}.{suffix}"
 
 
 class OppParseError(ValueError):
@@ -378,11 +387,12 @@ def write_cache(directory: Path, upload_id: str, dataset: OppDataset) -> None:
     """把列矩阵写为 Parquet、元数据写为 JSON（原子替换，避免读到半个文件）。"""
     directory.mkdir(parents=True, exist_ok=True)
     os.chmod(directory, 0o700)
-    parquet_path = directory / f"{upload_id}.parquet"
-    meta_path = directory / f"{upload_id}.json"
-    status_path = directory / f"{upload_id}.status"
-    tmp_parquet = directory / f".{upload_id}.{uuid.uuid4().hex}.parquet.tmp"
-    tmp_meta = directory / f".{upload_id}.{uuid.uuid4().hex}.json.tmp"
+    parquet_path = cache_path(directory, upload_id, "parquet")
+    meta_path = cache_path(directory, upload_id, "json")
+    status_path = cache_path(directory, upload_id, "status")
+    tmp_suffix = uuid.uuid4().hex
+    tmp_parquet = directory / f".{parquet_path.name}.{tmp_suffix}.tmp"
+    tmp_meta = directory / f".{meta_path.name}.{tmp_suffix}.tmp"
     dataset.column_frame().write_parquet(tmp_parquet)
     tmp_meta.write_text(
         json.dumps(dataset.meta(), ensure_ascii=False), encoding="utf-8"
@@ -392,19 +402,19 @@ def write_cache(directory: Path, upload_id: str, dataset: OppDataset) -> None:
     if dataset.status_pass is None:
         status_path.unlink(missing_ok=True)
     else:
-        tmp_status = directory / f".{upload_id}.{uuid.uuid4().hex}.status.tmp"
+        tmp_status = directory / f".{status_path.name}.{uuid.uuid4().hex}.tmp"
         tmp_status.write_bytes(dataset.status_pass.to_numpy().astype("u1").tobytes())
         os.replace(tmp_status, status_path)
 
 
 def read_status(directory: Path, upload_id: str) -> bytes | None:
     """读取状态掩码（1 = 计入 excludeFail 过滤后的样本）。"""
-    path = directory / f"{upload_id}.status"
+    path = cache_path(directory, upload_id, "status")
     return path.read_bytes() if path.exists() else None
 
 
 def read_meta(directory: Path, upload_id: str) -> dict[str, Any] | None:
-    path = directory / f"{upload_id}.json"
+    path = cache_path(directory, upload_id, "json")
     if not path.exists():
         return None
     try:
@@ -417,7 +427,7 @@ def read_column(
     directory: Path, upload_id: str, index: int
 ) -> tuple[bytes, bytes] | None:
     """读取一列的 (Float64 小端字节, 非空标记字节)；缺失返回 None。"""
-    path = directory / f"{upload_id}.parquet"
+    path = cache_path(directory, upload_id, "parquet")
     if not path.exists():
         return None
     try:

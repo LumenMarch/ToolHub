@@ -70,7 +70,9 @@ class OppParseResponse(BaseModel):
 
 
 def _owned_upload(upload_id: str, user_id: int) -> dict:
-    """校验上传归属，失败时返回明确 HTTP 状态。"""
+    """校验上传标识与归属，失败时返回明确 HTTP 状态。"""
+    if not opp_parser.UPLOAD_ID_RE.fullmatch(upload_id):
+        raise HTTPException(status_code=400, detail="非法上传标识")
     try:
         return UPLOAD_STORE.get_owned_info(upload_id, user_id)
     except UploadOwnershipError as exc:
