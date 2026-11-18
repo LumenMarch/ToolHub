@@ -103,7 +103,8 @@ const PanelZone: React.FC<ZoneContentProps> = ({
         {hasFile ? null : <Upload className="size-4 text-muted-foreground" />}
       </div>
       <span className="block min-w-0">
-        <span className={cn('block truncate font-medium', fileNameClassName)}>
+        {/* 文件名可能很长且没有空格：用 break-words 让它换行，而不是被截断或溢出卡片 */}
+        <span className={cn('block break-words font-medium', fileNameClassName)}>
           {hasFile ? file.name : '拖放或选择文件'}
         </span>
         <span
