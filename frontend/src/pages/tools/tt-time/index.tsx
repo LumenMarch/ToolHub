@@ -4,6 +4,7 @@ import { Database } from 'lucide-react';
 
 import api from '@/api/axios';
 import FileDropZone from '@/components/FileDropZone';
+import LoadingOverlay from '@/components/LoadingOverlay';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,19 +20,100 @@ import { TtTimeReadyView } from './TtTimeReadyView';
 
 const DEFAULT_BIN_WIDTH = 10;
 
+/** 会话级缓存键：误退出模块再回来时按 uploadId 恢复，不必重新上传。 */
+const CACHE_KEY = 'tt-time-active-upload';
+
+interface CachedTtSession {
+  uploadId: string;
+  fileName: string;
+  binWidthStr: string;
+  station: string;
+  excludeFail: boolean;
+  activeModule: ActiveModule;
+  mode: HistogramMode;
+}
+
+const ACTIVE_MODULES: readonly ActiveModule[] = ['distribution', 'boxplot', 'comparison'];
+const HISTOGRAM_MODES: readonly HistogramMode[] = ['percent', 'count'];
+
+/** 读取上次会话；字段类型不对就整份丢弃，避免半坏数据把界面带进异常状态。 */
+function readCachedSession(): CachedTtSession | null {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CachedTtSession>;
+    if (typeof parsed.uploadId !== 'string' || !parsed.uploadId) return null;
+    if (typeof parsed.fileName !== 'string' || !parsed.fileName) return null;
+    return {
+      uploadId: parsed.uploadId,
+      fileName: parsed.fileName,
+      binWidthStr:
+        typeof parsed.binWidthStr === 'string' && parsed.binWidthStr.trim()
+          ? parsed.binWidthStr
+          : String(DEFAULT_BIN_WIDTH),
+      station: typeof parsed.station === 'string' && parsed.station ? parsed.station : 'all',
+      excludeFail: parsed.excludeFail !== false,
+      activeModule: ACTIVE_MODULES.includes(parsed.activeModule as ActiveModule)
+        ? (parsed.activeModule as ActiveModule)
+        : 'distribution',
+      mode: HISTOGRAM_MODES.includes(parsed.mode as HistogramMode)
+        ? (parsed.mode as HistogramMode)
+        : 'percent',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedSession(session: CachedTtSession): void {
+  try {
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify(session));
+  } catch {
+    // 会话存储不可用时仅失去跨路由恢复能力，当前页面仍可正常工作
+  }
+}
+
+function clearCachedSession(): void {
+  try {
+    sessionStorage.removeItem(CACHE_KEY);
+  } catch {
+    // 同上：清理失败不影响内存态
+  }
+}
+
+/** 从 unknown 错误里读 HTTP 状态码与后端 detail，避免对第三方错误对象做内联断言。 */
+function readHttpError(err: unknown): { status?: number; detail?: string } {
+  if (typeof err !== 'object' || err === null) return {};
+  const response = 'response' in err ? err.response : undefined;
+  if (typeof response !== 'object' || response === null) return {};
+  const status =
+    'status' in response && typeof response.status === 'number' ? response.status : undefined;
+  const data = 'data' in response ? response.data : undefined;
+  const detail =
+    typeof data === 'object' &&
+    data !== null &&
+    'detail' in data &&
+    typeof data.detail === 'string'
+      ? data.detail
+      : undefined;
+  return { status, detail };
+}
+
 const TtTimeTool: React.FC = () => {
-  const [phase, setPhase] = useState<Phase>('upload');
-  const [activeModule, setActiveModule] = useState<ActiveModule>('distribution');
-  const [currentUploadId, setCurrentUploadId] = useState('');
-  const [fileName, setFileName] = useState('');
+  // 只读一次缓存：后续所有初始值都从这份快照取，避免 8 个 useState 各读一遍 sessionStorage
+  const [restored] = useState(readCachedSession);
+  const [phase, setPhase] = useState<Phase>(restored ? 'analyzing' : 'upload');
+  const [activeModule, setActiveModule] = useState<ActiveModule>(restored?.activeModule ?? 'distribution');
+  const [currentUploadId, setCurrentUploadId] = useState(restored?.uploadId ?? '');
+  const [fileName, setFileName] = useState(restored?.fileName ?? '');
   const [processData, setProcessData] = useState<BackendProcessResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   // 参数变化后的页内重算：结果页保持挂载，只叠加提示，避免卸载正在编辑的表单
   const [isRecomputing, setIsRecomputing] = useState(false);
-  const [mode, setMode] = useState<HistogramMode>('percent');
-  const [binWidthStr, setBinWidthStr] = useState(String(DEFAULT_BIN_WIDTH));
-  const [station, setStation] = useState('all');
-  const [excludeFail, setExcludeFail] = useState(true);
+  const [mode, setMode] = useState<HistogramMode>(restored?.mode ?? 'percent');
+  const [binWidthStr, setBinWidthStr] = useState(restored?.binWidthStr ?? String(DEFAULT_BIN_WIDTH));
+  const [station, setStation] = useState(restored?.station ?? 'all');
+  const [excludeFail, setExcludeFail] = useState(restored?.excludeFail ?? true);
   // 流式过程中已到达的正文
   const [streamingAdvice, setStreamingAdvice] = useState('');
   const processGenRef = useRef(0);
@@ -45,6 +127,38 @@ const TtTimeTool: React.FC = () => {
     },
     [],
   );
+
+  // 会话缓存：只存 uploadId 与参数，结果由后端按 uploadId 重算。
+  // 误退出模块再回来时据此恢复，不必重新选文件、重新上传。
+  useEffect(() => {
+    if (!currentUploadId) {
+      clearCachedSession();
+      return;
+    }
+    writeCachedSession({
+      uploadId: currentUploadId,
+      fileName,
+      binWidthStr,
+      station,
+      excludeFail,
+      activeModule,
+      mode,
+    });
+  }, [currentUploadId, fileName, binWidthStr, station, excludeFail, activeModule, mode]);
+
+  // 去重键：上传完成或参数变化后，同一组参数只发起一次后端计算
+  const lastProcessedRef = useRef('');
+  // ref 写入统一走这三个回调：效果/事件里直接改 ref 会被 React Compiler 的
+  // immutability 规则判为"在渲染期修改"
+  const invalidateInFlight = useCallback(() => {
+    processGenRef.current += 1;
+  }, []);
+  const markProcessed = useCallback((key: string) => {
+    lastProcessedRef.current = key;
+  }, []);
+  const clearProcessed = useCallback(() => {
+    lastProcessedRef.current = '';
+  }, []);
 
   const binWidth = useMemo(() => {
     const n = Number(binWidthStr.trim());
@@ -73,16 +187,23 @@ const TtTimeTool: React.FC = () => {
       } catch (err: unknown) {
         if (gen !== processGenRef.current) return;
         setIsRecomputing(false);
-        const msg =
-          err instanceof Error
-            ? err.message
-            : (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-              '后端数据处理失败';
+        const { status, detail } = readHttpError(err);
+        const msg = err instanceof Error ? err.message : detail || '后端数据处理失败';
+        // 恢复的会话可能已随上传文件过期：退回上传页并清掉缓存，而不是停在一个永远失败的页面上
+        if (status === 404 || status === 410) {
+          setCurrentUploadId('');
+          setFileName('');
+          setProcessData(null);
+          clearProcessed();
+          setErrorMessage('上次的上传文件已失效，请重新选择文件');
+          setPhase('upload');
+          return;
+        }
         setErrorMessage(String(msg));
         setPhase('ready');
       }
     },
-    [],
+    [clearProcessed],
   );
 
   const tusUpload = useTusUpload({
@@ -120,18 +241,6 @@ const TtTimeTool: React.FC = () => {
   // ① 去重键含参数，处理完成把 phase 置回 ready 不会再次触发同一 uploadId 的
   //    全量计算（旧实现因此对每次上传都发两遍相同请求）；
   // ② 300ms 定时器把分箱宽度输入期间的逐字触发收敛成一次请求。
-  const lastProcessedRef = useRef('');
-  // ref 写入统一走这三个回调：效果/事件里直接改 ref 会被 React Compiler 的
-  // immutability 规则判为"在渲染期修改"
-  const invalidateInFlight = useCallback(() => {
-    processGenRef.current += 1;
-  }, []);
-  const markProcessed = useCallback((key: string) => {
-    lastProcessedRef.current = key;
-  }, []);
-  const clearProcessed = useCallback(() => {
-    lastProcessedRef.current = '';
-  }, []);
   useEffect(() => {
     if (!currentUploadId) return;
     const key = `${currentUploadId}|${binWidth}|${station}|${excludeFail}`;
@@ -240,10 +349,35 @@ const TtTimeTool: React.FC = () => {
   const llmBlockedReason = llmUnavailableReason(llmStatus);
 
   if (phase === 'upload' || phase === 'analyzing') {
-    const isUploading = tusUpload.status === 'uploading';
-    const progress = Math.round(tusUpload.progress);
+    // 大文件真正耗时的两段——计算指纹（hashing）和缓存检查（cache-checking）——以前没有任何反馈，
+    // 上传进度条只在上传阶段渲染，用户看到的是「选完文件后界面一动不动」。
+    // 四个阶段统一交给全屏进度浮层，和 OPP 的解析浮层保持一致。
+    const stage = tusUpload.status;
+    const isLoading =
+      stage === 'hashing' ||
+      stage === 'cache-checking' ||
+      stage === 'uploading' ||
+      stage === 'confirming';
+    const loadingMessage =
+      stage === 'hashing'
+        ? '正在校验文件指纹…'
+        : stage === 'cache-checking'
+          ? '正在查找服务端缓存…'
+          : stage === 'confirming'
+            ? '正在确认上传结果…'
+            : '正在上传文件…';
+    // 指纹与上传阶段有字节级进度；缓存检查/服务端确认是等待，进度给满
+    const loadingProgress = stage === 'hashing' || stage === 'uploading' ? tusUpload.progress / 100 : 1;
+    const progressText =
+      stage === 'hashing' || stage === 'uploading' ? `（${Math.round(tusUpload.progress)}%）` : '';
     return (
       <div className="mx-auto flex w-full max-w-2xl min-w-0 flex-col gap-6">
+        <LoadingOverlay
+          loading={isLoading}
+          progress={loadingProgress}
+          message={loadingMessage}
+          detail={fileName ? `${fileName}${progressText}` : undefined}
+        />
         <Card>
           <CardHeader>
             <CardTitle>上传测试日志</CardTitle>
@@ -258,23 +392,9 @@ const TtTimeTool: React.FC = () => {
               description="拖拽或点击选择 Export-*.csv、.xlsx 或 .xls 文件"
               accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
               file={null}
-              disabled={isUploading || phase === 'analyzing'}
+              disabled={isLoading || phase === 'analyzing'}
               onSelect={onFileSelect}
             />
-            {isUploading ? (
-              <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-4">
-                <div className="flex items-center justify-between text-xs font-medium">
-                  <span>正在极速上传文件...</span>
-                  <span>{progress}%</span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-primary transition-all duration-200"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </div>
-            ) : null}
             {phase === 'analyzing' ? (
               <div className="flex items-center justify-center gap-3 py-6 text-sm text-muted-foreground">
                 <LoadingSignal label="分析中" ariaLabel="后端 Polars 引擎正在分析数据" />
@@ -298,12 +418,6 @@ const TtTimeTool: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-4">
-      {isRecomputing ? (
-        <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
-          <LoadingSignal label="重算中" ariaLabel="后端正在按新参数重新计算" />
-          <span>正在按新参数重新计算...</span>
-        </div>
-      ) : null}
       {errorMessage ? (
         <Alert variant="destructive">
           <AlertDescription className="flex items-center gap-3">
@@ -320,6 +434,7 @@ const TtTimeTool: React.FC = () => {
       activeModule={activeModule}
       setActiveModule={setActiveModule}
       reset={reset}
+      isRecomputing={isRecomputing}
       excludeFail={excludeFail}
       setExcludeFail={setExcludeFail}
       mode={mode}
