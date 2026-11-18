@@ -1,6 +1,6 @@
 // 图表工作区（右侧）— 上：导出按钮行（导出全部 / 导出当前）+ 设置行（按图类型）· 下：图区（单图或 A/B 并排对比）+ CPK 统计
 // 支持 Histogram / CDF / TimeSeries / Correlation 四类，对齐 OPP 各设置面板
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Download, Maximize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -107,6 +107,13 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
     return getActive(datasetB, selectedName, settings, excludeFail);
   }, [shared, datasetB, selectedName, settings, excludeFail]);
   const activeCol = activeA?.analysis ?? activeB?.analysis ?? null;
+
+  // 切换测试项的统计与分箱在本次提交里已算完（图表子组件的 effect 先于这里执行），
+  // 这里负责收起加载层；只依赖数据/选项，避免 computing 自身变化时把加载层瞬间关掉。
+  useEffect(() => {
+    const state = useOppStore.getState();
+    if (state.computing) state.setComputing(false);
+  }, [datasetA, datasetB, selectedName, compareMode, settings, excludeFail]);
 
   const isCorr = view === 'correlation';
   // 两个数据源都存在（无论是否处于对比视图）：导出当前即导出 A/B 两张

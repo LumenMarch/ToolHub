@@ -27,6 +27,8 @@ interface OppState {
   compareMode: boolean;
   loading: boolean;
   progress: number;
+  /** 切换测试项后按列统计/分箱的重算进行中（大文件下这一步是同步阻塞的） */
+  computing: boolean;
   error: string;
   selectedName: string;
   query: string;
@@ -46,6 +48,7 @@ interface OppActions {
   setCompareMode: (v: boolean) => void;
   setLoading: (v: boolean) => void;
   setProgress: (v: number) => void;
+  setComputing: (v: boolean) => void;
   setError: (v: string) => void;
   setSelectedName: (v: string) => void;
   setQuery: (v: string) => void;
@@ -77,6 +80,23 @@ function applyItemSelection(
     selectedName: name,
     settings: { ...state.settings, upperRange: null, lowerRange: null },
   };
+}
+
+/** 测试项切换序号：连点时只让最后一次生效，避免排队跑多次全量统计。 */
+let selectionSeq = 0;
+
+/** 让加载层先上屏再切测试项。双击 rAF 保证至少绘制过一帧；后台标签页不跑 rAF 时用定时器兜底。 */
+function afterNextPaint(run: () => void): void {
+  let done = false;
+  const fire = () => {
+    if (done) return;
+    done = true;
+    run();
+  };
+  requestAnimationFrame(() => {
+    requestAnimationFrame(fire);
+  });
+  window.setTimeout(fire, 200);
 }
 
 async function parseFileViaWorker(file: File, onProgress?: (p: number) => void): Promise<ParsedDataset> {
@@ -150,6 +170,7 @@ const initialState: OppState = {
   compareMode: false,
   loading: false,
   progress: 0,
+  computing: false,
   error: '',
   selectedName: '',
   query: '',
@@ -183,8 +204,18 @@ export const useOppStore = create<OppStore>()(
       setCompareMode: (v) => set({ compareMode: v }),
       setLoading: (v) => set({ loading: v }),
       setProgress: (v) => set({ progress: v }),
+      setComputing: (v) => set({ computing: v }),
       setError: (v) => set({ error: v }),
-      setSelectedName: (v) => set((s) => applyItemSelection(s, v)),
+      setSelectedName: (v) => {
+        if (v === get().selectedName) return;
+        const seq = ++selectionSeq;
+        // 大文件下按列统计/分箱是同步计算：先显示加载层，下一帧再切测试项，避免点下去像卡死
+        set({ computing: true });
+        afterNextPaint(() => {
+          if (seq !== selectionSeq) return;
+          set((s) => applyItemSelection(s, v));
+        });
+      },
       setQuery: (v) => set({ query: v }),
       setCorrYName: (v) => set({ corrYName: v }),
       setChartType: (v) => set({ chartType: v }),
