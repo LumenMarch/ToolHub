@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import re
@@ -55,10 +56,14 @@ UPLOAD_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def cache_path(directory: Path, upload_id: str, suffix: str) -> Path:
-    """拼接解析缓存路径；非法上传 id 一律拒绝。"""
+    """拼接解析缓存路径。
+
+    文件名取上传 id 的 SHA-256：既不把请求参数直接拼进路径，也保证长度固定。
+    """
     if not UPLOAD_ID_RE.fullmatch(upload_id):
         raise OppParseError("非法上传标识")
-    return directory / f"{upload_id}.{suffix}"
+    digest = hashlib.sha256(upload_id.encode("utf-8")).hexdigest()
+    return directory / f"{digest}.{suffix}"
 
 
 class OppParseError(ValueError):
