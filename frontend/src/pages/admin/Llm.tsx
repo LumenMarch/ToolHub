@@ -22,7 +22,10 @@ const AdminLlm: React.FC = () => {
   const api = useAdminApi();
   const { has } = usePermission();
   const canProbe = has('llm_config:write');
-  const { data: status, refetch: refetchStatus } = useLlmStatus();
+  const { data: status, refetch: refetchStatus } = useLlmStatus({
+    probe: canProbe,
+    poll: true,
+  });
   const [config, setConfig] = useState<LlmConfigResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
