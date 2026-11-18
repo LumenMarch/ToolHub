@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import useOppStore from './store/useOppStore';
-import LoadingOverlay from './components/LoadingOverlay';
+import LoadingOverlay from '@/components/LoadingOverlay';
 import TestItemList from './components/TestItemList';
 import ChartWorkspace, { type ChartView } from './components/ChartWorkspace';
 import FileDropZone from '../../../components/FileDropZone';
@@ -41,6 +41,8 @@ const CpkChartsTool: React.FC = () => {
   const clearFileB = useOppStore((s) => s.clearFileB);
   const loading = useOppStore((s) => s.loading);
   const progress = useOppStore((s) => s.progress);
+  const computing = useOppStore((s) => s.computing);
+  const selectedName = useOppStore((s) => s.selectedName);
   const error = useOppStore((s) => s.error);
   const clearError = useOppStore((s) => s.setError);
   const hasB = datasetB !== null && datasetB.columns.length > 0;
@@ -187,7 +189,13 @@ const CpkChartsTool: React.FC = () => {
         </div>
       </div>
 
-      <LoadingOverlay loading={loading} progress={progress} />
+      <LoadingOverlay
+        loading={loading || computing}
+        // 解析 CSV 有字节级进度；切换测试项的统计/分箱没有进度，用不定态条
+        progress={loading ? progress : null}
+        message={loading ? '正在解析 CSV…' : '正在计算统计与图表…'}
+        detail={!loading && selectedName ? `测试项：${selectedName}` : undefined}
+      />
     </div>
   );
 };

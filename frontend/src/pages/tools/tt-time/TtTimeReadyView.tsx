@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select';
 import { Markdown } from '@/components/ui/markdown';
 import { Spinner } from '@/components/ui/spinner';
+import { LoadingSignal } from '@/components/LoadingSignal';
 import {
   TtHistogramChart,
   TtPercentCurveChart,
@@ -46,6 +47,8 @@ export type TtTimeReadyViewProps = {
   activeModule: ActiveModule;
   setActiveModule: (m: ActiveModule) => void;
   reset: () => void;
+  /** 参数变化后的后端重算进行中：图表区显示加载层，避免看起来像没响应 */
+  isRecomputing: boolean;
   excludeFail: boolean;
   setExcludeFail: (v: boolean) => void;
   mode: HistogramMode;
@@ -194,6 +197,7 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
   activeModule,
   setActiveModule,
   reset,
+  isRecomputing,
   excludeFail,
   setExcludeFail,
   mode,
@@ -223,9 +227,15 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
           </span>
         </div>
         <ModuleTabs activeModule={activeModule} onSelect={setActiveModule} />
-        <Button type="button" variant="outline" size="sm" onClick={reset}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={reset}
+          title="清除当前数据集与恢复记录，重新选择文件"
+        >
           <RefreshCw data-icon="inline-start" />
-          重新上传
+          重置
         </Button>
       </div>
 
@@ -249,6 +259,7 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
         </div>
       </div>
 
+      <div className="relative flex min-w-0 flex-col gap-6" aria-busy={isRecomputing || undefined}>
       {activeModule === 'distribution' ? (
         <div className="flex flex-col gap-6">
           <Card>
@@ -361,6 +372,20 @@ export const TtTimeReadyView: React.FC<TtTimeReadyViewProps> = ({
         fileName={fileName}
         allStationBoxGroups={allStationBoxGroups}
       />
+
+      {/* 参数变化后的重算要几秒：在图表区盖一层加载层，否则切换 Station ID 看起来像没反应 */}
+      {isRecomputing ? (
+        <div className="absolute inset-0 z-10 flex items-start justify-center rounded-xl bg-background/60 backdrop-blur-[2px]">
+          <div className="mt-16 rounded-lg border bg-card px-4 py-3 shadow-md">
+            <LoadingSignal
+              label="正在重算…"
+              detail="按当前 Station ID / 过滤条件重新计算"
+              ariaLabel="后端正在按新参数重新计算测试时间数据"
+            />
+          </div>
+        </div>
+      ) : null}
+      </div>
     </div>
   );
 };
