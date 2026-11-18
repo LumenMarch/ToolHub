@@ -621,7 +621,7 @@ const AtlasMerge: React.FC = () => {
   /** 轮询瞬时失败的可重试提示：非空时保留 jobId 与 analyzing 阶段，不退回上传 */
   const [pollRetryMessage, setPollRetryMessage] = useState('');
   const [downloadError, setDownloadError] = useState('');
-  const [exportFormat, setExportFormat] = useState<ExportFormat>('pivot_to_wide');
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('insight');
   const [isDownloading, setIsDownloading] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [isExpired, setIsExpired] = useState(false);

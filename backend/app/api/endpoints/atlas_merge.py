@@ -49,10 +49,10 @@ class AtlasMergeAnalyzeRequest(BaseModel):
 
     upload_id: str = Field(..., min_length=1, description="unit-archive zip 上传 ID")
     export_format: Literal["pivot_to_wide", "insight"] = Field(
-        "pivot_to_wide",
+        "insight",
         description=(
-            "导出格式：pivot_to_wide（默认，兼容既有 pivot_to_wide.py 脚本）"
-            "或 insight（HILO Export-ID 标准布局，供 retest-rate/tt-time 直接消费）"
+            "导出格式：insight（默认，HILO Export-ID 标准布局，供 retest-rate/tt-time 直接消费）"
+            "或 pivot_to_wide（兼容既有 pivot_to_wide.py 脚本）"
         ),
     )
 
