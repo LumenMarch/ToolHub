@@ -6,7 +6,7 @@
   RunTime（time.csv DeviceStartStop StartTime，测试起始 Unix 秒）构造，
   时长精确保持；
 - 失败项分隔符逗号 → 分号（对齐 HILO 原生导出与 retest-rate 归因口径）；
-- 默认 pivot_to_wide 输出（csv_text）结构回归；
+- pivot_to_wide 输出（csv_text）结构回归；
 - 端到端：insight 输出被 retest-rate 直接分析、时间串满足 tt-time 解析格式。
 """
 
@@ -144,8 +144,8 @@ def test_insight_failing_tests_use_semicolon():
     assert grid[9][11] == "Current;OverVoltage"
 
 
-def test_default_csv_text_layout_unchanged():
-    """默认 pivot_to_wide 导出必须保持既有四行范式结构。"""
+def test_pivot_to_wide_layout_unchanged():
+    """pivot_to_wide 导出必须保持既有四行范式结构。"""
     text = csv_text(_report(_sample_rows()))
     grid = _grid(text)
     assert grid[0][:8] == [

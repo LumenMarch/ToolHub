@@ -76,8 +76,8 @@ class JobEntry:
     job_id: str
     user_id: int
     upload_id: str
-    # 导出格式（issue #75）：pivot_to_wide（默认）或 insight
-    export_format: str = "pivot_to_wide"
+    # 导出格式（issue #75）：insight（默认）或 pivot_to_wide
+    export_format: str = "insight"
     status: str = STATUS_QUEUED
     done: int = 0
     total: int = 0
@@ -105,7 +105,7 @@ class AtlasMergeJobRegistry:
         *,
         user_id: int,
         upload_id: str,
-        export_format: str = "pivot_to_wide",
+        export_format: str = "insight",
         request: Request | None = None,
     ) -> str:
         """创建 queued job 并提交后台执行，返回 job_id。"""

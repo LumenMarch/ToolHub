@@ -1,6 +1,6 @@
 """把 MergedReport 序列化为输出 CSV。
 
-- ``csv_text``：pivot_to_wide.py 兼容的四行范式 CSV（默认格式，移植自
+- ``csv_text``：pivot_to_wide.py 兼容的四行范式 CSV（可选格式，移植自
   Swift ReportExporter.swift，结构必须保持字节级稳定）。
   行1 列名 / 行2 Upper Limit / 行3 Lower Limit / 行4 Measurement Unit / 行5+ 数据行。
 - ``insight_csv_text``：insight/Export-ID（HILO 标准导出）格式，供
