@@ -25,19 +25,47 @@ export const llmAvailabilityQueryOptions = queryOptions({
  * staleTime 取 30 秒：状态里带探活，探活在后端按 TTL 复用，但前端也没必要
  * 每次挂载都打一次 —— 工具页来回切换时这份数据基本不变。
  */
-export const llmStatusQueryOptions = queryOptions({
-  queryKey: llmStatusQueryKey,
-  queryFn: () => api.get<LlmStatus>('/llm/status').then((r) => r.data),
-  staleTime: 30 * 1000,
-  retry: 1,
-});
+export function llmStatusQueryOptions(probe = false) {
+  return queryOptions({
+    queryKey: llmStatusQueryKey,
+    queryFn: () =>
+      api
+        .get<LlmStatus>('/llm/status', {
+          params: probe ? { probe: true } : undefined,
+        })
+        .then((r) => r.data),
+    staleTime: 30 * 1000,
+    retry: 1,
+  });
+}
+
+/** 状态页在前台时的刷新间隔；标签页隐藏后由 React Query 自动暂停。 */
+export const LLM_STATUS_REFETCH_INTERVAL_MS = 60 * 1000;
 
 export function useLlmAvailability() {
   return useQuery(llmAvailabilityQueryOptions);
 }
 
-export function useLlmStatus() {
-  return useQuery(llmStatusQueryOptions);
+/**
+ * 管理台状态查询。
+ *
+ * - probe=true：请求带 `?probe=true` 的软探活，后端仍按 TTL 复用，不会每次
+ *   打开页面都打上游；仅持有 llm_config:write 的调用方应开启。
+ * - poll=true：页面可见且处于前台时每 60 秒刷新一次；后台标签页不轮询。
+ *
+ * 不使用 `/admin/llm/probe`（force=true）：那是手动“测试连接”的强制探活，
+ * 会绕过 TTL 并受 6 次/分钟限流，不适合页面自动触发。
+ */
+export function useLlmStatus(
+  { probe = false, poll = false }: { probe?: boolean; poll?: boolean } = {},
+) {
+  return useQuery({
+    ...llmStatusQueryOptions(probe),
+    // 每次进入页面都取一次；探活是否真的打到上游由网关 TTL 决定。
+    refetchOnMount: probe ? 'always' : true,
+    refetchInterval: poll ? LLM_STATUS_REFETCH_INTERVAL_MS : false,
+    refetchIntervalInBackground: false,
+  });
 }
 
 /** 管理员改完模型配置后，所有在线的工具页应立即重估按钮状态。 */
