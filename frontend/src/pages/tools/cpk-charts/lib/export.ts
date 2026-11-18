@@ -27,12 +27,15 @@ import {
   formatIndex,
   formatTick,
   formatValue,
+  correlationPoints,
   pearsonCorrelation,
   type ChartSettings,
   type ColumnAnalysis,
+  type ColumnValues,
+  type CorrelationPair,
+  type TestColumn,
 } from './stats';
-import { getEffectiveRawRows, type ParsedDataset } from './csv';
-import type { CorrelationPair } from '../components/CorrelationChart';
+import { loadColumn, type ParsedDataset } from './dataset';
 import { pow10Interval } from './layout';
 
 const TEXT_COLOR = '#000000';
@@ -327,17 +330,10 @@ export function renderTimeSeriesSvg(analysis: ColumnAnalysis, settings: ChartSet
 
 export function renderCorrelationSvg(pair: CorrelationPair, settings: ChartSettings = DEFAULT_CHART_SETTINGS): string {
   const s = settings;
-  const pts: Array<{ x: number; y: number }> = [];
-  const n0 = Math.min(pair.rawX.length, pair.rawY.length);
-  for (let i = 0; i < n0; i += 1) {
-    // 空白单元格按缺失处理：Number('') === 0 会伪造零值散点（与组件端过滤一致）
-    if (pair.rawX[i].trim() === '' || pair.rawY[i].trim() === '') continue;
-    const x = Number(pair.rawX[i]);
-    const y = Number(pair.rawY[i]);
-    if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x, y });
-  }
-  const xs = pts.map((q) => q.x);
-  const ys = pts.map((q) => q.y);
+  const points = correlationPoints(pair);
+  const xs = points.xs;
+  const ys = points.ys;
+  const pts = xs.map((x, i) => ({ x, y: ys[i] }));
   const domainOf = (vals: number[], lo: number | null, hi: number | null): [number, number] => {
     let dlo = vals.length ? Math.min(...vals) : 0;
     let dhi = vals.length ? Math.max(...vals) : 1;
@@ -490,12 +486,11 @@ export async function exportChartPng(analysis: ColumnAnalysis, settings: ChartSe
  * 输出 zip，文件名为 `<prefix>_<序号>_<测试项>.png`。
  */
 interface NameEntrySrc {
-  src: { prefix: string };
+  src: { prefix: string; dataset: ParsedDataset };
   idx: number;
-  effUpper: number | null;
-  effLower: number | null;
-  raw: string[];
-  columnEff: ParsedDataset['columns'][number];
+  columnEff: TestColumn;
+  data: ColumnValues;
+  mask: Uint8Array | null;
 }
 interface NameEntry {
   name: string;
@@ -511,7 +506,18 @@ async function renderNameEntry(
   const { name, entries } = ne;
   if (entries.length === 2 && canShare) {
     const a = entries[0]!, b = entries[1]!;
-    const pair = analyzeColumnPair(a.columnEff, a.raw, b.columnEff, b.raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
+    const pair = analyzeColumnPair(
+      a.columnEff,
+      a.data,
+      a.mask,
+      b.columnEff,
+      b.data,
+      b.mask,
+      settings.binCount,
+      settings.lowerRange,
+      settings.upperRange,
+      settings.showLimits,
+    );
     const make = async (analysis: ColumnAnalysis, pre: string, idx: number) => {
       const svg = renderHistogramSvg(analysis, settings);
       const png = await svgToPng(svg);
@@ -522,7 +528,15 @@ async function renderNameEntry(
   }
   // 单侧（entries 最多 2：A/B 各自一条），显式展开避免循环内 await
   const r1 = async (en: NameEntrySrc) => {
-    const analysis = analyzeColumn(en.columnEff, en.raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits);
+    const analysis = analyzeColumn(
+      en.columnEff,
+      en.data,
+      en.mask,
+      settings.binCount,
+      settings.lowerRange,
+      settings.upperRange,
+      settings.showLimits,
+    );
     const svg = renderHistogramSvg(analysis, settings);
     const png = await svgToPng(svg);
     const bytes = new Uint8Array(await png.arrayBuffer());
@@ -531,6 +545,30 @@ async function renderNameEntry(
   if (entries.length === 1) return [await r1(entries[0]!)];
   if (entries.length === 2) return [await r1(entries[0]!), await r1(entries[1]!)];
   return [];
+}
+
+/** 某个测试项在某个数据源上的导出上下文（含列数据，按上传缓存复用）。 */
+async function buildNameEntrySrc(
+  name: string,
+  src: { dataset: ParsedDataset; prefix: string },
+  settings: ChartSettings,
+  excludeFail: boolean,
+): Promise<NameEntrySrc | null> {
+  const idx = src.dataset.columns.findIndex((c) => c.name === name);
+  if (idx < 0) return null;
+  const col = src.dataset.columns[idx];
+  const data = await loadColumn(src.dataset, idx);
+  return {
+    src,
+    idx,
+    columnEff: {
+      ...col,
+      upper: settings.upperLimit !== null ? settings.upperLimit : col.upper,
+      lower: settings.lowerLimit !== null ? settings.lowerLimit : col.lower,
+    },
+    data,
+    mask: excludeFail ? src.dataset.statusPass : null,
+  };
 }
 
 export async function exportComparedByName(
@@ -542,21 +580,13 @@ export async function exportComparedByName(
 ): Promise<string> {
   // 当双源且同名 Item 同时存在时，使用共享 X 轴域，保证两图刻度完全一致
   const canShare = sources.length === 2;
-  // 预构建每个 name 对应的源信息（含有效列与手动规格限覆盖）
+  const filterNull = (value: NameEntrySrc | null): value is NameEntrySrc => value !== null;
   const nameEntries: NameEntry[] = [];
   for (const name of names) {
-    const entries: NameEntry['entries'] = [];
-    for (const src of sources) {
-      const idx = src.dataset.columns.findIndex((c) => c.name === name);
-      if (idx >= 0) {
-        const col = src.dataset.columns[idx];
-        const effUpper = settings.upperLimit !== null ? settings.upperLimit : col.upper;
-        const effLower = settings.lowerLimit !== null ? settings.lowerLimit : col.lower;
-        const columnEff = { ...col, upper: effUpper, lower: effLower };
-        const raw = getEffectiveRawRows(src.dataset, idx, excludeFail);
-        entries.push({ src, idx, effUpper, effLower, raw, columnEff });
-      }
-    }
+    const loaded = await Promise.all(
+      sources.map((src) => buildNameEntrySrc(name, src, settings, Boolean(excludeFail))),
+    );
+    const entries = loaded.filter(filterNull);
     if (entries.length > 0) nameEntries.push({ name, entries });
   }
 

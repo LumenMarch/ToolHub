@@ -70,13 +70,45 @@ export interface ColumnAnalysis {
   hasLimits: boolean;
 }
 
-const NA_TOKENS = new Set(['', 'na', 'n/a', 'none', 'null']);
-
-/** 是否为空白/NA（Empty）。 */
-export function isEmptyValue(raw: string): boolean {
-  const v = raw.trim();
-  return v.length === 0 || NA_TOKENS.has(v.toLowerCase());
+/** 后端下发的列数据：values 中的 NaN 表示该单元没有可解析数值。 */
+export interface ColumnValues {
+  values: Float64Array;
+  /** 1 = 该行有内容且不是 NA 标记（Data Count 依据） */
+  nonEmpty: Uint8Array;
 }
+
+interface ParsedValues {
+  values: number[];
+  binValues: number[];
+  naCount: number;
+  valueCount: number;
+}
+
+/** 按状态掩码过滤后，把列数据拆成“有效数值 / 空值 / 有内容无值”三类计数。 */
+function prepareValues(data: ColumnValues, includeMask: Uint8Array | null): ParsedValues {
+  const values: number[] = [];
+  let naCount = 0;
+  let valueCount = 0;
+  for (let i = 0; i < data.values.length; i += 1) {
+    if (includeMask !== null && includeMask[i] === 0) continue;
+    if (data.nonEmpty[i] === 0) {
+      naCount += 1;
+      continue;
+    }
+    valueCount += 1;
+    const v = data.values[i];
+    if (Number.isFinite(v)) values.push(v);
+  }
+  const binValues =
+    values.length > 0
+      ? values
+      : valueCount > 0
+        ? new Array<number>(valueCount).fill(0)
+        : values;
+  return { values, binValues, naCount, valueCount };
+}
+
+const NA_TOKENS = new Set(['', 'na', 'n/a', 'none', 'null']);
 
 /** 解析单元格：非数值返回 null。 */
 export function parseCell(raw: string): number | null {
@@ -212,9 +244,11 @@ export function computeBins(
  */
 export function analyzeColumnPair(
   columnA: TestColumn,
-  rawA: string[],
+  dataA: ColumnValues,
+  maskA: Uint8Array | null,
   columnB: TestColumn,
-  rawB: string[],
+  dataB: ColumnValues,
+  maskB: Uint8Array | null,
   binCount: number | null = 75,
   rangeLo: number | null = null,
   rangeHi: number | null = null,
@@ -231,22 +265,8 @@ export function analyzeColumnPair(
     return la ?? lb;
   })();
 
-  const parseOne = (rawValues: string[]) => {
-    const values: number[] = [];
-    let naCount = 0;
-    let valueCount = 0;
-    for (const raw of rawValues) {
-      if (isEmptyValue(raw)) { naCount += 1; continue; }
-      valueCount += 1;
-      const v = parseCell(raw);
-      if (v !== null) values.push(v);
-    }
-    const binValues = values.length > 0 ? values : valueCount > 0 ? new Array<number>(valueCount).fill(0) : values;
-    return { values, binValues, naCount, valueCount };
-  };
-
-  const pA = parseOne(rawA);
-  const pB = parseOne(rawB);
+  const pA = prepareValues(dataA, maskA);
+  const pB = prepareValues(dataB, maskB);
 
   // 按 computeBins 的 floor/ceil 逻辑计算合并数据域
   const combinedBinValues = [...pA.binValues, ...pB.binValues];
@@ -387,31 +407,19 @@ export function analyzeColumnPair(
 /** 单测试项全量分析。 */
 export function analyzeColumn(
   column: TestColumn,
-  rawValues: string[],
+  data: ColumnValues,
+  includeMask: Uint8Array | null,
   binCount: number | null = 75,
   rangeLo: number | null = null,
   rangeHi: number | null = null,
   displayLimits: boolean = true,
 ): ColumnAnalysis {
-  const values: number[] = [];
-  let naCount = 0; // 空白 / Empty 行数
-  let valueCount = 0; // 有内容（非空）的行数 —— Data Count 依据
-  for (const raw of rawValues) {
-    if (isEmptyValue(raw)) {
-      naCount += 1;
-      continue;
-    }
-    valueCount += 1;
-    const v = parseCell(raw);
-    if (v !== null) values.push(v);
-  }
+  const { values, binValues, naCount, valueCount } = prepareValues(data, includeMask);
 
   const n = valueCount; // Data Count：有值行数（SerialNumber 等文本列也正常计数）
   const vN = values.length;
   const m = mean(values);
   const s = stdDev(values, m);
-  // 有内容但无有效数值的列（如 SerialNumber 文本列）：按单 bin 于 x=0 显示满柱（Y 轴反映 Data Count）
-  const binValues = values.length > 0 ? values : valueCount > 0 ? new Array<number>(valueCount).fill(0) : values;
   const { bins, domain, dataDomain } = computeBins(binValues, column.upper, column.lower, binCount, rangeLo, rangeHi, displayLimits);
 
   let failureCount = 0;
@@ -536,6 +544,39 @@ export function pearsonCorrelation(
     r = Number.isFinite(val) ? val : null;
   }
   return { r, slope, intercept, n };
+}
+
+/** 相关散点数据：values/nonEmpty 按行对齐，includeMask 用于状态过滤。 */
+export interface CorrelationPair {
+  xName: string;
+  yName: string;
+  valuesX: Float64Array;
+  valuesY: Float64Array;
+  nonEmptyX: Uint8Array;
+  nonEmptyY: Uint8Array;
+  includeMask: Uint8Array | null;
+  xUpper: number | null;
+  xLower: number | null;
+  yUpper: number | null;
+  yLower: number | null;
+}
+
+/** 取出可用于回归/散点的 (x, y) 配对样本：跳过状态过滤、NA 与非数值。 */
+export function correlationPoints(pair: CorrelationPair): { xs: number[]; ys: number[] } {
+  const n = Math.min(pair.valuesX.length, pair.valuesY.length);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < n; i += 1) {
+    if (pair.includeMask !== null && pair.includeMask[i] === 0) continue;
+    if (pair.nonEmptyX[i] === 0 || pair.nonEmptyY[i] === 0) continue;
+    const x = pair.valuesX[i];
+    const y = pair.valuesY[i];
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      xs.push(x);
+      ys.push(y);
+    }
+  }
+  return { xs, ys };
 }
 
 /** 图表显示设置（对齐 OPP 直方图设置面板）。 */

@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { getEffectiveRawRows, parseTestCsv, type ParsedDataset } from '../lib/csv';
-import { analyzeColumn, analyzeColumnPair, DEFAULT_CHART_SETTINGS, type ChartSettings, type ColumnAnalysis } from '../lib/stats';
-import type { CorrelationPair } from '../components/CorrelationChart';
-import { shortName } from '../lib/stats';
+import {
+  clearColumnCache,
+  parseOppDataset,
+  uploadOppFile,
+  type ParsedDataset,
+} from '../lib/dataset';
+import { DEFAULT_CHART_SETTINGS, type ChartSettings } from '../lib/stats';
 
 /** 并集项：对齐 index.tsx 的 MergeItem */
 export interface MergeItem {
@@ -99,66 +102,39 @@ function afterNextPaint(run: () => void): void {
   window.setTimeout(fire, 200);
 }
 
-async function parseFileViaWorker(file: File, onProgress?: (p: number) => void): Promise<ParsedDataset> {
-  // 大文件走 Worker，小文件直接解析，避免 Worker 开销
-  const THRESHOLD = 5 * 1024 * 1024; // 5MB
-  if (file.size > THRESHOLD && typeof Worker !== 'undefined') {
-    try {
-      const buf = await file.arrayBuffer();
-      return await new Promise<ParsedDataset>((resolve, reject) => {
-        const worker = new Worker(new URL('../workers/csv.worker.ts', import.meta.url), { type: 'module' });
-        const id = String(Date.now()) + Math.random().toString(16).slice(2);
-        // 无进度心跳超时：每条 progress 重置计时器，避免大文件解析总时长超 30s 被误杀
-        let timeout: ReturnType<typeof setTimeout>;
-        const arm = (): void => {
-          clearTimeout(timeout);
-          timeout = setTimeout(() => {
-            worker.terminate();
-            reject(new Error('Worker 解析超时'));
-          }, 30000);
-        };
-        arm();
-        worker.onmessage = (e: MessageEvent) => {
-          const data = e.data as { id: string; type: string; progress?: number; dataset?: ParsedDataset; error?: string };
-          if (data.id !== id) return;
-          if (data.type === 'progress' && typeof data.progress === 'number') {
-            arm();
-            onProgress?.(data.progress);
-          } else if (data.type === 'done' && data.dataset) {
-            clearTimeout(timeout);
-            worker.terminate();
-            // 与主线程路径一致：无有效数值列时报错而非静默成功
-            if (data.dataset.columns.length === 0) {
-              reject(new Error('未找到含数值的测试项列'));
-              return;
-            }
-            resolve(data.dataset);
-          } else if (data.type === 'error') {
-            clearTimeout(timeout);
-            worker.terminate();
-            reject(new Error(data.error || 'Worker 解析失败'));
-          }
-        };
-        worker.onerror = (ev) => {
-          clearTimeout(timeout);
-          worker.terminate();
-          reject(new Error(ev.message || 'Worker 异常'));
-        };
-        // 传递 ArrayBuffer（可转移）
-        worker.postMessage({ id, buffer: buf, fileName: file.name }, [buf]);
-      });
-    } catch {
-      // 回落到主线程解析
-    }
-  }
-  const text = await file.text();
-  const ds = parseTestCsv(text);
-  if (ds.columns.length === 0) throw new Error('未找到含数值的测试项列');
-  return ds;
+let uploadAbortA: (() => void) | null = null;
+let uploadAbortB: (() => void) | null = null;
+
+function startUpload(
+  file: File,
+  onProgress: (percent: number) => void,
+): { promise: Promise<string>; abort: () => void } {
+  let abort = () => {};
+  const promise = new Promise<string>((resolve, reject) => {
+    abort = uploadOppFile(file, { onProgress, onSuccess: resolve, onError: reject });
+  });
+  return { promise, abort };
 }
 
 // WeakMap 键占位（无数据集时的稳定引用）
-const EMPTY_DATASET: ParsedDataset = { title: '', records: 0, columns: [], rows: [], skippedColumns: [], allColumns: [] };
+const EMPTY_DATASET: ParsedDataset = {
+  uploadId: '',
+  title: '',
+  records: 0,
+  columns: [],
+  skippedColumns: [],
+  allColumns: [],
+  hasFailRecords: false,
+  statusPass: null,
+  headerRowIndex: -1,
+  dataStartRow: 0,
+  snColumn: null,
+  startTimeColumn: null,
+  endTimeColumn: null,
+  lowerLimitRow: null,
+  upperLimitRow: null,
+  unitRow: null,
+};
 
 const initialState: OppState = {
   fileA: null,
@@ -223,9 +199,14 @@ export const useOppStore = create<OppStore>()(
       setSettings: (s) => set({ settings: s }),
       setExcludeFail: (v) => set({ excludeFail: v }),
       loadFileA: async (file: File) => {
+        uploadAbortA?.();
         set({ error: '', fileA: file, loading: true, progress: 0, fileNameA: file.name });
+        const upload = startUpload(file, (percent) => set({ progress: percent / 100 }));
+        uploadAbortA = upload.abort;
         try {
-          const ds = await parseFileViaWorker(file, (p) => set({ progress: p }));
+          const uploadId = await upload.promise;
+          const ds = await parseOppDataset(uploadId, file.name);
+          clearColumnCache(uploadId);
           set({ datasetA: ds, progress: 1 });
           // 自动选中首项（若当前未选中或不存在）
           const state = get();
@@ -234,13 +215,19 @@ export const useOppStore = create<OppStore>()(
         } catch (e) {
           set({ error: e instanceof Error ? e.message : 'CSV 解析失败' });
         } finally {
+          if (uploadAbortA === upload.abort) uploadAbortA = null;
           set({ loading: false });
         }
       },
       loadFileB: async (file: File) => {
+        uploadAbortB?.();
         set({ error: '', fileB: file, loading: true, progress: 0, fileNameB: file.name });
+        const upload = startUpload(file, (percent) => set({ progress: percent / 100 }));
+        uploadAbortB = upload.abort;
         try {
-          const ds = await parseFileViaWorker(file, (p) => set({ progress: p }));
+          const uploadId = await upload.promise;
+          const ds = await parseOppDataset(uploadId, file.name);
+          clearColumnCache(uploadId);
           set({ datasetB: ds, progress: 1 });
           // 与 loadFileA 相同的兜底选择：仅加载 B（或 A 已清空）时自动选中首项
           const state = get();
@@ -249,12 +236,34 @@ export const useOppStore = create<OppStore>()(
         } catch (e) {
           set({ error: e instanceof Error ? e.message : 'CSV 解析失败' });
         } finally {
+          if (uploadAbortB === upload.abort) uploadAbortB = null;
           set({ loading: false });
         }
       },
-      clearFileA: () => set({ fileA: null, datasetA: null, fileNameA: '' }),
-      clearFileB: () => set({ fileB: null, datasetB: null, fileNameB: '' }),
-      reset: () => set({ ...initialState, settings: { ...DEFAULT_CHART_SETTINGS } }),
+      clearFileA: () => {
+        uploadAbortA?.();
+        uploadAbortA = null;
+        const current = get().datasetA;
+        if (current?.uploadId) clearColumnCache(current.uploadId);
+        set({ fileA: null, datasetA: null, fileNameA: '', progress: 0 });
+      },
+      clearFileB: () => {
+        uploadAbortB?.();
+        uploadAbortB = null;
+        const current = get().datasetB;
+        if (current?.uploadId) clearColumnCache(current.uploadId);
+        set({ fileB: null, datasetB: null, fileNameB: '', progress: 0 });
+      },
+      reset: () => {
+        uploadAbortA?.();
+        uploadAbortB?.();
+        uploadAbortA = null;
+        uploadAbortB = null;
+        const { datasetA, datasetB } = get();
+        if (datasetA?.uploadId) clearColumnCache(datasetA.uploadId);
+        if (datasetB?.uploadId) clearColumnCache(datasetB.uploadId);
+        set({ ...initialState, settings: { ...DEFAULT_CHART_SETTINGS } });
+      },
     }),
     {
       name: 'opp:store',
@@ -375,63 +384,6 @@ export function getFiltered(state: OppState): MergeItem[] {
   if (byQ.size > 0 && !byQ.has(q)) byQ.clear();
   byQ.set(q, out);
   return out;
-}
-
-export function getActive(
-  dataset: ParsedDataset | null,
-  selectedName: string,
-  settings: ChartSettings,
-  excludeFail?: boolean,
-): { index: number; analysis: ColumnAnalysis } | null {
-  if (!dataset || !selectedName) return null;
-  const idx = dataset.columns.findIndex((c) => c.name === selectedName);
-  if (idx < 0) return null;
-  const column = dataset.columns[idx];
-  const eff = {
-    ...column,
-    upper: settings.upperLimit !== null ? settings.upperLimit : column.upper,
-    lower: settings.lowerLimit !== null ? settings.lowerLimit : column.lower,
-  };
-  const raw = getEffectiveRawRows(dataset, idx, excludeFail);
-  return { index: idx, analysis: analyzeColumn(eff, raw, settings.binCount, settings.lowerRange, settings.upperRange, settings.showLimits) };
-}
-
-export function getCorrPair(
-  dataset: ParsedDataset | null,
-  selectedName: string,
-  corrYName: string,
-  settings: ChartSettings,
-  excludeFail?: boolean,
-): CorrelationPair | null {
-  if (!dataset || !selectedName || !corrYName || corrYName === selectedName) return null;
-  const ix = dataset.columns.findIndex((c) => c.name === selectedName);
-  const iy = dataset.columns.findIndex((c) => c.name === corrYName);
-  if (ix < 0 || iy < 0) return null;
-  return {
-    xName: shortName(selectedName),
-    yName: shortName(corrYName),
-    rawX: getEffectiveRawRows(dataset, ix, excludeFail),
-    rawY: getEffectiveRawRows(dataset, iy, excludeFail),
-    xUpper: settings.upperLimit !== null ? settings.upperLimit : dataset.columns[ix].upper,
-    xLower: settings.lowerLimit !== null ? settings.lowerLimit : dataset.columns[ix].lower,
-    yUpper: dataset.columns[iy].upper,
-    yLower: dataset.columns[iy].lower,
-  };
-}
-
-export function getSharedPair(state: OppState): { idxA: number; idxB: number; pair: { a: ColumnAnalysis; b: ColumnAnalysis } } | null {
-  if (!state.compareMode || !state.selectedName || !state.datasetA || !state.datasetB) return null;
-  const idxA = state.datasetA.columns.findIndex((c) => c.name === state.selectedName);
-  const idxB = state.datasetB.columns.findIndex((c) => c.name === state.selectedName);
-  if (idxA < 0 || idxB < 0) return null;
-  const colA = state.datasetA.columns[idxA];
-  const colB = state.datasetB.columns[idxB];
-  const effA = { ...colA, upper: state.settings.upperLimit !== null ? state.settings.upperLimit : colA.upper, lower: state.settings.lowerLimit !== null ? state.settings.lowerLimit : colA.lower };
-  const effB = { ...colB, upper: state.settings.upperLimit !== null ? state.settings.upperLimit : colB.upper, lower: state.settings.lowerLimit !== null ? state.settings.lowerLimit : colB.lower };
-  const rawA = getEffectiveRawRows(state.datasetA, idxA, state.excludeFail);
-  const rawB = getEffectiveRawRows(state.datasetB, idxB, state.excludeFail);
-  const pair = analyzeColumnPair(effA, rawA, effB, rawB, state.settings.binCount, state.settings.lowerRange, state.settings.upperRange, state.settings.showLimits);
-  return { idxA, idxB, pair };
 }
 
 export default useOppStore;

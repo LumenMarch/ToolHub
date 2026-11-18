@@ -1,20 +1,16 @@
 // Correlation 相关性散点图 — 对齐 OPP generateCorrelation（CorePlot 散点 + 可选回归线 + 四限线）
 // X=测试项X，Y=测试项Y；标题显示 "X vs Y (r=...)"；可选 Square 等距轴 / 回归线 / 离群高亮
 import React, { useMemo } from 'react';
-import { formatTick, minMax, pearsonCorrelation, type ChartSettings } from '../lib/stats';
+import {
+  correlationPoints,
+  formatTick,
+  minMax,
+  pearsonCorrelation,
+  type ChartSettings,
+  type CorrelationPair,
+} from '../lib/stats';
 import { H, PLOT_BOTTOM, PLOT_H, PLOT_LEFT, PLOT_RIGHT, PLOT_TOP, PLOT_W, SPEC_COLOR, W, ticksFor } from '../lib/layout';
 import PlotLegend from './PlotLegend';
-
-export interface CorrelationPair {
-  xName: string;
-  yName: string;
-  rawX: string[];
-  rawY: string[];
-  xUpper: number | null;
-  xLower: number | null;
-  yUpper: number | null;
-  yLower: number | null;
-}
 
 const mapXp = (lo: number, hi: number, v: number): number => PLOT_LEFT + ((v - lo) / (hi - lo)) * PLOT_W;
 const mapYp = (lo: number, hi: number, v: number): number => PLOT_BOTTOM - ((v - lo) / (hi - lo)) * PLOT_H;
@@ -41,19 +37,13 @@ interface CorrelationChartProps {
 const CorrelationChart: React.FC<CorrelationChartProps> = ({ pair, settings }) => {
   const s = settings;
   const { pts, xs, ys } = useMemo(() => {
-    const n0 = Math.min(pair.rawX.length, pair.rawY.length);
-    const out: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i < n0; i += 1) {
-      // 空白单元格按缺失处理：Number('') === 0 会伪造有效样本
-      if (pair.rawX[i].trim() === '' || pair.rawY[i].trim() === '') continue;
-      const x = Number(pair.rawX[i]);
-      const y = Number(pair.rawY[i]);
-      if (Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y });
-    }
-    const xs2 = out.map((q) => q.x);
-    const ys2 = out.map((q) => q.y);
-    return { pts: out, xs: xs2, ys: ys2 };
-  }, [pair.rawX, pair.rawY]);
+    const points = correlationPoints(pair);
+    return {
+      pts: points.xs.map((x, i) => ({ x, y: points.ys[i] })),
+      xs: points.xs,
+      ys: points.ys,
+    };
+  }, [pair]);
   const corr = useMemo(() => pearsonCorrelation(xs, ys), [xs, ys]);
 
   // 域：Square 时 X/Y 共用同一范围（等距轴）（轻量计算，每渲染执行）

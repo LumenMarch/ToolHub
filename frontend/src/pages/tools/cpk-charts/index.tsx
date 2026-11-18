@@ -46,6 +46,10 @@ const CpkChartsTool: React.FC = () => {
   const error = useOppStore((s) => s.error);
   const clearError = useOppStore((s) => s.setError);
   const hasB = datasetB !== null && datasetB.columns.length > 0;
+  // 合格品数量：状态掩码里 1 = PASS/空
+  const passCountA = datasetA?.statusPass
+    ? datasetA.statusPass.reduce((acc, v) => acc + v, 0)
+    : 0;
 
   // /export 子路由：渲染导出页
   const isExportRoute = location.pathname.endsWith('/export');
@@ -85,8 +89,8 @@ const CpkChartsTool: React.FC = () => {
             <Database className="size-4 shrink-0" />
             <span className="truncate">{datasetA.title}</span>
             <span className="shrink-0 tabular-nums">
-              {excludeFail && datasetA.statusList && datasetA.hasFailRecords
-                ? `合格品 ${datasetA.statusList.filter((s) => !s || s.toUpperCase() === 'PASS').length} / ${datasetA.records} 条`
+              {excludeFail && datasetA.statusPass && datasetA.hasFailRecords
+                ? `合格品 ${passCountA} / ${datasetA.records} 条`
                 : `${datasetA.records} 条`}{' '}
               / {datasetA.columns.length} 项
             </span>
@@ -97,13 +101,13 @@ const CpkChartsTool: React.FC = () => {
       <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
         <div className="flex min-w-0 flex-1 flex-col">
           <p className="mb-2 text-xs text-muted-foreground">
-            {datasetA ? `${datasetA.records} 条 / ${datasetA.columns.length} 项` : '上传产线导出 CSV'}
+            {datasetA ? `${datasetA.records} 条 / ${datasetA.columns.length} 项` : '上传产线导出 CSV / Excel'}
           </p>
           <FileDropZone
             id="cpk-csv-a"
-            label="上传数据 CSV"
-            description="产线导出 / 通用 CSV"
-            accept=".csv,text/csv"
+            label="上传数据文件"
+            description="产线导出 / 通用 CSV、Excel"
+            accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
             file={fileA}
             onSelect={(f) => void loadFileA(f)}
             onClear={() => clearFileA()}
@@ -116,9 +120,9 @@ const CpkChartsTool: React.FC = () => {
           </p>
           <FileDropZone
             id="cpk-csv-b"
-            label="上传数据 CSV"
+            label="上传数据文件"
             description="对比用（可选）"
-            accept=".csv,text/csv"
+            accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
             file={fileB}
             onSelect={(f) => void loadFileB(f)}
             onClear={() => clearFileB()}

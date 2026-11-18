@@ -85,7 +85,7 @@ export const toolsConfig: ToolDefinition[] = [
     name: 'OPP',
     icon: BarChart3,
     path: '/tools/cpk-charts',
-    description: '导入测试导出 CSV，点选测试项查看 CPK 过程能力直方图。',
+    description: '导入测试导出 CSV / Excel，点选测试项查看 CPK 过程能力直方图。',
     component: CpkCharts,
   },
   {

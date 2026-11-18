@@ -1,6 +1,6 @@
 // 图表工作区（右侧）— 上：导出按钮行（导出全部 / 导出当前）+ 设置行（按图类型）· 下：图区（单图或 A/B 并排对比）+ CPK 统计
 // 支持 Histogram / CDF / TimeSeries / Correlation 四类，对齐 OPP 各设置面板
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Download, Maximize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,15 +11,29 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import useOppStore, { getActive, getCorrPair, getSharedPair } from '../store/useOppStore';
+import useOppStore from '../store/useOppStore';
 import CpkHistogram from './CpkHistogram';
 import CdfChart from './CdfChart';
 import TimeSeriesChart from './TimeSeriesChart';
 import CorrelationChart from './CorrelationChart';
-import type { CorrelationPair } from './CorrelationChart';
 import CorrelationSettings from './CorrelationSettings';
 import ItemSettingsPanel from '../pages/ItemSettingsPanel';
-import { pearsonCorrelation, formatIndex, formatValue, shortName, type ColumnAnalysis } from '../lib/stats';
+import {
+  correlationPoints,
+  formatIndex,
+  formatValue,
+  pearsonCorrelation,
+  shortName,
+  type ColumnAnalysis,
+  type CorrelationPair,
+} from '../lib/stats';
+import {
+  loadActive,
+  loadCorrelation,
+  loadSharedPair,
+  type ActiveAnalysis,
+  type SharedPairAnalysis,
+} from '../lib/dataset';
 import {
   downloadBlob,
   renderCdfSvg,
@@ -35,19 +49,7 @@ export type ChartView = 'histogram' | 'cdf' | 'timeseries' | 'correlation';
 /** 配对统计（模块级纯函数）：从 pair 的原始行配对 X/Y 并计算 Pearson 回归统计。 */
 function corrStatsOf(pair: CorrelationPair | null): { r: number | null; slope: number; intercept: number; meanX: number; meanY: number; stdX: number; stdY: number; n: number } | null {
   if (!pair) return null;
-  const n0 = Math.min(pair.rawX.length, pair.rawY.length);
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (let i = 0; i < n0; i += 1) {
-    // 空白单元格按缺失处理：Number('') === 0 会伪造有效样本
-    if (pair.rawX[i].trim() === '' || pair.rawY[i].trim() === '') continue;
-    const x = Number(pair.rawX[i]);
-    const y = Number(pair.rawY[i]);
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      xs.push(x);
-      ys.push(y);
-    }
-  }
+  const { xs, ys } = correlationPoints(pair);
   const { r, slope, intercept } = pearsonCorrelation(xs, ys);
   const meanX = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
   const meanY = ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : 0;
@@ -66,6 +68,14 @@ function singleStatsCards(st: NonNullable<ReturnType<typeof corrStatsOf>>): Arra
 }
 
 const STAT_ROWS = ['Cpk', 'Cpu', 'Cpl', 'Mean', 'Std. Dev.', 'Data Count', 'Failure Count'] as const;
+
+interface LoadedAnalyses {
+  shared: SharedPairAnalysis | null;
+  activeA: ActiveAnalysis | null;
+  activeB: ActiveAnalysis | null;
+  pairA: CorrelationPair | null;
+  pairB: CorrelationPair | null;
+}
 
 interface ChartWorkspaceProps {
   view: ChartView;
@@ -86,36 +96,49 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
   const setError = useOppStore((s) => s.setError);
   const [zoom, setZoom] = useState<'A' | 'B' | null>(null);
 
-  // ---- Correlation 数据处理 ----
-  const pairA = useMemo(() => (view === 'correlation' ? getCorrPair(datasetA, selectedName, corrYName, settings, excludeFail) : null), [datasetA, selectedName, corrYName, settings, excludeFail, view]);
-  const pairB = useMemo(() => (view === 'correlation' ? getCorrPair(datasetB, selectedName, corrYName, settings, excludeFail) : null), [datasetB, selectedName, corrYName, settings, excludeFail, view]);
+  const isCorr = view === 'correlation';
+  const [loaded, setLoaded] = useState<LoadedAnalyses | null>(null);
+
+  // 列数据在后端，统计/分箱仍在本进程：异步取列 → 计算 → 写回状态。
+  // 先让出两帧，保证切换测试项的加载遮罩先绘制出来。
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve());
+          });
+        });
+        const [shared, activeA, activeB, pairA, pairB] = await Promise.all([
+          compareMode ? loadSharedPair(datasetA, datasetB, selectedName, settings, excludeFail) : Promise.resolve(null),
+          loadActive(datasetA, selectedName, settings, excludeFail),
+          loadActive(datasetB, selectedName, settings, excludeFail),
+          isCorr ? loadCorrelation(datasetA, selectedName, corrYName, settings, excludeFail) : Promise.resolve(null),
+          isCorr ? loadCorrelation(datasetB, selectedName, corrYName, settings, excludeFail) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        setLoaded({ shared, activeA, activeB, pairA, pairB });
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : '测试项数据加载失败');
+      } finally {
+        if (!cancelled) useOppStore.getState().setComputing(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [datasetA, datasetB, selectedName, corrYName, settings, compareMode, excludeFail, isCorr, setError]);
+
+  const shared = loaded?.shared ?? null;
+  const activeA = shared ? { index: shared.indexA, analysis: shared.pair.a } : (loaded?.activeA ?? null);
+  const activeB = shared ? { index: shared.indexB, analysis: shared.pair.b } : (loaded?.activeB ?? null);
+  const activeCol = activeA?.analysis ?? activeB?.analysis ?? null;
+  const pairA = loaded?.pairA ?? null;
+  const pairB = loaded?.pairB ?? null;
   const statA = pairA ? corrStatsOf(pairA) : null;
   const statB = pairB ? corrStatsOf(pairB) : null;
-
-  // ---- Histogram / CDF / TimeSeries 数据处理 ----
-  // 对比配对：派生自原始字段（zustand v5 selector 必须返回稳定引用，用 useMemo 缓存）
-  const shared = useMemo(
-    () => getSharedPair({ datasetA, datasetB, selectedName, compareMode, settings, excludeFail } as never),
-    [datasetA, datasetB, selectedName, compareMode, settings, excludeFail],
-  );
-  const activeA = useMemo(() => {
-    if (shared) return { index: shared.idxA, analysis: shared.pair.a };
-    return getActive(datasetA, selectedName, settings, excludeFail);
-  }, [shared, datasetA, selectedName, settings, excludeFail]);
-  const activeB = useMemo(() => {
-    if (shared) return { index: shared.idxB, analysis: shared.pair.b };
-    return getActive(datasetB, selectedName, settings, excludeFail);
-  }, [shared, datasetB, selectedName, settings, excludeFail]);
-  const activeCol = activeA?.analysis ?? activeB?.analysis ?? null;
-
-  // 切换测试项的统计与分箱在本次提交里已算完（图表子组件的 effect 先于这里执行），
-  // 这里负责收起加载层；只依赖数据/选项，避免 computing 自身变化时把加载层瞬间关掉。
-  useEffect(() => {
-    const state = useOppStore.getState();
-    if (state.computing) state.setComputing(false);
-  }, [datasetA, datasetB, selectedName, compareMode, settings, excludeFail]);
-
-  const isCorr = view === 'correlation';
   // 两个数据源都存在（无论是否处于对比视图）：导出当前即导出 A/B 两张
   const hasBothDatasets = Boolean(datasetA && datasetB);
 
