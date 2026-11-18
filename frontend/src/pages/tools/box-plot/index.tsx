@@ -21,6 +21,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Empty,
   EmptyDescription,
@@ -29,6 +30,7 @@ import {
 } from '@/components/ui/empty'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Separator } from '@/components/ui/separator'
+import { Spinner } from '@/components/ui/spinner'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   Table,
@@ -85,6 +87,8 @@ interface AnalyzeResponse {
   totalRows: number
   usedRows: number
   skippedRows: number
+  excludedFailRows: number
+  failColumn: string | null
   groups: BoxGroup[]
 }
 
@@ -143,6 +147,7 @@ const BoxPlotTool: React.FC = () => {
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null)
   const [whiskerMode, setWhiskerMode] = useState<WhiskerMode>('tukey')
   const [quartileMethod, setQuartileMethod] = useState<QuartileMethod>('JMP')
+  const [excludeFail, setExcludeFail] = useState(true)
   const [showFences, setShowFences] = useState(false)
   const [showValues, setShowValues] = useState(false)
   const [error, setError] = useState('')
@@ -275,6 +280,7 @@ const BoxPlotTool: React.FC = () => {
     groupCol: string,
     method: QuartileMethod,
     groupValues: string[],
+    excludeFailEnabled: boolean,
   ) => {
     if (!upload.uploadId || !valueCol) return
     const gen = ++analyzeGenRef.current
@@ -290,6 +296,7 @@ const BoxPlotTool: React.FC = () => {
           quartile_method: method,
           group_values:
             groupCol !== NG_GROUP && groupValues.length > 0 ? groupValues : null,
+          exclude_fail: excludeFailEnabled,
         },
       )
       if (gen !== analyzeGenRef.current) return // 已有更新的分析请求，丢弃过期响应
@@ -344,7 +351,7 @@ const BoxPlotTool: React.FC = () => {
       setError(`最多选择 ${MAX_GROUPS} 个分组值`)
       return
     }
-    void doAnalyze(valueColumn, groupColumn, quartileMethod, selectedGroupValues)
+    void doAnalyze(valueColumn, groupColumn, quartileMethod, selectedGroupValues, excludeFail)
   }, [
     phase,
     columns,
@@ -352,6 +359,7 @@ const BoxPlotTool: React.FC = () => {
     groupColumn,
     quartileMethod,
     selectedGroupValues,
+    excludeFail,
     groupValueTotal,
     groupValueOptions.length,
     numericColumns.length,
@@ -574,17 +582,73 @@ const BoxPlotTool: React.FC = () => {
               <CardTitle>分布对比</CardTitle>
               {analysis ? (
                 <CardDescription>
-                  {analysis.filename} · {analysis.valueColumn}
-                  {analysis.groupColumn
-                    ? ` · 按 ${analysis.groupColumn} 分组`
-                    : ' · 单箱对比'}{' '}
-                  · 有效 {analysis.usedRows.toLocaleString('zh-CN')} /{' '}
-                  {analysis.totalRows.toLocaleString('zh-CN')} 行
-                  {analysis.skippedRows > 0
-                    ? ` · 跳过 ${analysis.skippedRows.toLocaleString('zh-CN')} 行`
-                    : ''}{' '}
-                  · 分位数 {analysis.quartileMethod}
-                  {analyzing ? ' · 刷新中…' : ''}
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="shrink-0 text-muted-foreground">文件</span>
+                      <span
+                        className="min-w-0 truncate font-medium text-foreground"
+                        title={analysis.filename}
+                      >
+                        {analysis.filename}
+                      </span>
+                    </div>
+                    <dl className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <dt className="text-muted-foreground">数值列</dt>
+                        <dd
+                          className="max-w-[22rem] truncate font-medium text-foreground"
+                          title={analysis.valueColumn}
+                        >
+                          {analysis.valueColumn}
+                        </dd>
+                      </div>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <dt className="text-muted-foreground">分组</dt>
+                        <dd
+                          className="max-w-[22rem] truncate font-medium text-foreground"
+                          title={analysis.groupColumn ?? '单箱对比'}
+                        >
+                          {analysis.groupColumn
+                            ? analysis.groupColumn
+                            : '单箱对比'}
+                        </dd>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <dt className="text-muted-foreground">有效行</dt>
+                        <dd className="font-medium tabular-nums text-foreground">
+                          {analysis.usedRows.toLocaleString('zh-CN')} /{' '}
+                          {analysis.totalRows.toLocaleString('zh-CN')}
+                        </dd>
+                      </div>
+                      {analysis.skippedRows > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <dt className="text-muted-foreground">跳过</dt>
+                          <dd className="font-medium tabular-nums text-foreground">
+                            {analysis.skippedRows.toLocaleString('zh-CN')}
+                          </dd>
+                        </div>
+                      ) : null}
+                      {analysis.excludedFailRows > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <dt className="text-muted-foreground">排除 Fail</dt>
+                          <dd className="font-medium tabular-nums text-foreground">
+                            {analysis.excludedFailRows.toLocaleString('zh-CN')}
+                          </dd>
+                        </div>
+                      ) : null}
+                      <div className="flex items-center gap-1.5">
+                        <dt className="text-muted-foreground">分位数</dt>
+                        <dd className="font-medium text-foreground">
+                          {analysis.quartileMethod}
+                        </dd>
+                      </div>
+                    </dl>
+                    {excludeFail && !analysis.failColumn ? (
+                      <p className="text-xs text-status-warning-foreground">
+                        未检测到 Pass/Fail 状态列，排除 Fail 未生效。
+                      </p>
+                    ) : null}
+                  </div>
                 </CardDescription>
               ) : null}
             </CardHeader>
@@ -620,6 +684,21 @@ const BoxPlotTool: React.FC = () => {
                         <ToggleGroupItem value="R7">R7（Excel）</ToggleGroupItem>
                       </ToggleGroup>
                     </Field>
+                    <Separator orientation="vertical" className="hidden h-10 sm:block" />
+                    <div className="flex items-center gap-2 pb-1.5">
+                      <Checkbox
+                        id="boxplot-exclude-fail"
+                        checked={excludeFail}
+                        onCheckedChange={(checked) => setExcludeFail(Boolean(checked))}
+                      />
+                      <label
+                        htmlFor="boxplot-exclude-fail"
+                        className="cursor-pointer select-none text-sm text-muted-foreground transition-colors hover:text-foreground"
+                        title="排除 Test Pass/Fail Status 为 FAIL 的行"
+                      >
+                        排除 Fail
+                      </label>
+                    </div>
                     <Separator orientation="vertical" className="hidden h-10 sm:block" />
                     <Field className="w-fit gap-1.5">
                       <FieldLabel id="boxplot-whisker">须线</FieldLabel>
@@ -700,13 +779,27 @@ const BoxPlotTool: React.FC = () => {
                       部分组离群点超过 500 个，图上只绘制前 500 个；完整数量见统计表。
                     </p>
                   ) : null}
-                  <BoxPlotChart
-                    ref={chartHandleRef}
-                    groups={analysis.groups}
-                    whiskerMode={whiskerMode}
-                    showFences={showFences}
-                    showValues={showValues}
-                  />
+                  <div className="relative">
+                    <BoxPlotChart
+                      ref={chartHandleRef}
+                      groups={analysis.groups}
+                      whiskerMode={whiskerMode}
+                      showFences={showFences}
+                      showValues={showValues}
+                    />
+                    {analyzing ? (
+                      <div
+                        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/60 backdrop-blur-[1px]"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 shadow-sm">
+                          <Spinner aria-label="正在刷新统计" className="size-4" />
+                          <span className="text-sm text-muted-foreground">刷新中…</span>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                   <Table className="min-w-[40rem] tabular-nums">
                     <TableHeader>
                       <TableRow>

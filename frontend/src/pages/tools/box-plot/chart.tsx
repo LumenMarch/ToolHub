@@ -139,118 +139,109 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
     const chartRef = useRef<echarts.ECharts | null>(null);
     const { resolvedTheme } = useTheme();
 
+    /** ECharts SVG 导出会带上 dataZoom 滑块；excludeComponents 可在导出时忽略它。 */
+    const getExportSvgString = (chart: echarts.ECharts): string => {
+      const svgChart = chart as unknown as {
+        getDataURL: (options: {
+          type: 'svg';
+          excludeComponents: string[];
+        }) => string;
+      };
+      const dataUrl = svgChart.getDataURL({
+        type: 'svg',
+        excludeComponents: ['dataZoom'],
+      });
+      if (!dataUrl) return '';
+      const comma = dataUrl.indexOf(',');
+      if (comma < 0) return '';
+      const meta = dataUrl.slice(0, comma);
+      const payload = dataUrl.slice(comma + 1);
+      return meta.includes(';base64') ? atob(payload) : decodeURIComponent(payload);
+    };
+
     // 暴露导出能力给父组件
     useImperativeHandle(ref, () => ({
       exportSvg: (baseName: string) => {
         const chart = chartRef.current;
         if (!chart) return;
-        // svg 渲染器自带 renderToSVGString，TypeScript 类型未暴露，需用命名别名断言
-        const svgChart = chart as unknown as { renderToSVGString?: () => string; getDataURL: (o: unknown) => string };
-        const svgStr = svgChart.renderToSVGString?.();
-        if (svgStr) {
-          const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${baseName}.svg`;
-          a.click();
-          // 部分浏览器异步启动下载，立即 revoke 可能取消下载；
-          // 与 PNG 路径一致延迟释放。
-          setTimeout(() => URL.revokeObjectURL(url), 2000);
-          return;
-        }
-        const url2 = svgChart.getDataURL({ type: 'svg' });
+        const svgStr = getExportSvgString(chart);
+        if (!svgStr) return;
+        const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url2;
+        a.href = url;
         a.download = `${baseName}.svg`;
         a.click();
+        // 部分浏览器异步启动下载，立即 revoke 可能取消下载；
+        // 与 PNG 路径一致延迟释放。
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
       },
       exportPng: async (baseName: string) => {
         const chart = chartRef.current;
         if (!chart) return;
         const svgChart = chart as unknown as {
-          renderToSVGString?: () => string;
           getWidth: () => number;
           getHeight: () => number;
-          getDataURL: (o: unknown) => string;
         };
-        const svgStr = svgChart.renderToSVGString?.();
-        if (!svgStr) {
-          const url = svgChart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: cssColor('--background') });
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${baseName}.png`;
-          a.click();
-          return;
-        }
+        const svgStr = getExportSvgString(chart);
+        if (!svgStr) return;
         const width = svgChart.getWidth();
         const height = svgChart.getHeight();
         const pixelRatio = 2;
         const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
         const url = URL.createObjectURL(svgBlob);
         const img = new Image();
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => {
-            // 回调在 Promise executor 返回后才运行：任何异常都必须转为 reject，
-            // 否则 Promise 永远 pending，父层 finally 无法复位 exporting。
-            try {
-              const canvas = document.createElement('canvas');
-              canvas.width = Math.round(width * pixelRatio);
-              canvas.height = Math.round(height * pixelRatio);
-              const ctx = canvas.getContext('2d');
-              if (!ctx) {
-                URL.revokeObjectURL(url);
-                reject(new Error('canvas context'));
-                return;
-              }
-              ctx.fillStyle = cssColor('--background');
-              ctx.fillRect(0, 0, canvas.width, canvas.height);
-              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              canvas.toBlob(
-                (blob) => {
-                  try {
-                    if (!blob) {
-                      URL.revokeObjectURL(url);
-                      reject(new Error('toBlob'));
-                      return;
-                    }
-                    const pngUrl = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = pngUrl;
-                    a.download = `${baseName}.png`;
-                    a.click();
-                    setTimeout(() => URL.revokeObjectURL(pngUrl), 2000);
+        const { promise, resolve, reject } = Promise.withResolvers<void>();
+        img.onload = () => {
+          // 回调中的异常必须显式 reject，否则导出 Promise 永远 pending，
+          // 父层 finally 无法复位 exporting。
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(width * pixelRatio);
+            canvas.height = Math.round(height * pixelRatio);
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              URL.revokeObjectURL(url);
+              reject(new Error('canvas context'));
+              return;
+            }
+            ctx.fillStyle = cssColor('--background');
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            canvas.toBlob(
+              (blob) => {
+                try {
+                  if (!blob) {
                     URL.revokeObjectURL(url);
-                    resolve();
-                  } catch (error) {
-                    URL.revokeObjectURL(url);
-                    reject(error instanceof Error ? error : new Error(String(error)));
+                    reject(new Error('toBlob'));
+                    return;
                   }
-                },
-                'image/png',
-              );
-            } catch (error) {
-              URL.revokeObjectURL(url);
-              reject(error instanceof Error ? error : new Error(String(error)));
-            }
-          };
-          img.onerror = () => {
-            try {
-              URL.revokeObjectURL(url);
-              // 兜底用 getDataURL
-              const fallback = svgChart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: cssColor('--background') });
-              const a = document.createElement('a');
-              a.href = fallback;
-              a.download = `${baseName}.png`;
-              a.click();
-              resolve();
-            } catch (error) {
-              URL.revokeObjectURL(url);
-              reject(error instanceof Error ? error : new Error(String(error)));
-            }
-          };
-          img.src = url;
-        });
+                  const pngUrl = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = pngUrl;
+                  a.download = `${baseName}.png`;
+                  a.click();
+                  setTimeout(() => URL.revokeObjectURL(pngUrl), 2000);
+                  URL.revokeObjectURL(url);
+                  resolve();
+                } catch (error) {
+                  URL.revokeObjectURL(url);
+                  reject(error instanceof Error ? error : new Error(String(error)));
+                }
+              },
+              'image/png',
+            );
+          } catch (error) {
+            URL.revokeObjectURL(url);
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error('无法加载导出图像'));
+        };
+        img.src = url;
+        await promise;
       },
     }));
 

@@ -25,6 +25,10 @@ class BoxPlotAnalyzeRequest(BaseModel):
         default=None,
         description="限定分析的分组值；空或省略表示该列全部水平",
     )
+    exclude_fail: bool = Field(
+        default=True,
+        description="排除 Test Pass/Fail Status 为 FAIL 的行；默认开启",
+    )
 
 
 class BoxPlotGroupValuesRequest(BaseModel):
@@ -98,4 +102,7 @@ class AnalyzeResponse(BaseModel):
     total_rows: int
     used_rows: int
     skipped_rows: int
+    # 状态为 FAIL 被排除的行数；未识别到状态列时 fail_column 为 None
+    excluded_fail_rows: int = 0
+    fail_column: str | None = None
     groups: list[GroupStatModel]
