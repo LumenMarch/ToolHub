@@ -8,8 +8,9 @@
   零工具权限 403；
 - 迁移脚本 migrate_per_tool_permissions：对模拟存量库（旧 seed 建库）幂等、
   自定义角色同样获得全部工具权限、tool:use 记录被清理；
-- 迁移脚本 migrate_retired_tool_permissions：摘掉已下线工具权限及其角色/
-  用户直接授权，现有 TOOL_PERMISSIONS 不被误删，重复执行无副作用；
+- 迁移脚本 migrate_retired_tools：工具目录外的残留（权限行、角色/用户
+  直接授权、工具元数据）被自动清理，现有 TOOL_PERMISSIONS 不被误删，
+  重复执行无副作用；
 - 公开端点（OPTIONS /upload/tus）不受影响。
 """
 
@@ -20,10 +21,9 @@ from app.models.role import Role
 from app.models.tool_meta import ToolMeta
 from app.seed import (
     PERMISSIONS,
-    RETIRED_TOOL_PERMISSIONS,
     TOOL_PERMISSION_CODENAMES,
     migrate_per_tool_permissions,
-    migrate_retired_tool_permissions,
+    migrate_retired_tools,
 )
 from tests.conftest import auth_header, login, register
 
@@ -253,16 +253,17 @@ def test_migration_inserts_tool_permissions_when_none_exist(db):
     assert set(db.scalars(select(Permission.codename)).all()) == codenames
 
 
-def test_retired_permissions_migration_cleans_roles_and_users(db):
-    """存量库残留已下线 tool:*:use：迁移后权限行与角色/用户引用一并清除。
+def test_retired_tools_migration_cleans_database(db):
+    """工具目录外的残留：权限行、角色/用户授权与工具元数据一并清除。
 
-    现有 TOOL_PERMISSIONS 不被误删；再跑一遍仍干净（幂等）。
+    现有 TOOL_PERMISSIONS 与在线工具的元数据不被误删；再跑一遍仍干净（幂等）。
     """
     from app.core.security import get_password_hash
     from app.models.user import USER_STATUS_APPROVED, User
 
+    legacy_codenames = ["tool:color-picker:use", "tool:sixty-seconds:use"]
     retired_rows = []
-    for codename in RETIRED_TOOL_PERMISSIONS:
+    for codename in legacy_codenames:
         perm = Permission(codename=codename, description=f"已下线 {codename}")
         db.add(perm)
         retired_rows.append(perm)
@@ -279,42 +280,51 @@ def test_retired_permissions_migration_cleans_roles_and_users(db):
         direct_permissions=list(retired_rows),
     )
     db.add(alice)
+    db.add_all(
+        [
+            ToolMeta(tool_id="color-picker", enabled=False, sort_order=90),
+            ToolMeta(tool_id="qrcode", enabled=True, sort_order=1),
+        ]
+    )
     db.commit()
 
     live_before = set(TOOL_PERMISSION_CODENAMES)
     assert live_before <= set(db.scalars(select(Permission.codename)).all())
 
-    migrate_retired_tool_permissions()
+    migrate_retired_tools()
     db.expire_all()
 
     remaining = set(db.scalars(select(Permission.codename)).all())
-    assert set(RETIRED_TOOL_PERMISSIONS).isdisjoint(remaining)
+    assert set(legacy_codenames).isdisjoint(remaining)
     assert live_before <= remaining
 
     tool_user = db.scalars(select(Role).where(Role.name == "工具使用者")).one()
-    assert set(RETIRED_TOOL_PERMISSIONS).isdisjoint(
-        {p.codename for p in tool_user.permissions}
-    )
+    held = {p.codename for p in tool_user.permissions}
+    assert set(legacy_codenames).isdisjoint(held)
 
     alice = db.scalars(select(User).where(User.username == "alice")).one()
     assert alice.direct_permissions == []
 
-    migrate_retired_tool_permissions()
+    assert set(db.scalars(select(ToolMeta.tool_id)).all()) == {"qrcode"}
+
+    migrate_retired_tools()
     db.expire_all()
     assert set(db.scalars(select(Permission.codename)).all()) == remaining
-    assert live_before <= remaining
+    assert set(db.scalars(select(ToolMeta.tool_id)).all()) == {"qrcode"}
 
 
-def test_retired_permissions_migration_noop_when_absent(db):
-    """新部署无已下线权限行：迁移为 no-op，现有 TOOL_PERMISSIONS 完整保留。"""
+def test_retired_tools_migration_noop_without_residue(db):
+    """无工具目录外残留：迁移为 no-op，权限与工具元数据保持原样。"""
     codenames_before = set(db.scalars(select(Permission.codename)).all())
-    assert set(RETIRED_TOOL_PERMISSIONS).isdisjoint(codenames_before)
     assert set(TOOL_PERMISSION_CODENAMES) <= codenames_before
+    assert not [
+        codename
+        for codename in codenames_before
+        if codename.startswith("tool:") and codename not in TOOL_PERMISSION_CODENAMES
+    ]
 
-    migrate_retired_tool_permissions()
-    assert set(db.scalars(select(Permission.codename)).all()) == codenames_before
-
-    migrate_retired_tool_permissions()
+    migrate_retired_tools()
+    migrate_retired_tools()
     assert set(db.scalars(select(Permission.codename)).all()) == codenames_before
 
 
