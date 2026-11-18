@@ -95,21 +95,58 @@ function readHttpError(err: unknown): { status?: number; detail?: string } {
   return { status, detail };
 }
 
+/** 恢复会话时的初始值：把 8 个字段的兜底逻辑收在一处，别让组件本体堆满三元表达式。 */
+function initialStateFromCache(restored: CachedTtSession | null) {
+  return {
+    phase: (restored ? 'analyzing' : 'upload') as Phase,
+    activeModule: restored?.activeModule ?? 'distribution',
+    uploadId: restored?.uploadId ?? '',
+    fileName: restored?.fileName ?? '',
+    binWidthStr: restored?.binWidthStr ?? String(DEFAULT_BIN_WIDTH),
+    station: restored?.station ?? 'all',
+    excludeFail: restored?.excludeFail ?? true,
+    mode: restored?.mode ?? 'percent',
+  };
+}
+
+/**
+ * 会话缓存：只存 uploadId 与参数，结果由后端按 uploadId 重算。
+ * 误退出模块再回来时据此恢复，不必重新选文件、重新上传。
+ */
+function useSessionCache(
+  uploadId: string,
+  fileName: string,
+  binWidthStr: string,
+  station: string,
+  excludeFail: boolean,
+  activeModule: ActiveModule,
+  mode: HistogramMode,
+): void {
+  useEffect(() => {
+    if (!uploadId) {
+      clearCachedSession();
+      return;
+    }
+    writeCachedSession({ uploadId, fileName, binWidthStr, station, excludeFail, activeModule, mode });
+  }, [uploadId, fileName, binWidthStr, station, excludeFail, activeModule, mode]);
+}
+
 const TtTimeTool: React.FC = () => {
   // 只读一次缓存：后续所有初始值都从这份快照取，避免 8 个 useState 各读一遍 sessionStorage
   const [restored] = useState(readCachedSession);
-  const [phase, setPhase] = useState<Phase>(restored ? 'analyzing' : 'upload');
-  const [activeModule, setActiveModule] = useState<ActiveModule>(restored?.activeModule ?? 'distribution');
-  const [currentUploadId, setCurrentUploadId] = useState(restored?.uploadId ?? '');
-  const [fileName, setFileName] = useState(restored?.fileName ?? '');
+  const [initial] = useState(() => initialStateFromCache(restored));
+  const [phase, setPhase] = useState<Phase>(initial.phase);
+  const [activeModule, setActiveModule] = useState<ActiveModule>(initial.activeModule);
+  const [currentUploadId, setCurrentUploadId] = useState(initial.uploadId);
+  const [fileName, setFileName] = useState(initial.fileName);
   const [processData, setProcessData] = useState<BackendProcessResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   // 参数变化后的页内重算：结果页保持挂载，只叠加提示，避免卸载正在编辑的表单
   const [isRecomputing, setIsRecomputing] = useState(false);
-  const [mode, setMode] = useState<HistogramMode>(restored?.mode ?? 'percent');
-  const [binWidthStr, setBinWidthStr] = useState(restored?.binWidthStr ?? String(DEFAULT_BIN_WIDTH));
-  const [station, setStation] = useState(restored?.station ?? 'all');
-  const [excludeFail, setExcludeFail] = useState(restored?.excludeFail ?? true);
+  const [mode, setMode] = useState<HistogramMode>(initial.mode);
+  const [binWidthStr, setBinWidthStr] = useState(initial.binWidthStr);
+  const [station, setStation] = useState(initial.station);
+  const [excludeFail, setExcludeFail] = useState(initial.excludeFail);
   // 流式过程中已到达的正文
   const [streamingAdvice, setStreamingAdvice] = useState('');
   const processGenRef = useRef(0);
@@ -124,23 +161,7 @@ const TtTimeTool: React.FC = () => {
     [],
   );
 
-  // 会话缓存：只存 uploadId 与参数，结果由后端按 uploadId 重算。
-  // 误退出模块再回来时据此恢复，不必重新选文件、重新上传。
-  useEffect(() => {
-    if (!currentUploadId) {
-      clearCachedSession();
-      return;
-    }
-    writeCachedSession({
-      uploadId: currentUploadId,
-      fileName,
-      binWidthStr,
-      station,
-      excludeFail,
-      activeModule,
-      mode,
-    });
-  }, [currentUploadId, fileName, binWidthStr, station, excludeFail, activeModule, mode]);
+  useSessionCache(currentUploadId, fileName, binWidthStr, station, excludeFail, activeModule, mode);
 
   // 去重键：上传完成或参数变化后，同一组参数只发起一次后端计算
   const lastProcessedRef = useRef('');
