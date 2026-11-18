@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useAdminApi } from './hooks/use-admin-api';
+import { findToolByAuditSlug, findToolDisplayName } from '../../lib/tool-audit';
 import { parseServerDate } from '../../lib/format-time';
 import type { AuditLog } from './hooks/use-admin-api';
 import AdminLoadingState from './components/AdminLoadingState';
@@ -39,6 +40,16 @@ const ACTION_INFO: Record<string, { label: string; tone: string }> = {
   'user.create': { label: '创建用户', tone: 'text-primary' },
   'user.update': { label: '修改用户', tone: 'text-primary' },
   'user.delete': { label: '删除用户', tone: 'text-primary' },
+  'user.approve': { label: '审批通过', tone: 'text-primary' },
+  'user.reject': { label: '审批拒绝', tone: 'text-primary' },
+  'user.role_change': { label: '调整用户角色', tone: 'text-primary' },
+  'user.session_revoke': { label: '吊销登录会话', tone: 'text-primary' },
+  'role.create': { label: '创建角色', tone: 'text-primary' },
+  'role.update': { label: '修改角色', tone: 'text-primary' },
+  'role.delete': { label: '删除角色', tone: 'text-primary' },
+  'role.permissions_update': { label: '调整角色权限', tone: 'text-primary' },
+  'llm.config.update': { label: '修改模型配置', tone: 'text-primary' },
+  'llm.config.reset': { label: '重置模型配置', tone: 'text-primary' },
   'tool.qrcode.generate': { label: '二维码生成', tone: 'text-primary' },
   'tool.asset.scan': { label: '资产扫描', tone: 'text-primary' },
   'tool.asset.compare': { label: '资产比对', tone: 'text-primary' },
@@ -48,9 +59,16 @@ const ACTION_INFO: Record<string, { label: string; tone: string }> = {
   'tool.attendance.analyze': { label: '出勤分析', tone: 'text-primary' },
   'tool.attendance.download': { label: '出勤结果下载', tone: 'text-primary' },
   'tool.attendance.delete_result': { label: '删除出勤结果', tone: 'text-primary' },
+  'tool.atlas_merge.analyze': { label: 'AtlasLog 合并', tone: 'text-primary' },
+  'tool.atlas_merge.download': { label: '下载合并结果', tone: 'text-primary' },
   'tool.atlas_merge.delete': { label: '删除合并结果', tone: 'text-primary' },
-  'tool.asset.save': { label: '资产保存', tone: 'text-primary' },
-  'tool.asset.export': { label: '资产导出', tone: 'text-primary' },
+  'tool.box_plot.analyze': { label: '箱线图分析', tone: 'text-primary' },
+  'tool.box_plot.columns': { label: '读取箱线图列', tone: 'text-primary' },
+  'tool.cpk.item_check_report': { label: '生成点检报告', tone: 'text-primary' },
+  'tool.tt_time.process': { label: '测试时间处理', tone: 'text-primary' },
+  'tool.tt_time.analyze': { label: '测试时间分析', tone: 'text-primary' },
+  'tool.retest_rate.analyze': { label: '重测率统计', tone: 'text-primary' },
+  'tool.calendar.info': { label: '日历查询', tone: 'text-primary' },
   'tool.meta.update': { label: '工具配置', tone: 'text-primary' },
   'tool.meta.bulk_update': { label: '批量配置', tone: 'text-primary' },
 };
@@ -105,8 +123,19 @@ const groupAuditLogs = (logs: AuditLog[]) => {
   return groups;
 };
 
-const formatAction = (action: string) =>
-  ACTION_INFO[action] ?? { label: action, tone: 'text-primary' };
+const formatAction = (action: string) => {
+  const known = ACTION_INFO[action];
+  if (known) return known;
+  // 未收录的新动作至少解析出工具名，避免把 tool.<slug>.<op> 原样展示。
+  if (action.startsWith('tool.')) {
+    const parts = action.slice('tool.'.length).split('.');
+    const tool = parts.length > 1
+      ? findToolByAuditSlug(parts.slice(0, -1).join('.'))
+      : undefined;
+    if (tool) return { label: tool.name, tone: 'text-primary' };
+  }
+  return { label: action, tone: 'text-primary' };
+};
 
 const AdminAudit: React.FC = () => {
   const api = useAdminApi();
@@ -352,6 +381,10 @@ const AuditEventRow: React.FC<{ log: AuditLog }> = ({ log }) => {
   const [expanded, setExpanded] = useState(false);
   const date = getAuditDateParts(log.created_at);
   const action = formatAction(log.action);
+  const targetName =
+    log.target_type === 'tool' && log.target_id
+      ? (findToolDisplayName(log.target_id) ?? log.target_id)
+      : (log.target_id ?? '无目标');
 
   return (
     <article className="border-b last:border-b-0 hover:bg-muted/40">
@@ -379,7 +412,7 @@ const AuditEventRow: React.FC<{ log: AuditLog }> = ({ log }) => {
 
         <div className="min-w-0 text-sm">
           <span className="block truncate">
-            {log.target_id ?? '无目标'}
+            {targetName}
           </span>
           <span className="mt-1 block truncate text-xs text-muted-foreground">
             {log.target_id ? `${log.target_type}#${log.target_id}` : '无目标'}

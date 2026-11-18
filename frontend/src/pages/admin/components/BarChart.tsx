@@ -24,7 +24,7 @@ const BarChart: React.FC<BarChartProps> = ({ data, emptyHint = '暂无数据' })
         return (
           <div
             key={d.label}
-            className="group flex h-full min-w-0 max-w-[120px] flex-1 flex-col items-center justify-end"
+            className="group flex h-full min-w-0 max-w-[120px] flex-1 flex-col items-center"
             title={
               d.actions && d.actions.length > 1
                 ? `${d.label}: ${d.value} (${d.actions.join(' + ')})`
@@ -34,10 +34,13 @@ const BarChart: React.FC<BarChartProps> = ({ data, emptyHint = '暂无数据' })
             <span className="mb-2 text-xs tabular-nums text-muted-foreground transition-colors group-hover:text-primary">
               {d.value}
             </span>
-            <div
-              className="min-h-[2px] w-full rounded-t-sm bg-muted transition-colors group-hover:bg-primary"
-              style={{ height: `${heightPct}%` }}
-            />
+            {/* 百分比高度相对绘图区解析，避免被数值/名称标签挤压后失真 */}
+            <div className="relative w-full flex-1">
+              <div
+                className="absolute inset-x-0 bottom-0 min-h-[2px] rounded-t-sm bg-muted transition-colors group-hover:bg-primary"
+                style={{ height: `${heightPct}%` }}
+              />
+            </div>
             <span className="mt-2 max-w-full truncate text-center text-xs text-muted-foreground">
               {d.label}
             </span>
