@@ -200,7 +200,7 @@ def require_tool_enabled(tool_id: str) -> _ToolEnabledChecker:
     用法:
         @router.post("/info")
         def info(
-            _: None = Depends(require_tool_enabled("calendar")),
+            _: None = Depends(require_tool_enabled("qrcode")),
         ):
             ...
     """

@@ -12,7 +12,6 @@ from app.api.endpoints import (
     attendance,
     auth,
     box_plot,
-    calendar_tools,
     cpk_charts,
     llm,
     notifications,
@@ -44,9 +43,6 @@ api_router.include_router(
 # To add a new tool, import its router and include it here
 api_router.include_router(
     qrcode_tools.router, prefix="/tools/qrcode", tags=["qrcode_tools"]
-)
-api_router.include_router(
-    calendar_tools.router, prefix="/tools/calendar", tags=["calendar_tools"]
 )
 api_router.include_router(
     asset_comparison.router, prefix="/tools/asset", tags=["asset_comparison"]

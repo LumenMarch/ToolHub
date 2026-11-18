@@ -28,7 +28,7 @@ from app.seed import (
 from tests.conftest import auth_header, login, register
 
 QRCODE_URL = "/api/v1/tools/qrcode"
-CALENDAR_URL = "/api/v1/tools/calendar/info"
+ASSET_JOB_URL = "/api/v1/tools/asset/jobs/probe"
 TOOLS_META_URL = "/api/v1/tools-meta"
 
 
@@ -112,13 +112,9 @@ def test_per_tool_granularity_custom_role(admin_client, db):
     ok = client.post(QRCODE_URL, json={"text": "hi"}, headers=auth_header(token))
     assert ok.status_code == 200, ok.text
 
-    denied = client.post(
-        CALENDAR_URL,
-        json={"date": "2026-08-08"},
-        headers=auth_header(token),
-    )
+    denied = client.get(ASSET_JOB_URL, headers=auth_header(token))
     assert denied.status_code == 403
-    assert "需要 tool:calendar:use 权限" in denied.json()["detail"]
+    assert "需要 tool:asset-comparison:use 权限" in denied.json()["detail"]
 
 
 # ---------- require_any_tool_permission ----------

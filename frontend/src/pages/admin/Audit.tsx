@@ -40,7 +40,6 @@ const ACTION_INFO: Record<string, { label: string; tone: string }> = {
   'user.update': { label: '修改用户', tone: 'text-primary' },
   'user.delete': { label: '删除用户', tone: 'text-primary' },
   'tool.qrcode.generate': { label: '二维码生成', tone: 'text-primary' },
-  'tool.calendar.info': { label: '日历查询', tone: 'text-primary' },
   'tool.asset.scan': { label: '资产扫描', tone: 'text-primary' },
   'tool.asset.compare': { label: '资产比对', tone: 'text-primary' },
   'tool.asset.finalize': { label: '比对定稿', tone: 'text-primary' },
