@@ -1,7 +1,6 @@
 import React from 'react'
 import {
   BarChart3,
-  Calendar,
   ChartColumn,
   FolderTree,
   Images,
@@ -33,7 +32,6 @@ const AtlasMerge = React.lazy(() => import('../pages/tools/atlas-merge/index'))
 const CpkCharts = React.lazy(() => import('../pages/tools/cpk-charts/index'))
 const ImageToPdf = React.lazy(() => import('../pages/tools/image-to-pdf/index'))
 const BoxPlot = React.lazy(() => import('../pages/tools/box-plot/index'))
-const CalendarTool = React.lazy(() => import('../pages/tools/calendar/index'))
 const TtTime = React.lazy(() => import('../pages/tools/tt-time/index'))
 const RetestRate = React.lazy(() => import('../pages/tools/retest-rate/index'))
 
@@ -82,15 +80,6 @@ export const toolsConfig: ToolDefinition[] = [
     path: '/tools/cpk-charts',
     description: '导入测试导出 CSV，点选测试项查看 CPK 过程能力直方图。',
     component: CpkCharts,
-  },
-  {
-    id: 'calendar',
-    permission: 'tool:calendar:use',
-    name: '日历',
-    icon: Calendar,
-    path: '/tools/calendar',
-    description: '农历黄历、节气宜忌与假期倒计时。',
-    component: CalendarTool,
   },
   {
     id: 'image-to-pdf',
