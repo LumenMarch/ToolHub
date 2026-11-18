@@ -14,6 +14,8 @@ import {
 
 export interface ToolDefinition {
   id: string
+  /** 审计 action 中的工具段（tool.<auditSlug>.<操作>），用于把调用统计归属到工具 */
+  auditSlug: string
   /** 该工具对应的权限 codename（tool:<id>:use），权限数据唯一来源 */
   permission: string
   name: string
@@ -38,6 +40,7 @@ const RetestRate = React.lazy(() => import('../pages/tools/retest-rate/index'))
 export const toolsConfig: ToolDefinition[] = [
   {
     id: 'qrcode',
+    auditSlug: 'qrcode',
     permission: 'tool:qrcode:use',
     name: '二维码生成',
     icon: QrCode,
@@ -47,6 +50,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'asset-comparison',
+    auditSlug: 'asset',
     permission: 'tool:asset-comparison:use',
     name: '资产核对',
     icon: Search,
@@ -56,6 +60,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'attendance-organizer',
+    auditSlug: 'attendance',
     permission: 'tool:attendance-organizer:use',
     name: '出勤资料整理',
     icon: Upload,
@@ -65,6 +70,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'atlas-merge',
+    auditSlug: 'atlas_merge',
     permission: 'tool:atlas-merge:use',
     name: 'AtlasLog Merge',
     icon: FolderTree,
@@ -74,6 +80,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'cpk-charts',
+    auditSlug: 'cpk',
     permission: 'tool:cpk-charts:use',
     name: 'OPP',
     icon: BarChart3,
@@ -83,6 +90,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'image-to-pdf',
+    auditSlug: 'image_to_pdf',
     permission: 'tool:image-to-pdf:use',
     name: '图片转 PDF',
     icon: Images,
@@ -92,6 +100,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'box-plot',
+    auditSlug: 'box_plot',
     permission: 'tool:box-plot:use',
     name: '箱线图',
     icon: ChartColumn,
@@ -101,6 +110,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'tt-time',
+    auditSlug: 'tt_time',
     permission: 'tool:tt-time:use',
     name: '测试时间分析',
     icon: Timer,
@@ -110,6 +120,7 @@ export const toolsConfig: ToolDefinition[] = [
   },
   {
     id: 'retest-rate',
+    auditSlug: 'retest_rate',
     permission: 'tool:retest-rate:use',
     name: '重测率统计',
     icon: RotateCcw,

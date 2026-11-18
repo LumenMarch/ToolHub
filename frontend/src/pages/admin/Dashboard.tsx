@@ -22,6 +22,7 @@ import AdminLoadingState from './components/AdminLoadingState';
 import PermissionGuard from '../../components/guards/PermissionGuard';
 import { usePermission } from '../../hooks/use-permission';
 import { useAdminApi } from './hooks/use-admin-api';
+import { findToolByAuditSlug } from '../../lib/tool-audit';
 import type {
   DailyActiveStat,
   OverviewStats,
@@ -65,25 +66,41 @@ function ChartRangeSelector<T extends number | null>({
   );
 }
 
-/** 工具 action slug → 中文名。
- *  slug 从后端 action 派生：去掉 "tool." 前缀后，去掉最后一个 ".操作段"
- *  （如 tool.attendance.process → attendance）。
- *  名称来源：frontend/src/config/tools.ts 的 id/name；slug 与 tools.ts id
- *  存在连字符/下划线差异时在此显式映射（attendance → attendance-organizer）。
- *  tool.meta.* 为管理员在后台配置工具的审计动作（backend/app/api/endpoints/admin_tools.py），
- *  非用户工具调用，单独归类为"工具配置管理"避免混入工具调用。
- *  不在映射表中的 slug 回退显示 slug 本身，不报错。 */
-const TOOL_SLUG_NAMES: Record<string, string> = {
-  attendance: '出勤资料整理',
-  atlas_merge: 'AtlasLog Merge',
-  meta: '工具配置管理',
-};
-
-/** 图表数据条目：label 为归并后的工具中文名，actions 保留原始 action 列表用于 tooltip。 */
+/** 图表数据条目：label 为工具中文名，actions 保留原始 action 列表用于 tooltip。 */
 interface ToolCallChartItem {
   label: string;
   value: number;
   actions: string[];
+}
+
+/** 同一工具的不同操作（如 analyze/download）归并为一个条目并相加；
+ *  非 tool.* 动作与已下线工具的动作被忽略。最终按 count 降序。 */
+function buildToolCallChartData(
+  toolCalls: ToolCallStat[],
+): ToolCallChartItem[] {
+  const byTool = new Map<string, ToolCallChartItem>();
+  for (const toolCall of toolCalls) {
+    if (!toolCall.action.startsWith('tool.')) continue;
+    const parts = toolCall.action.slice('tool.'.length).split('.');
+    // slug = 去掉最后一个 ".操作段"（如 tool.attendance.process → attendance）。
+    if (parts.length < 2) continue;
+    const slug = parts.slice(0, -1).join('.');
+    const tool = findToolByAuditSlug(slug);
+    if (!tool) continue;
+
+    const existing = byTool.get(tool.id);
+    if (existing) {
+      existing.value += toolCall.count;
+      existing.actions.push(toolCall.action);
+    } else {
+      byTool.set(tool.id, {
+        label: tool.name,
+        value: toolCall.count,
+        actions: [toolCall.action],
+      });
+    }
+  }
+  return [...byTool.values()].sort((a, b) => b.value - a.value);
 }
 
 const AdminDashboard: React.FC = () => {
@@ -190,25 +207,9 @@ const AdminDashboard: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canViewStats, reloadKey, activeDays]);
 
-  // 工具调用统计：同一工具不同操作（如 analyze/download）按 slug 归并为一个条目，
-  // count 相加，label 显示中文工具名；最终按 count 降序（与后端返回排序一致）。
-  const toolCallChartData = toolCalls
-    .reduce<ToolCallChartItem[]>((items, toolCall) => {
-      if (!toolCall.action.startsWith('tool.')) return items;
-      const parts = toolCall.action.slice('tool.'.length).split('.');
-      // slug = 去掉最后一个 ".操作段"（如 tool.attendance.process → attendance）。
-      const slug = parts.length > 1 ? parts.slice(0, -1).join('.') : parts.join('.');
-      const label = TOOL_SLUG_NAMES[slug] ?? slug;
-      const existing = items.find((item) => item.label === label);
-      if (existing) {
-        existing.value += toolCall.count;
-        existing.actions.push(toolCall.action);
-      } else {
-        items.push({ label, value: toolCall.count, actions: [toolCall.action] });
-      }
-      return items;
-    }, [])
-    .sort((a, b) => b.value - a.value);
+  // 工具调用统计：同一工具不同操作（如 analyze/download）按工具归并为一个条目，
+  // count 相加，label 显示工具中文名；已下线工具的历史记录不展示。
+  const toolCallChartData = buildToolCallChartData(toolCalls);
 
   if (!canViewStats) {
     return (
