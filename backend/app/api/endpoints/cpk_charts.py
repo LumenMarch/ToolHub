@@ -1,20 +1,148 @@
 import base64
 import os
+import struct
 import tempfile
+import threading
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.core.auth import require_tool_permission
+from app.core.config import settings
 from app.models.user import User
 from app.services.audit import log_action
+from app.services.cpk_charts import parser as opp_parser
+from app.services.upload.store import (
+    UploadNotCompleteError,
+    UploadNotFoundError,
+    UploadOwnershipError,
+    UploadStore,
+)
 
 router = APIRouter()
+
+UPLOAD_STORE = UploadStore()
+OPP_CACHE_DIR = Path(settings.TASK_ARTIFACT_ROOT) / "cpk_charts"
+# 同一上传只解析一次：并发请求排队，其余命中缓存
+_PARSE_LOCKS: dict[str, threading.Lock] = {}
+_PARSE_LOCKS_GUARD = threading.Lock()
+
+
+def _parse_lock(upload_id: str) -> threading.Lock:
+    with _PARSE_LOCKS_GUARD:
+        return _PARSE_LOCKS.setdefault(upload_id, threading.Lock())
+
+
+class OppParseRequest(BaseModel):
+    upload_id: str = Field(min_length=1, max_length=64)
+
+
+class OppColumnMeta(BaseModel):
+    name: str
+    unit: str
+    upper: str
+    lower: str
+
+
+class OppParseResponse(BaseModel):
+    upload_id: str
+    title: str
+    records: int
+    columns: list[OppColumnMeta]
+    all_columns: list[str]
+    skipped_columns: list[str]
+    has_fail_records: bool
+    # 状态掩码（base64，1 = PASS/空），无状态列时为 null
+    status_pass: str | None
+    header_row_index: int
+    data_start_row: int
+    sn_column: int | None
+    start_time_column: int | None
+    end_time_column: int | None
+    lower_limit_row: int | None
+    upper_limit_row: int | None
+    unit_row: int | None
+
+
+def _owned_upload(upload_id: str, user_id: int) -> dict:
+    """校验上传归属，失败时返回明确 HTTP 状态。"""
+    try:
+        return UPLOAD_STORE.get_owned_info(upload_id, user_id)
+    except UploadOwnershipError as exc:
+        raise HTTPException(status_code=403, detail="无权访问此上传") from exc
+    except UploadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="上传不存在") from exc
+    except UploadNotCompleteError as exc:
+        raise HTTPException(status_code=409, detail="上传尚未完成") from exc
+
+
+@router.post("/parse", response_model=OppParseResponse)
+def parse_opp_dataset(
+    req: OppParseRequest,
+    request: Request,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(require_tool_permission("cpk-charts")),
+) -> OppParseResponse:
+    """解析 tus 上传的 CSV/Excel 为 OPP 数据集（首次解析后落盘缓存）。"""
+    info = _owned_upload(req.upload_id, current_user.id)
+    meta = opp_parser.read_meta(OPP_CACHE_DIR, req.upload_id)
+    if meta is None:
+        lock = _parse_lock(req.upload_id)
+        with lock:
+            meta = opp_parser.read_meta(OPP_CACHE_DIR, req.upload_id)
+            if meta is None:
+                path = UPLOAD_STORE.get_owned_file_path(req.upload_id, current_user.id)
+                try:
+                    dataset = opp_parser.parse_file(path, info.get("filename", ""))
+                except opp_parser.OppParseError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                opp_parser.write_cache(OPP_CACHE_DIR, req.upload_id, dataset)
+                meta = dataset.meta()
+        log_action(
+            db,
+            request=request,
+            user=current_user,
+            action="tool.cpk_charts.parse",
+            target_type="tool",
+            target_id="cpk-charts",
+            detail={"ok": True, "records": meta.get("records", 0)},
+        )
+    status = opp_parser.read_status(OPP_CACHE_DIR, req.upload_id)
+    return OppParseResponse(
+        upload_id=req.upload_id,
+        status_pass=base64.b64encode(status).decode("ascii") if status else None,
+        **meta,
+    )
+
+
+@router.get("/column/{upload_id}/{index}")
+def get_opp_column(
+    upload_id: str,
+    index: int,
+    current_user: User = Depends(require_tool_permission("cpk-charts")),
+) -> Response:
+    """返回一列原始数值：``[u32 n][f64 × n][u8 × n]``。
+
+    数值里的 NaN 表示该单元没有可解析数值；u8 标记 1 = 非空（非 NA）单元，
+    前端据此还原 Data Count / NA Count 语义。
+    """
+    _owned_upload(upload_id, current_user.id)
+    data = opp_parser.read_column(OPP_CACHE_DIR, upload_id, index)
+    if data is None:
+        raise HTTPException(status_code=404, detail="数据集未解析或列不存在")
+    values, flags = data
+    body = struct.pack("<I", len(flags)) + values + flags
+    return Response(
+        content=body,
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
 
 MAX_ITEM_CHARS = 200
 MAX_TOTAL_ITEM_CHARS = 50_000

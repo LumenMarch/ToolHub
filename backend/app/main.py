@@ -149,11 +149,14 @@ initial_admin_bootstrap_error: str | None = None
 def cleanup_task_artifacts() -> None:
     """清理过期上传、任务产物，并按 TTL 和容量限制回收缓存。"""
     from app.api.endpoints.asset_comparison import asset_comparison_job_manager
+    from app.api.endpoints.cpk_charts import OPP_CACHE_DIR
+    from app.services.cpk_charts import parser as opp_parser
     from app.services.task_artifacts import task_artifact_store
     from app.services.upload.store import UploadStore
 
     asset_comparison_job_manager.cleanup()
     UploadStore().cleanup_expired(max_age_hours=24)
+    opp_parser.cleanup(OPP_CACHE_DIR, max_age_hours=24 * 3)
     result = task_artifact_store.cleanup()
     logger.info(
         "task artifacts cleaned: expired_tasks={} expired_blobs={} "
