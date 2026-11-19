@@ -74,10 +74,16 @@ const formatNumber = (value: number): string => {
 const shortenTail = (text: string, max: number): string =>
   text.length > max ? `…${text.slice(-(max - 1))}` : text;
 
+const ISO_DATE_LABEL = /^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?$/;
+
 /** 分组名常有相同前缀（机台/工位），截尾保留可区分的后缀。 */
 const axisLabels = (names: string[]): string[] => {
   if (names.length === 0) return [];
   if (names.length === 1) return [shortenTail(names[0], MAX_LABEL_LENGTH)];
+  // 时间桶标签：保留月-日与时间，去掉重复年份；tooltip/表格仍显示完整值
+  if (names.every((name) => ISO_DATE_LABEL.test(name))) {
+    return names.map((name) => name.slice(5));
+  }
 
   let prefixLength = names[0].length;
   for (const name of names) {
@@ -340,7 +346,7 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
                 `样本数 n: ${g.count}`,
                 `${whiskerMode === 'tukey' ? 'Whisker low' : 'MIN'}: ${formatNumber(whiskerMode === 'tukey' ? g.whiskerLow : g.min)}`,
                 `Q1: ${formatNumber(g.q1)}`,
-                `中位数: ${formatNumber(g.median)}`,
+                `Median: ${formatNumber(g.median)}`,
                 `Q3: ${formatNumber(g.q3)}`,
                 `${whiskerMode === 'tukey' ? 'Whisker high' : 'MAX'}: ${formatNumber(whiskerMode === 'tukey' ? g.whiskerHigh : g.max)}`,
                 `IQR: ${formatNumber(g.iqr)}`,
@@ -493,7 +499,7 @@ const BoxPlotChart = forwardRef<BoxPlotChartHandle, BoxPlotChartProps>(
                       const p = params as { dataIndex: number };
                       const g = groups[p.dataIndex];
                       if (!g) return '';
-                      return `中位数 ${formatNumber(g.median)}`;
+                      return `Median ${formatNumber(g.median)}`;
                     },
                     fontSize: 8.5,
                     fontWeight: 'bold' as const,
