@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -295,28 +296,30 @@ const CreateRoleDialog: React.FC<CreateRoleDialogProps> = ({ open, onClose, onSu
           <DialogTitle>新建角色</DialogTitle>
           <DialogDescription>定义角色名称与描述。</DialogDescription>
         </DialogHeader>
-        <form id="create-role-form" onSubmit={handleSubmit}>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="create-role-name">角色名</FieldLabel>
-              <Input
-                id="create-role-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="create-role-description">描述</FieldLabel>
-              <Input
-                id="create-role-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </Field>
-            {error ? <FieldError>{error}</FieldError> : null}
-          </FieldGroup>
-        </form>
+        <DialogBody>
+          <form id="create-role-form" onSubmit={handleSubmit}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="create-role-name">角色名</FieldLabel>
+                <Input
+                  id="create-role-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="create-role-description">描述</FieldLabel>
+                <Input
+                  id="create-role-description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </Field>
+              {error ? <FieldError>{error}</FieldError> : null}
+            </FieldGroup>
+          </form>
+        </DialogBody>
         <DialogFooter>
           <Button
             type="button"
@@ -466,98 +469,100 @@ const EditRoleDialog: React.FC<EditRoleDialogProps> = ({ target, onClose, onSubm
           <DialogTitle>编辑角色</DialogTitle>
           <DialogDescription>更新角色信息与权限分配。</DialogDescription>
         </DialogHeader>
-        <form id="edit-role-form" onSubmit={handleSubmit}>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="edit-role-name">角色名</FieldLabel>
-              <Input
-                id="edit-role-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="edit-role-description">描述</FieldLabel>
-              <Input
-                id="edit-role-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </Field>
+        <DialogBody>
+          <form id="edit-role-form" onSubmit={handleSubmit}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="edit-role-name">角色名</FieldLabel>
+                <Input
+                  id="edit-role-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="edit-role-description">描述</FieldLabel>
+                <Input
+                  id="edit-role-description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </Field>
 
-            <div className="flex flex-col gap-2 border-t pt-4">
-              <Label className="text-sm text-muted-foreground">
-                权限 ({selectedPermIds.length}/{allPermissions.length})
-              </Label>
-              <div className="flex max-h-56 flex-col gap-3 overflow-y-auto pr-1">
-                {permissionGroups.map((group) => (
-                  <div key={group.title} className="flex flex-col gap-1.5">
-                    <p className="text-sm text-muted-foreground">
-                      {group.title} ({group.items.length})
-                    </p>
-                    {/* 工具权限组：二选一模式——工具使用者（全部工具）/ 自定义逐个勾选 */}
-                    {group.title === '工具权限' && (
-                      <div className="flex flex-col gap-1 pt-0.5 pb-1">
-                        <label className="flex cursor-pointer items-center gap-2 text-sm">
-                          <input
-                            type="radio"
-                            name="tool-permission-mode"
-                            checked={toolMode === 'all'}
-                            onChange={() => switchToolMode('all')}
-                            className="size-4 accent-primary"
-                          />
-                          <span className="text-sm text-muted-foreground">
-                            工具使用者（全部工具）
-                          </span>
-                        </label>
-                        <label className="flex cursor-pointer items-center gap-2 text-sm">
-                          <input
-                            type="radio"
-                            name="tool-permission-mode"
-                            checked={toolMode === 'custom'}
-                            onChange={() => switchToolMode('custom')}
-                            className="size-4 accent-primary"
-                          />
-                          <span className="text-sm text-muted-foreground">
-                            自定义工具权限
-                          </span>
-                        </label>
-                      </div>
-                    )}
-                    {group.items.map((perm) => {
-                      // 「工具使用者」模式下工具权限复选框整体禁用，只能由 radio 统一授予/收回
-                      const disabled =
-                        group.title === '工具权限' && toolMode === 'all';
-                      return (
-                        <label
-                          key={perm.id}
-                          className={`flex items-center gap-2 text-sm ${
-                            disabled
-                              ? 'cursor-not-allowed opacity-60'
-                              : 'cursor-pointer'
-                          }`}
-                        >
-                          <Checkbox
-                            checked={selectedPermissionIdSet.has(perm.id)}
-                            onCheckedChange={() => togglePermission(perm.id)}
-                            disabled={disabled}
-                          />
-                          <code className="w-24 shrink-0 text-xs text-muted-foreground">
-                            {perm.codename}
-                          </code>
-                          <span className="text-sm">{perm.description}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                ))}
+              <div className="flex flex-col gap-2 border-t pt-4">
+                <Label className="text-sm text-muted-foreground">
+                  权限 ({selectedPermIds.length}/{allPermissions.length})
+                </Label>
+                <div className="flex flex-col gap-3">
+                  {permissionGroups.map((group) => (
+                    <div key={group.title} className="flex flex-col gap-1.5">
+                      <p className="text-sm text-muted-foreground">
+                        {group.title} ({group.items.length})
+                      </p>
+                      {/* 工具权限组：二选一模式——工具使用者（全部工具）/ 自定义逐个勾选 */}
+                      {group.title === '工具权限' && (
+                        <div className="flex flex-col gap-1 pt-0.5 pb-1">
+                          <label className="flex cursor-pointer items-center gap-2 text-sm">
+                            <input
+                              type="radio"
+                              name="tool-permission-mode"
+                              checked={toolMode === 'all'}
+                              onChange={() => switchToolMode('all')}
+                              className="size-4 accent-primary"
+                            />
+                            <span className="text-sm text-muted-foreground">
+                              工具使用者（全部工具）
+                            </span>
+                          </label>
+                          <label className="flex cursor-pointer items-center gap-2 text-sm">
+                            <input
+                              type="radio"
+                              name="tool-permission-mode"
+                              checked={toolMode === 'custom'}
+                              onChange={() => switchToolMode('custom')}
+                              className="size-4 accent-primary"
+                            />
+                            <span className="text-sm text-muted-foreground">
+                              自定义工具权限
+                            </span>
+                          </label>
+                        </div>
+                      )}
+                      {group.items.map((perm) => {
+                        // 「工具使用者」模式下工具权限复选框整体禁用，只能由 radio 统一授予/收回
+                        const disabled =
+                          group.title === '工具权限' && toolMode === 'all';
+                        return (
+                          <label
+                            key={perm.id}
+                            className={`flex items-center gap-2 text-sm ${
+                              disabled
+                                ? 'cursor-not-allowed opacity-60'
+                                : 'cursor-pointer'
+                            }`}
+                          >
+                            <Checkbox
+                              checked={selectedPermissionIdSet.has(perm.id)}
+                              onCheckedChange={() => togglePermission(perm.id)}
+                              disabled={disabled}
+                            />
+                            <code className="w-24 shrink-0 text-xs text-muted-foreground">
+                              {perm.codename}
+                            </code>
+                            <span className="text-sm">{perm.description}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            {error ? <FieldError>{error}</FieldError> : null}
-          </FieldGroup>
-        </form>
+              {error ? <FieldError>{error}</FieldError> : null}
+            </FieldGroup>
+          </form>
+        </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
             取消

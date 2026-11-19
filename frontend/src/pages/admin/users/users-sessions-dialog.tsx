@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -150,7 +151,7 @@ export function UsersSessionsDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <div className='flex max-h-80 flex-col gap-2 overflow-y-auto'>
+          <DialogBody className='flex flex-col gap-2'>
             {sessionsQuery.isPending ? (
               <div className='flex flex-col gap-2'>
                 <Skeleton className='h-16 w-full' />
@@ -209,7 +210,7 @@ export function UsersSessionsDialog({
                 )
               })
             )}
-          </div>
+          </DialogBody>
         </DialogContent>
       </Dialog>
 
