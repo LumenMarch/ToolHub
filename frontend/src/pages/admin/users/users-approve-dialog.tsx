@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -141,144 +142,146 @@ export function UsersApproveDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form id='approve-user-form' onSubmit={onSubmit} className='flex flex-col gap-4'>
-          <Controller
-            control={control}
-            name='roleIds'
-            render={({ field }) => (
-              <div className='flex flex-col gap-1.5'>
-                <Label className='text-sm text-muted-foreground'>
-                  分配角色（可留空）
-                </Label>
-                {rolesQuery.isPending && (
-                  <p className='text-xs text-muted-foreground'>
-                    角色列表加载中...
-                  </p>
-                )}
-                {rolesQuery.isError && (
-                  <div className='flex items-center gap-2 text-xs text-destructive'>
-                    <span>角色列表加载失败</span>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='xs'
-                      onClick={() => void rolesQuery.refetch()}
-                    >
-                      重试
-                    </Button>
-                  </div>
-                )}
-                {!rolesQuery.isPending &&
-                  !rolesQuery.isError &&
-                  visibleRoles.length === 0 && (
+        <DialogBody>
+          <form id='approve-user-form' onSubmit={onSubmit} className='flex flex-col gap-4'>
+            <Controller
+              control={control}
+              name='roleIds'
+              render={({ field }) => (
+                <div className='flex flex-col gap-1.5'>
+                  <Label className='text-sm text-muted-foreground'>
+                    分配角色（可留空）
+                  </Label>
+                  {rolesQuery.isPending && (
                     <p className='text-xs text-muted-foreground'>
-                      暂无自定义角色可选（"工具使用者"由下方工具权限模式决定）。
+                      角色列表加载中...
                     </p>
                   )}
-                {visibleRoles.map((role) => {
-                  const checked = field.value.includes(role.id)
+                  {rolesQuery.isError && (
+                    <div className='flex items-center gap-2 text-xs text-destructive'>
+                      <span>角色列表加载失败</span>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='xs'
+                        onClick={() => void rolesQuery.refetch()}
+                      >
+                        重试
+                      </Button>
+                    </div>
+                  )}
+                  {!rolesQuery.isPending &&
+                    !rolesQuery.isError &&
+                    visibleRoles.length === 0 && (
+                      <p className='text-xs text-muted-foreground'>
+                        暂无自定义角色可选（"工具使用者"由下方工具权限模式决定）。
+                      </p>
+                    )}
+                  {visibleRoles.map((role) => {
+                    const checked = field.value.includes(role.id)
+                    return (
+                      <label
+                        key={role.id}
+                        className='flex cursor-pointer items-center gap-2 text-sm'
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(value) => {
+                            const next = value
+                              ? [...field.value, role.id]
+                              : field.value.filter((id) => id !== role.id)
+                            field.onChange(next)
+                          }}
+                        />
+                        <span>{role.name}</span>
+                        <span className='ml-auto text-xs text-muted-foreground'>
+                          {role.permission_count} 项权限
+                        </span>
+                      </label>
+                    )
+                  })}
+                  {errors.roleIds && (
+                    <p className='text-sm text-destructive'>
+                      {errors.roleIds.message}
+                    </p>
+                  )}
+                </div>
+              )}
+            />
+
+            {/* 工具权限：二选一（工具使用者全部工具 / 自定义逐工具勾选），风格同角色编辑弹窗 */}
+            <div className='flex flex-col gap-1.5 border-t pt-4'>
+              <Label className='text-sm text-muted-foreground'>
+                工具权限
+              </Label>
+              {permissionsQuery.isPending && (
+                <p className='text-xs text-muted-foreground'>
+                  权限列表加载中...
+                </p>
+              )}
+              <div className='flex flex-col gap-1 pt-0.5'>
+                <label className='flex cursor-pointer items-center gap-2 text-sm'>
+                  <input
+                    type='radio'
+                    name='tool-permission-mode'
+                    checked={toolMode === 'all'}
+                    onChange={() => handleToolModeChange('all')}
+                    className='size-4 accent-primary'
+                  />
+                  <span className='text-sm text-muted-foreground'>
+                    工具使用者（全部工具）
+                  </span>
+                </label>
+                <label className='flex cursor-pointer items-center gap-2 text-sm'>
+                  <input
+                    type='radio'
+                    name='tool-permission-mode'
+                    checked={toolMode === 'custom'}
+                    onChange={() => handleToolModeChange('custom')}
+                    className='size-4 accent-primary'
+                  />
+                  <span className='text-sm text-muted-foreground'>
+                    自定义工具权限
+                  </span>
+                </label>
+              </div>
+              {!permissionsQuery.isPending && allToolPerms.length === 0 && (
+                <p className='text-xs text-muted-foreground'>
+                  暂无工具权限可选。
+                </p>
+              )}
+              <div className='flex flex-col gap-1.5 pt-1'>
+                {allToolPerms.map((perm) => {
+                  // 「工具使用者」模式下复选框整体禁用，只能由 radio 统一授予/收回
+                  const disabled = toolMode === 'all'
                   return (
                     <label
-                      key={role.id}
-                      className='flex cursor-pointer items-center gap-2 text-sm'
+                      key={perm.id}
+                      className={`flex items-center gap-2 text-sm ${
+                        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                      }`}
                     >
                       <Checkbox
-                        checked={checked}
+                        checked={toolMode === 'all' || toolIdSet.has(perm.id)}
+                        disabled={disabled}
                         onCheckedChange={(value) => {
-                          const next = value
-                            ? [...field.value, role.id]
-                            : field.value.filter((id) => id !== role.id)
-                          field.onChange(next)
+                          setToolIds((prev) =>
+                            value
+                              ? [...prev, perm.id]
+                              : prev.filter((id) => id !== perm.id),
+                          )
                         }}
                       />
-                      <span>{role.name}</span>
-                      <span className='ml-auto text-xs text-muted-foreground'>
-                        {role.permission_count} 项权限
-                      </span>
+                      <code className='text-xs text-muted-foreground'>
+                        {perm.codename}
+                      </code>
                     </label>
                   )
                 })}
-                {errors.roleIds && (
-                  <p className='text-sm text-destructive'>
-                    {errors.roleIds.message}
-                  </p>
-                )}
               </div>
-            )}
-          />
-
-          {/* 工具权限：二选一（工具使用者全部工具 / 自定义逐工具勾选），风格同角色编辑弹窗 */}
-          <div className='flex flex-col gap-1.5 border-t pt-4'>
-            <Label className='text-sm text-muted-foreground'>
-              工具权限
-            </Label>
-            {permissionsQuery.isPending && (
-              <p className='text-xs text-muted-foreground'>
-                权限列表加载中...
-              </p>
-            )}
-            <div className='flex flex-col gap-1 pt-0.5'>
-              <label className='flex cursor-pointer items-center gap-2 text-sm'>
-                <input
-                  type='radio'
-                  name='tool-permission-mode'
-                  checked={toolMode === 'all'}
-                  onChange={() => handleToolModeChange('all')}
-                  className='size-4 accent-primary'
-                />
-                <span className='text-sm text-muted-foreground'>
-                  工具使用者（全部工具）
-                </span>
-              </label>
-              <label className='flex cursor-pointer items-center gap-2 text-sm'>
-                <input
-                  type='radio'
-                  name='tool-permission-mode'
-                  checked={toolMode === 'custom'}
-                  onChange={() => handleToolModeChange('custom')}
-                  className='size-4 accent-primary'
-                />
-                <span className='text-sm text-muted-foreground'>
-                  自定义工具权限
-                </span>
-              </label>
             </div>
-            {!permissionsQuery.isPending && allToolPerms.length === 0 && (
-              <p className='text-xs text-muted-foreground'>
-                暂无工具权限可选。
-              </p>
-            )}
-            <div className='flex max-h-40 flex-col gap-1.5 overflow-y-auto pr-1 pt-1'>
-              {allToolPerms.map((perm) => {
-                // 「工具使用者」模式下复选框整体禁用，只能由 radio 统一授予/收回
-                const disabled = toolMode === 'all'
-                return (
-                  <label
-                    key={perm.id}
-                    className={`flex items-center gap-2 text-sm ${
-                      disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                    }`}
-                  >
-                    <Checkbox
-                      checked={toolMode === 'all' || toolIdSet.has(perm.id)}
-                      disabled={disabled}
-                      onCheckedChange={(value) => {
-                        setToolIds((prev) =>
-                          value
-                            ? [...prev, perm.id]
-                            : prev.filter((id) => id !== perm.id),
-                        )
-                      }}
-                    />
-                    <code className='text-xs text-muted-foreground'>
-                      {perm.codename}
-                    </code>
-                  </label>
-                )
-              })}
-            </div>
-          </div>
-        </form>
+          </form>
+        </DialogBody>
 
         <DialogFooter className='sm:justify-between'>
           {!permissionsReady ? (

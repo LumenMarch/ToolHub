@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -259,7 +260,7 @@ function ToolPermissionPicker({
           暂无工具权限可选。
         </p>
       )}
-      <div className='flex max-h-40 flex-col gap-1.5 overflow-y-auto pr-1 pt-1'>
+      <div className='flex flex-col gap-1.5 pt-1'>
         {allToolPerms.map((perm) => {
           // 「工具使用者」模式（或编辑自己）下复选框整体禁用，只能由 radio 统一授予/收回
           const checkboxDisabled = toolMode === 'all' || disabled
@@ -691,56 +692,58 @@ export function UsersActionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form id='user-form' onSubmit={onSubmit} className='flex flex-col gap-4'>
-          <UserCredentialsFields register={register} errors={errors} isEdit={isEdit} />
+        <DialogBody>
+          <form id='user-form' onSubmit={onSubmit} className='flex flex-col gap-4'>
+            <UserCredentialsFields register={register} errors={errors} isEdit={isEdit} />
 
-          <Controller
-            control={control}
-            name='roleIds'
-            render={({ field }) => (
-              <RolePicker
-                value={field.value}
-                onChange={field.onChange}
-                roles={visibleRoles}
-                pending={rolesQuery.isPending}
-                error={errors.roleIds?.message}
-                disabled={isSelf}
-                toolMode={toolMode}
-                isEdit={isEdit}
-              />
-            )}
-          />
-
-          {/* 工具权限：二选一（工具使用者全部工具 / 自定义逐工具勾选），风格同角色编辑弹窗 */}
-          <ToolPermissionPicker
-            toolMode={toolMode}
-            onModeChange={handleToolModeChange}
-            allToolPerms={allToolPerms}
-            toolIdSet={toolIdSet}
-            onToggleToolId={toggleToolId}
-            disabled={isSelf}
-            isPending={permissionsQuery.isPending}
-          />
-
-          {isEdit && (
             <Controller
               control={control}
-              name='isActive'
+              name='roleIds'
               render={({ field }) => (
-                <AccountStatusField
+                <RolePicker
                   value={field.value}
-                  onChange={(value) => field.onChange(value)}
+                  onChange={field.onChange}
+                  roles={visibleRoles}
+                  pending={rolesQuery.isPending}
+                  error={errors.roleIds?.message}
                   disabled={isSelf}
+                  toolMode={toolMode}
+                  isEdit={isEdit}
                 />
               )}
             />
-          )}
-          {isEdit && isSelf && (
-            <p className='text-sm text-muted-foreground'>
-              不能停用自己的账号
-            </p>
-          )}
-        </form>
+
+            {/* 工具权限：二选一（工具使用者全部工具 / 自定义逐工具勾选），风格同角色编辑弹窗 */}
+            <ToolPermissionPicker
+              toolMode={toolMode}
+              onModeChange={handleToolModeChange}
+              allToolPerms={allToolPerms}
+              toolIdSet={toolIdSet}
+              onToggleToolId={toggleToolId}
+              disabled={isSelf}
+              isPending={permissionsQuery.isPending}
+            />
+
+            {isEdit && (
+              <Controller
+                control={control}
+                name='isActive'
+                render={({ field }) => (
+                  <AccountStatusField
+                    value={field.value}
+                    onChange={(value) => field.onChange(value)}
+                    disabled={isSelf}
+                  />
+                )}
+              />
+            )}
+            {isEdit && isSelf && (
+              <p className='text-sm text-muted-foreground'>
+                不能停用自己的账号
+              </p>
+            )}
+          </form>
+        </DialogBody>
 
         <DialogFooter
           // 有提示时才用两端对齐；否则 space-between 会把按钮挤到左侧

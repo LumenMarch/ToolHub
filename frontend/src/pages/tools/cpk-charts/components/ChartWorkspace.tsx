@@ -6,6 +6,7 @@ import { Download, Maximize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -357,13 +358,13 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
       )}
 
       <Dialog open={Boolean(zoom)} onOpenChange={(open) => { if (!open) setZoom(null); }}>
-        <DialogContent className="max-h-[92vh] w-full max-w-5xl overflow-auto sm:max-w-5xl">
+        <DialogContent className="w-full max-w-5xl [--dialog-max-height:92vh] sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>数据集 {zoom} · 放大视图</DialogTitle>
           </DialogHeader>
-          <div className="overflow-auto">
+          <DialogBody>
             {zoom === 'A' && activeA ? renderChart(activeA.analysis) : zoom === 'B' && activeB ? renderChart(activeB.analysis) : null}
-          </div>
+          </DialogBody>
         </DialogContent>
       </Dialog>
     </div>
