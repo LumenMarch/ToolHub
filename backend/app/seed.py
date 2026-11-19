@@ -70,11 +70,14 @@ ROLES = {
         *TOOL_PERMISSION_CODENAMES,
     ],
     "用户管理员": ["user:read", "user:write", "role:read"],
-    "审计员": ["audit:read"],
     "工具管理员": ["tool_meta:read", "tool_meta:write"],
-    "统计查看者": ["stats:read"],
     "工具使用者": TOOL_PERMISSION_CODENAMES,
 }
+
+# 已下线的内置角色：启动时从存量库删除，避免老库继续展示/分配。
+# 删除后，仅持有这些角色的用户会失去 audit:read / stats:read；
+# 需要单权限时由管理员改用自定义角色，而不是重新引入内置单权限角色。
+RETIRED_ROLE_NAMES = ("审计员", "统计查看者")
 
 
 def _seed_all(db: Session) -> None:
@@ -289,6 +292,31 @@ def migrate_retired_tools() -> None:
             "、".join(retired_codenames) or "-",
             len(retired_metas),
         )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def migrate_retired_roles() -> None:
+    """删除已下线的内置角色及其用户/权限关联（幂等）。
+
+    与 migrate_retired_tools 同理：run_seed 只补齐、不删除，存量库会保留
+    已从 ROLES 移除的角色。启动时按 RETIRED_ROLE_NAMES 清理，用户绑定与
+    权限绑定随角色一并删除；权限 codename 本身保留（超级管理员等仍在使用）。
+    无残留时为 no-op；同一事务提交，失败整体回滚。
+    """
+    db = SessionLocal()
+    try:
+        roles = db.scalars(select(Role).where(Role.name.in_(RETIRED_ROLE_NAMES))).all()
+        if not roles:
+            return
+        removed = sorted(role.name for role in roles)
+        for role in roles:
+            db.delete(role)
+        db.commit()
+        logger.info("已删除下线角色：{}", "、".join(removed))
     except Exception:
         db.rollback()
         raise

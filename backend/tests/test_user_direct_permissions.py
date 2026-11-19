@@ -479,15 +479,21 @@ def test_delete_user_with_roles_regression(admin_client, db):
 
 
 def test_super_admin_can_delete_user_holding_unrelated_role(admin_client, db):
-    """超管删除持"统计查看者"的用户不应因角色名子集判断被误拒。
+    """超管删除持单权限自定义角色的用户不应因角色名子集判断被误拒。
 
     回归：_ensure_can_manage 用"管理员角色名 ⊇ 目标角色名"判断层级，
-    超管只持有 [超级管理员, 工具使用者]，目标持有 [统计查看者, 工具使用者]
+    超管只持有 [超级管理员, 工具使用者]，目标持有 [数据观察员, 工具使用者]
     时子集不成立 → DELETE 返回 400，超管无法删除任何非常规角色用户。
+    内置单权限角色已下线，这里显式创建一个自定义角色复现该场景。
     """
     client, root_token = admin_client
     alice_id = register(client, "alice").json()["id"]
-    stats_role = db.scalars(select(Role).where(Role.name == "统计查看者")).one()
+    stats_role = Role(name="数据观察员")
+    stats_role.permissions = [
+        db.scalars(select(Permission).where(Permission.codename == "stats:read")).one()
+    ]
+    db.add(stats_role)
+    db.commit()
 
     resp = client.post(
         f"/api/v1/admin/users/{alice_id}/approve",

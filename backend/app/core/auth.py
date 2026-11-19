@@ -130,7 +130,7 @@ def ensure_can_grant_roles(db: Session, admin: User, roles: list) -> None:
 
     语义：角色是正交的权限包，不是层级。判断依据是"被授予角色的权限
     必须是管理员自身有效权限的子集"，而不是"管理员必须持有同名的角色"。
-    超管因此可以授予「统计查看者」这类自己没有挂载的角色（其 stats:read
+    超管因此可以授予「用户管理员」这类自己没有挂载的角色（其 user:* / role:read
     已在超管的权限集合内），受限管理员仍无法借审批给自己或他人提权。
     """
     admin_permissions = get_user_permissions(db, admin)
@@ -149,7 +149,7 @@ def ensure_can_manage(db: Session, admin: User, target: User) -> None:
 
     同样按有效权限集合（角色权限 ∪ 直接工具权限）比较，而非角色名子集：
     角色名子集会让持有 [超级管理员, 工具使用者] 的超管无法删除持有
-    [统计查看者, 工具使用者] 的普通用户 —— 两种角色名互不包含，但前者
+    [用户管理员, 工具使用者] 的受限管理员 —— 两种角色名互不包含，但前者
     的权限集合完整覆盖后者。
     """
     admin_permissions = get_user_permissions(db, admin)

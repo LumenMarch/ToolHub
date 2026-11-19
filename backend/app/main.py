@@ -18,6 +18,7 @@ from app.db.session import engine, ensure_schema_compat
 from app.seed import (
     migrate_admin_permissions,
     migrate_per_tool_permissions,
+    migrate_retired_roles,
     migrate_retired_tools,
     run_seed,
 )
@@ -40,6 +41,8 @@ run_seed()
 migrate_per_tool_permissions()
 # 存量库补齐新增的管理权限（如 llm_config:*）并让内置角色回到声明集（幂等）
 migrate_admin_permissions()
+# 删除已下线的内置角色及其关联（幂等）
+migrate_retired_roles()
 # 清理已下线工具在库中的残留（权限行/角色与用户授权/元数据，幂等）
 migrate_retired_tools()
 
