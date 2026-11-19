@@ -17,6 +17,10 @@ class BoxPlotAnalyzeRequest(BaseModel):
     upload_id: str = Field(..., min_length=1, description="数据文件上传 ID")
     value_col: str = Field(..., min_length=1, description="数值列名")
     group_col: str | None = Field(default=None, description="分组列名，缺省不分组")
+    time_unit: Literal["day", "shift", "hour"] | None = Field(
+        default=None,
+        description="时间列分组粒度：日 / 8 小时班次 / 小时；仅对时间列生效",
+    )
     quartile_method: Literal["R7", "JMP"] = Field(
         default="JMP",
         description="分位算法：默认 JMP Type 6；R7 对齐 Excel/numpy",
@@ -36,6 +40,10 @@ class BoxPlotGroupValuesRequest(BaseModel):
 
     upload_id: str = Field(..., min_length=1, description="数据文件上传 ID")
     group_col: str = Field(..., min_length=1, description="分组列名")
+    time_unit: Literal["day", "shift", "hour"] | None = Field(
+        default=None,
+        description="时间列分组粒度；非时间列省略",
+    )
 
 
 class GroupValuesResponse(BaseModel):
@@ -50,8 +58,10 @@ class ColumnMeta(BaseModel):
     """单列类型推断结果。"""
 
     name: str
-    kind: Literal["numeric", "text", "other"]
+    kind: Literal["numeric", "text", "datetime", "other"]
     non_null_count: int
+    # 采样行内的唯一值数量（含空值），供前端过滤高基数分组列
+    distinct_count: int = 0
 
 
 class ColumnsResponse(BaseModel):
@@ -95,6 +105,8 @@ class AnalyzeResponse(BaseModel):
     filename: str
     value_column: str
     group_column: str | None
+    # 时间分组粒度；普通列分组时为 None
+    group_time_unit: Literal["day", "shift", "hour"] | None = None
     # 分位数算法约定（Hyndman-Fan R7，与 numpy / Excel QUARTILE.INC 一致）
     quartile_method: str = "JMP Type 6"
     # 后端按 Tukey fences 计算；前端可切换 min-max 仅影响渲染

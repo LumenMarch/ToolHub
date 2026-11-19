@@ -19,6 +19,7 @@ from app.services.boxplot.service import (
     compute_groups,
     list_group_values,
     read_tabular,
+    scan_columns,
 )
 
 
@@ -195,3 +196,103 @@ def test_compute_groups_empty_group_values_means_all():
     df = pl.DataFrame({"group": ["a", "b"], "value": [1.0, 2.0]})
     stats, _, _ = compute_groups(df, "value", "group", group_values=[])
     assert [s.name for s in stats] == ["a", "b"]
+
+
+# ---------- 时间分组 ----------
+
+
+def _time_df() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "Site": ["A", "A", "B", "B", "A", "B"],
+            "SerialNumber": [f"SN{i}" for i in range(6)],
+            "Start Time": [
+                "2026-08-20 00:05:00",
+                "2026-08-20 07:59:00",
+                "2026-08-20 08:00:00",
+                "2026-08-20 16:30:00",
+                "2026-08-21 09:00:00",
+                None,
+            ],
+            "Power": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        }
+    )
+
+
+def test_scan_columns_detects_datetime_and_distinct_count():
+    df = pl.DataFrame(
+        {
+            "Site": ["A", "A", "B"],
+            "StartTime": ["2026/08/20 00:05:00", "2026/08/20 08:00:00", None],
+            "Power": ["1.5", "2.5", "3.5"],
+            "Note": ["x", "y", "z"],
+        }
+    )
+    infos = {info.name: info for info in scan_columns(df)}
+
+    assert infos["Site"].kind == "text"
+    assert infos["Site"].distinct_count == 2
+    assert infos["StartTime"].kind == "datetime"
+    assert infos["Power"].kind == "numeric"
+    assert infos["Note"].kind == "text"
+
+
+def test_list_group_values_time_buckets():
+    df = _time_df()
+
+    day, total, truncated = list_group_values(df, "Start Time", "day")
+    assert day == ["(无值)", "2026-08-20", "2026-08-21"]
+    assert total == 3
+    assert truncated is False
+
+    shift, _, _ = list_group_values(df, "Start Time", "shift")
+    assert shift == [
+        "(无值)",
+        "2026-08-20 00:00",
+        "2026-08-20 08:00",
+        "2026-08-20 16:00",
+        "2026-08-21 08:00",
+    ]
+
+    hour, _, _ = list_group_values(df, "Start Time", "hour")
+    assert hour == [
+        "(无值)",
+        "2026-08-20 00:00",
+        "2026-08-20 07:00",
+        "2026-08-20 08:00",
+        "2026-08-20 16:00",
+        "2026-08-21 09:00",
+    ]
+
+
+def test_compute_groups_by_time_bucket():
+    df = _time_df()
+
+    stats, used_rows, skipped_rows = compute_groups(
+        df, "Power", "Start Time", time_unit="day"
+    )
+    assert [(s.name, s.count) for s in stats] == [
+        ("(无值)", 1),
+        ("2026-08-20", 4),
+        ("2026-08-21", 1),
+    ]
+    assert used_rows == df.height
+    assert skipped_rows == 0
+
+    stats, used_rows, _ = compute_groups(
+        df, "Power", "Start Time", time_unit="day", group_values=["2026-08-20"]
+    )
+    assert [s.name for s in stats] == ["2026-08-20"]
+    assert used_rows == 4
+
+
+def test_compute_groups_rejects_invalid_time_unit():
+    df = _time_df()
+    with pytest.raises(BoxPlotValidationError, match="时间粒度"):
+        compute_groups(df, "Power", "Start Time", time_unit="week")
+
+
+def test_compute_groups_rejects_non_time_column_for_time_unit():
+    df = _time_df()
+    with pytest.raises(BoxPlotValidationError, match="无法解析为时间"):
+        compute_groups(df, "Power", "Site", time_unit="day")

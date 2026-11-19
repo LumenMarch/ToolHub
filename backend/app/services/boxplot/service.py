@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import polars as pl
@@ -42,6 +43,26 @@ SAMPLE_ROWS = 10_000
 PREVIEW_ROWS = 5
 # 文本列判定"可数值化"的最低有效比例（0.9 = 容忍少量脏单元格）
 NUMERIC_TEXT_RATIO = 0.9
+# 时间列判定"可解析"的最低有效比例（同口径）
+TIME_TEXT_RATIO = 0.9
+# 时间分组粒度：日 / 8 小时班次 / 小时
+TIME_UNITS = ("day", "shift", "hour")
+SHIFT_HOURS = 8
+# 时间列名特征：Start/End Time、Test Start Time、Date、Timestamp、中文日期列
+_DATETIME_COLUMN_RE = re.compile(
+    r"(?:^|\b)(?:test\s*)?(?:start|end)\s*time\b|^date$|^timestamp$|开始时间|结束时间|日期",
+    re.IGNORECASE,
+)
+# 时间字符串格式（覆盖 Keysight/WiPAS 导出的常见写法）
+_DATETIME_FORMATS = (
+    "%Y-%m-%d %H:%M:%S",
+    "%Y/%m/%d %H:%M:%S",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y %I:%M:%S %p",
+    "%Y/%m/%d %H:%M",
+    "%Y-%m-%d %H:%M",
+    "%m/%d/%Y %H:%M",
+)
 
 # AtlasLog 四行范式 CSV 的规格行前缀（表头后的上限/下限/单位行）
 _ATLAS_META_PREFIXES = (
@@ -76,9 +97,12 @@ class ColumnInfo:
     """单列的类型推断结果。"""
 
     name: str
-    # "numeric"：可作数值列；"text"：可作分组列；"other"：其它（仅可分组）
+    # "numeric"：可作数值列；"text"：可作分组列；
+    # "datetime"：可作分组列并支持日/班次/小时聚合；"other"：其它
     kind: str
     non_null_count: int
+    # 采样行内的唯一值数量（含空值），供前端过滤高基数分组列
+    distinct_count: int
 
 
 @dataclass(frozen=True)
@@ -318,31 +342,47 @@ def filter_fail_rows(df: pl.DataFrame, status_col: str) -> tuple[pl.DataFrame, i
 
 
 def scan_columns(df: pl.DataFrame) -> list[ColumnInfo]:
-    """推断各列类型：数值 dtype → numeric；文本列按可数值化比例判定。"""
+    """推断各列类型：数值 dtype → numeric；日期 dtype → datetime；
+    文本列按可数值化 / 可时间解析的比例判定。"""
     infos: list[ColumnInfo] = []
     for name in df.columns:
         series = df[name]
         null_count = series.null_count()
         if series.dtype.is_numeric():
             kind = "numeric"
+        elif series.dtype in (pl.Date, pl.Datetime):
+            kind = "datetime"
         elif series.dtype == pl.Utf8:
-            kind = "numeric" if _looks_numeric(series) else "text"
+            if _looks_numeric(series):
+                kind = "numeric"
+            elif _looks_datetime(name, series):
+                kind = "datetime"
+            else:
+                kind = "text"
         else:
             kind = "other"
         infos.append(
-            ColumnInfo(name=name, kind=kind, non_null_count=series.len() - null_count)
+            ColumnInfo(
+                name=name,
+                kind=kind,
+                non_null_count=series.len() - null_count,
+                distinct_count=int(series.n_unique()),
+            )
         )
     return infos
 
 
-def list_group_values(df: pl.DataFrame, group_col: str) -> tuple[list[str], int, bool]:
+def list_group_values(
+    df: pl.DataFrame, group_col: str, time_unit: str | None = None
+) -> tuple[list[str], int, bool]:
     """列出分组列的唯一值（含空值占位），供前端筛选。
 
+    time_unit 非空时先按时间粒度聚合（day / shift / hour）；
     返回 (选项, 唯一值总数, 是否因上限截断)。
     """
     if group_col not in df.columns:
         raise BoxPlotValidationError(f"分组列 '{group_col}' 不存在")
-    keys = df[group_col].cast(pl.Utf8).fill_null(NULL_GROUP_LABEL)
+    keys = _group_keys(df, group_col, time_unit)
     unique = [str(value) for value in keys.unique().sort().to_list()]
     total = len(unique)
     truncated = total > MAX_GROUP_VALUE_OPTIONS
@@ -355,12 +395,15 @@ def compute_groups(
     group_col: str | None = None,
     quartile_method: str = "JMP",
     group_values: list[str] | None = None,
+    time_unit: str | None = None,
 ) -> tuple[list[GroupStat], int, int]:
     """计算箱线图统计量。
 
     返回 (每组统计, 有效数值行数, 跳过行数)。数值列中的空值、无法解析
     为数字的文本以及 NaN / ±inf 等非有限值均视为无效并计入跳过。
     quartile_method 为 JMP（默认 Type 6）或 R7；须线始终按 Tukey 1.5×IQR。
+    time_unit 非空时按 Start/End Time 等时间列的日/班次/小时桶分组；
+    未提供分组列时 time_unit 会报错。
     """
     method = quartile_method.strip().upper()
     if method not in QUARTILE_METHODS:
@@ -374,6 +417,8 @@ def compute_groups(
             raise BoxPlotValidationError(f"分组列 '{group_col}' 不存在")
         if group_col == value_col:
             raise BoxPlotValidationError("数值列与分组列不能相同")
+    elif time_unit is not None:
+        raise BoxPlotValidationError("按时间粒度分组时必须提供分组列")
 
     raw = df[value_col].cast(pl.Float64, strict=False)
     # cast(strict=False) 只把解析失败置空；NaN / ±inf 是合法 float，
@@ -397,7 +442,7 @@ def compute_groups(
             raise BoxPlotValidationError(f"数值列 '{value_col}' 不含有效数值")
         return [stat], used_rows, total_rows - used_rows
 
-    keys = df[group_col].cast(pl.Utf8).fill_null(NULL_GROUP_LABEL)
+    keys = _group_keys(df, group_col, time_unit)
     frame = pl.DataFrame({"_key": keys, "_value": values})
     if group_values:
         frame = frame.filter(pl.col("_key").is_in(group_values))
@@ -411,6 +456,11 @@ def compute_groups(
 
     key_counts = usable.group_by("_key").len().sort("_key")
     if key_counts.height > MAX_GROUPS:
+        if time_unit is not None:
+            raise BoxPlotValidationError(
+                f"时间分组过多（{key_counts.height} 组），上限为 {MAX_GROUPS} 组，"
+                "请改用更粗的粒度或筛选分组值"
+            )
         raise BoxPlotValidationError(
             f"分组过多（{key_counts.height} 组），上限为 {MAX_GROUPS} 组"
         )
@@ -498,3 +548,93 @@ def _looks_numeric(series: pl.Series) -> bool:
     parsed = series.cast(pl.Float64, strict=False)
     valid = parsed.len() - parsed.null_count()
     return valid / total >= NUMERIC_TEXT_RATIO
+
+
+def _looks_datetime(name: str, series: pl.Series) -> bool:
+    """列名命中时间特征且样本可解析为时间时，视为时间列。"""
+    if not _DATETIME_COLUMN_RE.search(name.strip()):
+        return False
+    non_null = series.drop_nulls()
+    if non_null.len() == 0:
+        return False
+    sample = non_null.head(200)
+    parsed = sum(
+        1 for value in sample.to_list() if _parse_datetime_value(str(value)) is not None
+    )
+    return parsed / sample.len() >= TIME_TEXT_RATIO
+
+
+def _parse_datetime_value(raw: str) -> datetime | None:
+    """解析一个时间单元格；兼容 ISO 与导出文件常见的斜杠/12 小时制。"""
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        pass
+    for fmt in _DATETIME_FORMATS:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _time_bucket_label(value: datetime, time_unit: str) -> str:
+    """把时间点截断到日 / 8 小时班次 / 小时，返回可排序的 ISO 标签。"""
+    if time_unit == "day":
+        return value.strftime("%Y-%m-%d")
+    hour = value.hour
+    if time_unit == "shift":
+        hour = (hour // SHIFT_HOURS) * SHIFT_HOURS
+    return value.replace(hour=hour, minute=0, second=0, microsecond=0).strftime(
+        "%Y-%m-%d %H:00"
+    )
+
+
+def _time_bucket_keys(series: pl.Series, time_unit: str) -> pl.Series:
+    """逐行生成时间桶分组键；无法解析的时间归入「(无值)」。
+
+    解析率不足 TIME_TEXT_RATIO 时拒绝分组，避免把格式不匹配的列
+    静默塞进一个巨大的「(无值)」组。同一原始字符串只解析一次。
+    """
+    if time_unit not in TIME_UNITS:
+        raise BoxPlotValidationError(
+            f"时间粒度 '{time_unit}' 无效，可选 {', '.join(TIME_UNITS)}"
+        )
+    cache: dict[str, tuple[str, bool]] = {}
+    labels: list[str] = []
+    non_null = 0
+    parsed = 0
+    for raw in series.cast(pl.Utf8).to_list():
+        text = "" if raw is None else str(raw).strip()
+        if not text:
+            labels.append(NULL_GROUP_LABEL)
+            continue
+        non_null += 1
+        cached = cache.get(text)
+        if cached is None:
+            value = _parse_datetime_value(text)
+            cached = (
+                (_time_bucket_label(value, time_unit), True)
+                if value is not None
+                else (NULL_GROUP_LABEL, False)
+            )
+            cache[text] = cached
+        label, valid = cached
+        if valid:
+            parsed += 1
+        labels.append(label)
+    if non_null == 0 or parsed / non_null < TIME_TEXT_RATIO:
+        raise BoxPlotValidationError(
+            f"列 '{series.name}' 无法解析为时间，不能按时间粒度分组"
+        )
+    return pl.Series("_key", labels, dtype=pl.Utf8)
+
+
+def _group_keys(df: pl.DataFrame, group_col: str, time_unit: str | None) -> pl.Series:
+    """生成分组键：普通列按原文，时间列按日/班次/小时桶。"""
+    if time_unit is None:
+        return df[group_col].cast(pl.Utf8).fill_null(NULL_GROUP_LABEL)
+    return _time_bucket_keys(df[group_col], time_unit)

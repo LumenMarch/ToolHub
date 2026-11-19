@@ -92,6 +92,7 @@ def preview_columns(
             name=info.name,
             kind=info.kind,
             non_null_count=info.non_null_count,
+            distinct_count=info.distinct_count,
         )
         for info in scan_columns(sample)
     ]
@@ -140,7 +141,7 @@ def preview_group_values(
 
     df, _ = exclude_atlas_meta_rows(df)
     try:
-        values, total, truncated = list_group_values(df, req.group_col)
+        values, total, truncated = list_group_values(df, req.group_col, req.time_unit)
     except BoxPlotValidationError as exc:
         raise _parse_or_400(exc) from exc
     return GroupValuesResponse(values=values, total=total, truncated=truncated)
@@ -175,6 +176,7 @@ def analyze_box_plot(
             req.group_col,
             quartile_method=req.quartile_method,
             group_values=req.group_values,
+            time_unit=req.time_unit,
         )
     except BoxPlotValidationError as exc:
         raise _parse_or_400(exc) from exc
@@ -189,6 +191,7 @@ def analyze_box_plot(
         detail={
             "quartile_method": req.quartile_method,
             "grouped": req.group_col is not None,
+            "time_unit": req.time_unit,
             "groups": len(stats),
             "used_rows": used_rows,
             "exclude_fail": req.exclude_fail,
@@ -204,6 +207,7 @@ def analyze_box_plot(
         filename=filename,
         value_column=req.value_col,
         group_column=req.group_col,
+        group_time_unit=req.time_unit,
         quartile_method=QUARTILE_METHOD_LABELS[req.quartile_method],
         total_rows=df.height,
         used_rows=used_rows,

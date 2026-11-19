@@ -64,8 +64,10 @@ import { SearchableSelect } from './searchable-select'
 
 interface ColumnMeta {
   name: string
-  kind: 'numeric' | 'text' | 'other'
+  kind: 'numeric' | 'text' | 'datetime' | 'other'
   nonNullCount: number
+  // 采样行内的唯一值数量（含空值）
+  distinctCount: number
 }
 
 interface ColumnsResponse {
@@ -82,6 +84,7 @@ interface AnalyzeResponse {
   filename: string
   valueColumn: string
   groupColumn: string | null
+  groupTimeUnit: TimeUnit | null
   quartileMethod: string
   whisker: 'tukey'
   totalRows: number
@@ -94,10 +97,17 @@ interface AnalyzeResponse {
 
 type QuartileMethod = 'R7' | 'JMP'
 
+type TimeUnit = 'day' | 'shift' | 'hour'
+
 type Phase = 'upload' | 'configure'
 
 const NG_GROUP = '__none__'
 const MAX_GROUPS = 200
+const TIME_UNIT_LABELS: Record<TimeUnit, string> = {
+  day: '按日',
+  shift: '按 8 小时班次',
+  hour: '按小时',
+}
 
 const toCamel = <T extends Record<string, unknown>>(record: T): Record<string, unknown> => {
   const output: Record<string, unknown> = {}
@@ -140,6 +150,7 @@ const BoxPlotTool: React.FC = () => {
   const [columns, setColumns] = useState<ColumnsResponse | null>(null)
   const [valueColumn, setValueColumn] = useState('')
   const [groupColumn, setGroupColumn] = useState<string>(NG_GROUP)
+  const [timeUnit, setTimeUnit] = useState<TimeUnit>('day')
   const [groupValueOptions, setGroupValueOptions] = useState<string[]>([])
   const [groupValueTotal, setGroupValueTotal] = useState(0)
   const [groupValuesTruncated, setGroupValuesTruncated] = useState(false)
@@ -188,9 +199,14 @@ const BoxPlotTool: React.FC = () => {
         .map((column) => column.name)
       if (numericNames.length > 0) {
         setValueColumn(numericNames[0])
-        setGroupColumn(
-          cameled.columns.find((column) => column.kind === 'text')?.name ?? NG_GROUP,
+        const defaultGroup = cameled.columns.find(
+          (column) =>
+            column.kind === 'text' &&
+            column.distinctCount > 1 &&
+            column.distinctCount <= MAX_GROUPS,
         )
+        setGroupColumn(defaultGroup?.name ?? NG_GROUP)
+        setTimeUnit('day')
       }
       setPhase('configure')
     } catch (err) {
@@ -251,29 +267,70 @@ const BoxPlotTool: React.FC = () => {
     [columns],
   )
 
-  const loadGroupValues = useCallback(async (uploadId: string, groupCol: string) => {
-    const gen = ++groupValuesGenRef.current
-    try {
-      const response = await api.post<{
-        values: string[]
-        total: number
-        truncated: boolean
-      }>('/tools/box-plot/group-values', {
-        upload_id: uploadId,
-        group_col: groupCol,
-      })
-      if (gen !== groupValuesGenRef.current) return
-      setGroupValueOptions(response.data.values)
-      setGroupValueTotal(response.data.total)
-      setGroupValuesTruncated(response.data.truncated)
-    } catch (err) {
-      if (gen !== groupValuesGenRef.current) return
-      setGroupValueOptions([])
-      setGroupValueTotal(0)
-      setGroupValuesTruncated(false)
-      setError(readErrorMessage(err))
-    }
-  }, [])
+  const groupColumnMeta = useMemo(
+    () => columns?.columns.find((column) => column.name === groupColumn),
+    [columns, groupColumn],
+  )
+  const isTimeGroup = groupColumnMeta?.kind === 'datetime'
+  // 普通分组不传 time_unit；只有时间列才按所选粒度聚合
+  const effectiveTimeUnit = isTimeGroup ? timeUnit : null
+
+  const groupSummary = analysis?.groupColumn
+    ? `${analysis.groupColumn}${
+        analysis.groupTimeUnit
+          ? ` · ${TIME_UNIT_LABELS[analysis.groupTimeUnit]}`
+          : ''
+      }`
+    : '单箱对比'
+
+  // 分组列候选：排除当前数值列、全空列与高基数列；
+  // 时间列始终保留（通过日/班次/小时聚合把基数压下来）
+  const groupColumnOptions = useMemo(() => {
+    const available = (columns?.columns ?? []).filter((column) => {
+      if (column.name === valueColumn) return false
+      if (column.nonNullCount === 0) return false
+      if (column.kind === 'datetime') return true
+      return column.distinctCount > 1 && column.distinctCount <= MAX_GROUPS
+    })
+    return [
+      { value: NG_GROUP, label: '不分组（单箱对比）' },
+      ...available.map((column) => ({
+        value: column.name,
+        label:
+          column.kind === 'datetime'
+            ? `${column.name}（时间）`
+            : `${column.name}（${column.distinctCount}）`,
+      })),
+    ]
+  }, [columns, valueColumn])
+
+  const loadGroupValues = useCallback(
+    async (uploadId: string, groupCol: string, timeUnit?: TimeUnit) => {
+      const gen = ++groupValuesGenRef.current
+      try {
+        const response = await api.post<{
+          values: string[]
+          total: number
+          truncated: boolean
+        }>('/tools/box-plot/group-values', {
+          upload_id: uploadId,
+          group_col: groupCol,
+          ...(timeUnit ? { time_unit: timeUnit } : {}),
+        })
+        if (gen !== groupValuesGenRef.current) return
+        setGroupValueOptions(response.data.values)
+        setGroupValueTotal(response.data.total)
+        setGroupValuesTruncated(response.data.truncated)
+      } catch (err) {
+        if (gen !== groupValuesGenRef.current) return
+        setGroupValueOptions([])
+        setGroupValueTotal(0)
+        setGroupValuesTruncated(false)
+        setError(readErrorMessage(err))
+      }
+    },
+    [],
+  )
 
   const doAnalyze = useCallback(async (
     valueCol: string,
@@ -281,6 +338,7 @@ const BoxPlotTool: React.FC = () => {
     method: QuartileMethod,
     groupValues: string[],
     excludeFailEnabled: boolean,
+    timeUnit: TimeUnit | null,
   ) => {
     if (!upload.uploadId || !valueCol) return
     const gen = ++analyzeGenRef.current
@@ -296,6 +354,7 @@ const BoxPlotTool: React.FC = () => {
           quartile_method: method,
           group_values:
             groupCol !== NG_GROUP && groupValues.length > 0 ? groupValues : null,
+          time_unit: timeUnit,
           exclude_fail: excludeFailEnabled,
         },
       )
@@ -329,8 +388,8 @@ const BoxPlotTool: React.FC = () => {
       setGroupValuesTruncated(false)
       return
     }
-    void loadGroupValues(upload.uploadId, groupColumn)
-  }, [phase, upload.uploadId, groupColumn, loadGroupValues])
+    void loadGroupValues(upload.uploadId, groupColumn, effectiveTimeUnit ?? undefined)
+  }, [phase, upload.uploadId, groupColumn, effectiveTimeUnit, loadGroupValues])
 
   // 列、分位或分组筛选变更后自动刷新箱线图（无需点击生成按钮）
   useEffect(() => {
@@ -343,7 +402,11 @@ const BoxPlotTool: React.FC = () => {
     const selectedCount = selectedGroupValues.length
     if (grouping && selectedCount === 0 && groupValueTotal > MAX_GROUPS) {
       setAnalysis(null)
-      setError(`分组共 ${groupValueTotal} 个，超过 ${MAX_GROUPS} 上限，请先筛选分组值`)
+      setError(
+        isTimeGroup
+          ? `时间分组共 ${groupValueTotal} 个，超过 ${MAX_GROUPS} 上限，请改用更粗的粒度或筛选分组值`
+          : `分组共 ${groupValueTotal} 个，超过 ${MAX_GROUPS} 上限，请先筛选分组值`,
+      )
       return
     }
     if (grouping && selectedCount > MAX_GROUPS) {
@@ -351,7 +414,14 @@ const BoxPlotTool: React.FC = () => {
       setError(`最多选择 ${MAX_GROUPS} 个分组值`)
       return
     }
-    void doAnalyze(valueColumn, groupColumn, quartileMethod, selectedGroupValues, excludeFail)
+    void doAnalyze(
+      valueColumn,
+      groupColumn,
+      quartileMethod,
+      selectedGroupValues,
+      excludeFail,
+      effectiveTimeUnit,
+    )
   }, [
     phase,
     columns,
@@ -363,6 +433,8 @@ const BoxPlotTool: React.FC = () => {
     groupValueTotal,
     groupValueOptions.length,
     numericColumns.length,
+    isTimeGroup,
+    effectiveTimeUnit,
     doAnalyze,
   ])
 
@@ -517,7 +589,13 @@ const BoxPlotTool: React.FC = () => {
                     <FieldLabel>数值列</FieldLabel>
                     <SearchableSelect
                       value={valueColumn}
-                      onValueChange={setValueColumn}
+                      onValueChange={(value) => {
+                        setValueColumn(value)
+                        if (value === groupColumn) {
+                          setGroupColumn(NG_GROUP)
+                          setSelectedGroupValues([])
+                        }
+                      }}
                       options={numericColumns.map((c) => ({ value: c.name, label: c.name }))}
                       placeholder="选择数值列"
                       searchPlaceholder="搜索数值列..."
@@ -536,17 +614,57 @@ const BoxPlotTool: React.FC = () => {
                       value={groupColumn}
                       onValueChange={(value) => {
                         setGroupColumn(value)
+                        setAnalysis(null)
                         setSelectedGroupValues([])
+                        setGroupValueOptions([])
+                        setGroupValueTotal(0)
+                        setGroupValuesTruncated(false)
                       }}
-                      options={[
-                        { value: NG_GROUP, label: '不分组（单箱对比）' },
-                        ...columns.columns.map((c) => ({ value: c.name, label: c.name })),
-                      ]}
+                      options={groupColumnOptions}
                       placeholder="选择分组列"
                       searchPlaceholder="搜索分组列..."
                       emptyText="无匹配分组列"
                       ariaLabel="分组列"
                     />
+                    {isTimeGroup ? (
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <span
+                          id="boxplot-time-unit"
+                          className="text-sm text-muted-foreground"
+                        >
+                          时间粒度
+                        </span>
+                        <ToggleGroup
+                          type="single"
+                          size="sm"
+                          variant="outline"
+                          spacing={0}
+                          value={timeUnit}
+                          onValueChange={(value) => {
+                            if (
+                              value === 'day' ||
+                              value === 'shift' ||
+                              value === 'hour'
+                            ) {
+                              setTimeUnit(value)
+                              setAnalysis(null)
+                              setSelectedGroupValues([])
+                              setGroupValueOptions([])
+                              setGroupValueTotal(0)
+                              setGroupValuesTruncated(false)
+                            }
+                          }}
+                          aria-labelledby="boxplot-time-unit"
+                        >
+                          <ToggleGroupItem value="day">日</ToggleGroupItem>
+                          <ToggleGroupItem value="shift">8 小时班次</ToggleGroupItem>
+                          <ToggleGroupItem value="hour">小时</ToggleGroupItem>
+                        </ToggleGroup>
+                      </div>
+                    ) : null}
+                    <p className="text-sm text-muted-foreground">
+                      仅显示唯一值 ≤ {MAX_GROUPS} 的列；时间列支持按日/班次/小时聚合。
+                    </p>
                   </Field>
                   {groupColumn !== NG_GROUP ? (
                     <Field className="md:col-span-2">
@@ -606,11 +724,9 @@ const BoxPlotTool: React.FC = () => {
                         <dt className="text-muted-foreground">分组</dt>
                         <dd
                           className="max-w-[22rem] truncate font-medium text-foreground"
-                          title={analysis.groupColumn ?? '单箱对比'}
+                          title={groupSummary}
                         >
-                          {analysis.groupColumn
-                            ? analysis.groupColumn
-                            : '单箱对比'}
+                          {groupSummary}
                         </dd>
                       </div>
                       <div className="flex items-center gap-1.5">
@@ -807,7 +923,7 @@ const BoxPlotTool: React.FC = () => {
                         <TableHead>n</TableHead>
                         <TableHead>MIN</TableHead>
                         <TableHead>Q1</TableHead>
-                        <TableHead>中位数</TableHead>
+                        <TableHead>MEDIAN</TableHead>
                         <TableHead>Q3</TableHead>
                         <TableHead>MAX</TableHead>
                         <TableHead>IQR</TableHead>
