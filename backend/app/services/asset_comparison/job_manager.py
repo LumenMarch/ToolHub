@@ -6,14 +6,13 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -39,6 +38,7 @@ from app.services.asset_comparison.domain import (
     normalize_module_results,
     transition_allowed,
 )
+from app.services.jobs.queue import JobQueue, get_job_queue
 from app.services.realtime.events import job_terminal_event, job_updated_event
 from app.services.realtime.hub import realtime_hub
 from app.services.task_artifacts import (
@@ -128,16 +128,36 @@ class AssetComparisonJobManager:
         finalize_job: Callable,
         retry_artifact: Callable,
         artifact_store: TaskArtifactStore | None = None,
+        job_queue: JobQueue | None = None,
+        execute_task: Callable[[str], None] | None = None,
+        finalize_task: Callable[[str, int, dict, dict], None] | None = None,
+        retry_task: Callable[[str, str], None] | None = None,
     ) -> None:
         self._execute_job = execute_job
         self._finalize_job = finalize_job
         self._retry_artifact = retry_artifact
         self._artifact_store = artifact_store or task_artifact_store
-        self._executor = ThreadPoolExecutor(
-            max_workers=max(settings.ASSET_COMPARISON_MAX_ACTIVE_JOBS, 1),
-            thread_name_prefix="asset-comparison-job",
-        )
+        self._job_queue = job_queue or get_job_queue()
+        # RQ 只能序列化模块级函数；默认值仅用于 LocalJobQueue 与测试。
+        self._execute_task = execute_task or self.execute
+        self._finalize_task = finalize_task or self.finalize_task
+        self._retry_task = retry_task or self.retry_task
         self._lock = threading.RLock()
+
+    def execute(self, job_id: str) -> None:
+        self._execute_worker(job_id)
+
+    def finalize_task(
+        self,
+        job_id: str,
+        revision: int,
+        remarks: dict[str, str],
+        reviews: dict[str, str],
+    ) -> None:
+        self._finalize_worker(job_id, revision, remarks, reviews)
+
+    def retry_task(self, job_id: str, artifact_key: str) -> None:
+        self._retry_worker(job_id, artifact_key)
 
     @staticmethod
     def _transition(job: AssetComparisonJob, next_status: str) -> None:
@@ -382,7 +402,9 @@ class AssetComparisonJobManager:
         self._notify_job(job_id=job_id, user_id=user_id, status="queued")
         # 请求已通过 scan 校验且任务已落库，才触发按调用者作用域的保留策略
         self.cleanup(user_id=user_id)
-        self._executor.submit(self._execute_worker, job_id)
+        self._job_queue.enqueue(
+            self._execute_task, job_id, queue=settings.JOB_QUEUE_ANALYSIS
+        )
         return response, False
 
     def get_job(self, *, user_id: int, job_id: str) -> dict:
@@ -538,12 +560,13 @@ class AssetComparisonJobManager:
             status="building",
             annotation_revision=revision,
         )
-        self._executor.submit(
-            self._finalize_worker,
+        self._job_queue.enqueue(
+            self._finalize_task,
             job_id,
             revision,
             remarks,
             reviews,
+            queue=settings.JOB_QUEUE_EXPORT,
         )
         return self.get_job(user_id=user_id, job_id=job_id)
 
@@ -582,7 +605,12 @@ class AssetComparisonJobManager:
             artifact_key=artifact_key,
         )
         self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])
-        self._executor.submit(self._retry_worker, job_id, artifact_key)
+        self._job_queue.enqueue(
+            self._retry_task,
+            job_id,
+            artifact_key,
+            queue=settings.JOB_QUEUE_EXPORT,
+        )
         return self.get_job(user_id=user_id, job_id=job_id)
 
     def cancel(self, *, user_id: int, job_id: str) -> dict:
@@ -765,7 +793,9 @@ class AssetComparisonJobManager:
                 stage="job_recover",
                 status="queued",
             )
-            self._executor.submit(self._execute_worker, job_id)
+            self._job_queue.enqueue(
+                self._execute_task, job_id, queue=settings.JOB_QUEUE_ANALYSIS
+            )
         for job_id in failed_job_ids:
             self._log_stage(
                 job_id=job_id,
@@ -775,7 +805,7 @@ class AssetComparisonJobManager:
         self.cleanup()
 
     def shutdown(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        self._job_queue.shutdown()
 
     def cleanup(self, *, user_id: int | None = None) -> None:
         now = _utcnow()
@@ -870,16 +900,30 @@ class AssetComparisonJobManager:
             elif job.status != "queued":
                 return None
             else:
-                self._transition(job, "validating")
-                job.started_at = _utcnow()
-                job.error_message = None
-                job.progress_json = _dumps(
-                    calculate_progress(
-                        results,
-                        artifacts,
-                        validation_status="running",
+                # 条件更新是跨进程的任务领取锁：多个 API/Worker 同时拿到
+                # 同一个 job_id 时，只有一个能把 queued 改成 validating。
+                claimed = db.execute(
+                    update(AssetComparisonJob)
+                    .where(
+                        AssetComparisonJob.id == job_id,
+                        AssetComparisonJob.status == "queued",
                     )
-                )
+                    .values(
+                        status="validating",
+                        started_at=_utcnow(),
+                        error_message=None,
+                        progress_json=_dumps(
+                            calculate_progress(
+                                results,
+                                artifacts,
+                                validation_status="running",
+                            )
+                        ),
+                    )
+                ).rowcount
+                if claimed != 1:
+                    db.rollback()
+                    return None
                 db.commit()
                 self._log_stage(
                     job_id=job.id,
@@ -887,7 +931,7 @@ class AssetComparisonJobManager:
                     stage="job_validate_inputs",
                     status="running",
                 )
-                notify = (job.id, job.user_id, job.status)
+                notify = (job.id, job.user_id, "validating")
                 user_id = job.user_id
         if notify is not None:
             self._notify_job(job_id=notify[0], user_id=notify[1], status=notify[2])

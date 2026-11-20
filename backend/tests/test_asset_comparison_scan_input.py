@@ -16,10 +16,10 @@ from tests.conftest import auth_header, tus_upload
 ASSET_URL = "/api/v1/tools/asset"
 
 
-class _NoopExecutor:
+class _NoopJobQueue:
     """占位执行器：拦截后台任务提交，避免测试中启动真实比对线程。"""
 
-    def submit(self, fn, *args, **kwargs):
+    def enqueue(self, fn, *args, queue=None, **kwargs):
         return None
 
     def shutdown(self, *args, **kwargs):
@@ -63,7 +63,7 @@ def _scan_all_inputs(client, token) -> str:
 
 def test_scan_response_contains_filenames_only(admin_client, monkeypatch):
     """/scan 响应只含文件名，不泄露服务器绝对路径。"""
-    monkeypatch.setattr(asset_comparison_job_manager, "_executor", _NoopExecutor())
+    monkeypatch.setattr(asset_comparison_job_manager, "_job_queue", _NoopJobQueue())
     client, token = admin_client
     scan_id = _scan_all_inputs(client, token)
 
@@ -88,7 +88,7 @@ def test_scan_response_contains_filenames_only(admin_client, monkeypatch):
 
 def test_jobs_rejects_incomplete_scan(admin_client, monkeypatch):
     """扫描结果缺必需输入键（部分匹配）时创建任务必须 422。"""
-    monkeypatch.setattr(asset_comparison_job_manager, "_executor", _NoopExecutor())
+    monkeypatch.setattr(asset_comparison_job_manager, "_job_queue", _NoopJobQueue())
     client, token = admin_client
 
     # 只上传一个文件（只能匹配 thisFinance 一个键）
@@ -118,7 +118,7 @@ def test_jobs_rejects_incomplete_scan(admin_client, monkeypatch):
 
 def test_jobs_rejects_path_fields(admin_client, monkeypatch):
     """请求体携带路径字段必须被 422 拒绝（schema 层）。"""
-    monkeypatch.setattr(asset_comparison_job_manager, "_executor", _NoopExecutor())
+    monkeypatch.setattr(asset_comparison_job_manager, "_job_queue", _NoopJobQueue())
     client, token = admin_client
     scan_id = _scan_all_inputs(client, token)
 
@@ -134,7 +134,7 @@ def test_jobs_rejects_path_fields(admin_client, monkeypatch):
 
 def test_jobs_rejects_unknown_scan(admin_client, monkeypatch):
     """不存在的 scan_id 必须被拒绝。"""
-    monkeypatch.setattr(asset_comparison_job_manager, "_executor", _NoopExecutor())
+    monkeypatch.setattr(asset_comparison_job_manager, "_job_queue", _NoopJobQueue())
     client, token = admin_client
 
     payload = {
@@ -148,7 +148,7 @@ def test_jobs_rejects_unknown_scan(admin_client, monkeypatch):
 
 def test_cross_user_scan_id_denied(admin_client, client, monkeypatch):
     """B 用户不能使用 A 用户的 scan_id 建任务（按用户隔离）。"""
-    monkeypatch.setattr(asset_comparison_job_manager, "_executor", _NoopExecutor())
+    monkeypatch.setattr(asset_comparison_job_manager, "_job_queue", _NoopJobQueue())
     admin, admin_token = admin_client
     scan_id = _scan_all_inputs(admin, admin_token)
 

@@ -1,11 +1,11 @@
-"""ToolHub 服务默认启动入口。
+"""ToolHub 服务启动入口。
 
-pex / scie 二进制通过 `-m app` 执行本模块，裸跑即可启动服务（无需再传
-`app.main:app` 参数）；在 backend 目录下 `python -m app` 同样可用（dev 模式）。
+本地开发可直接 `python -m app`；服务器部署使用 uvicorn 命令以支持多副本。
+API 与 Worker 是独立进程，Worker 入口见 `app.worker`。
 
 用法：
-    ./dist/toolhub                                  # 默认 0.0.0.0:8000
-    ./dist/toolhub --host 127.0.0.1 --port 8015     # 覆盖监听地址 / 端口
+    python -m app                                   # 默认 0.0.0.0:8000
+    python -m app --host 127.0.0.1 --port 8015      # 覆盖监听地址 / 端口
 """
 
 import argparse
@@ -19,8 +19,8 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000, help="监听端口（默认 8000）")
     args = parser.parse_args()
 
-    # 单 worker：资产比对任务运行器按单个 uvicorn worker 设计（见 backend/README.md），
-    # 内部使用有界执行器做比对工作，单 worker 不会把比对任务限制在一个 CPU 核上。
+    # 本入口只启动一个 API 进程；多副本部署请使用 uvicorn --workers
+    # 或容器编排，后台任务由独立 RQ Worker 执行。
     uvicorn.run("app.main:app", host=args.host, port=args.port, workers=1)
 
 

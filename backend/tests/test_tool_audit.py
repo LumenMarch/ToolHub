@@ -17,10 +17,10 @@ QR_URL = "/api/v1/tools/qrcode"
 ASSET_URL = "/api/v1/tools/asset"
 
 
-class _NoopExecutor:
+class _NoopJobQueue:
     """占位执行器：拦截后台任务提交，避免测试中启动真实比对线程。"""
 
-    def submit(self, fn, *args, **kwargs):
+    def enqueue(self, fn, *args, queue=None, **kwargs):
         return None
 
     def shutdown(self, *args, **kwargs):
@@ -61,7 +61,7 @@ def test_asset_compare_writes_audit_and_poll_is_silent(
 ):
     """POST /jobs 落 tool.asset.compare；随后轮询 GET /jobs/{id} 不产生审计噪音。"""
     # 拦截后台比对线程，保持测试确定性
-    monkeypatch.setattr(asset_comparison_job_manager, "_executor", _NoopExecutor())
+    monkeypatch.setattr(asset_comparison_job_manager, "_job_queue", _NoopJobQueue())
 
     client, token = admin_client
     # 上传 11 个输入文件（文件名匹配扫描关键词与年月规则）后扫描，

@@ -131,7 +131,7 @@ def delete_user(db: Session, user: User) -> None:
 
     审计日志按设计保留（AuditLog 冗余 username 字段，保证删号后日志仍可读）：
     先把引用该用户的 audit_logs.user_id 置空——audit_logs 外键未声明
-    ON DELETE CASCADE，直接删 user 会触发 SQLite 外键约束错误（500）。
+    ON DELETE CASCADE，直接删 user 会触发数据库外键约束错误（500）。
     其余引用表（user_roles / user_permissions / user_sessions / notifications）
     均声明了 ON DELETE CASCADE，由数据库级联清理。
     """

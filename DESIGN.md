@@ -13,8 +13,10 @@
 
 ### 1.2. 后端架构 (Backend)
 - **框架**: FastAPI
-- **运行时**: Uvicorn
-- **数据库**: SQLite + SQLAlchemy 2.0 (ORM)
+- **运行时**: Uvicorn（API，可多副本）
+- **数据库**: PostgreSQL + SQLAlchemy 2.0 (ORM) + Alembic（schema 唯一来源）
+- **任务队列**: Redis + RQ（分析/导出/维护队列，独立 Worker 进程）；资产核对与 Atlas Merge 的任务状态存 PostgreSQL，API 只入队
+- **实时推送**: WebSocket + Redis Pub/Sub（Worker 直接向 Redis 发布事件）
 - **认证体系**: JWT (JSON Web Tokens) + OAuth2 Password Bearer
 - **密码哈希**: 原生 `bcrypt`
 
@@ -33,14 +35,14 @@
 ### 2.2. API 聚合网关 (Backend)
 后端遵循“网关-端点”的路由注册模式：
 - **`main.py` 瘦身**: 核心入口文件仅负责挂载 CORS 和单一的路由网关。
-- **`api_router.py`**: 作为统一的 API 聚合器（Gateway），所有的工具子路由（如 `string_tools.py`）仅需在此文件内通过 `include_router` 注册，实现业务逻辑与核心基础设施的物理隔离。
+- **`api_router.py`**: 作为统一的路由聚合器，所有的工具子路由（如 `string_tools.py`）仅需在此文件内通过 `include_router` 注册，实现业务逻辑与核心基础设施的物理隔离。它只做路由注册，不承担网关的限流、鉴权或熔断职责。
 
 ### 2.3. 敏感结果缓存 (Sensitive Result Cache)
 - 出勤整理等包含员工资料的工具，其分析结果存放于统一任务产物存储（`TASK_ARTIFACT_ROOT`，磁盘），仅作为短时承接分析与下载的辅助缓存，不写入数据库；REST 仍是唯一真相源。
 - 缓存键绑定当前认证用户并附带不可预测标识，下载与删除均校验归属。
 - 设置明确有效期（TTL 600 秒）；`max_entries` / `max_bytes` 为进程内索引上限，磁盘总量由 TTL 过期与启动/周期清理兜底，重启或跨 Worker 时可能瞬时超出。
 - 过期或淘汰的条目必须同步从磁盘删除（懒清理、进程内淘汰与启动/周期清理均执行磁盘删除）。
-- 单进程假设：`TaskArtifactStore` 锁为进程内锁（`threading.RLock`），`publish_blob()` 检查-执行与容量淘汰的 `protected_paths` 不跨进程安全；多 Worker 共享同一 `TASK_ARTIFACT_ROOT` 卷前须补文件级锁与原子发布/淘汰。
+- 多进程安全：`TaskArtifactStore` 在进程内 `RLock` 之外增加 `portalocker` 文件锁（`TASK_ARTIFACT_ROOT/.blobs.lock`），串行化 `publish_blob()` 的检查-执行与容量淘汰；API 与 Worker 共享同一卷部署。
 - Windows 上 `os.chmod(0o700/0o600)` 仅切换只读属性、不改变继承 ACL；自定义 `TASK_ARTIFACT_ROOT` 须配置用户/管理员专属 ACL，否则按父目录 ACL 暴露。
 
 ---

@@ -39,8 +39,7 @@ USER_STATUS_REJECTED = "rejected"
 
 class User(Base):
     __tablename__ = "users"
-    # 仅新建库时生效；存量库通过 ensure_schema_compat 的 ALTER 补列（无 CHECK），
-    # 应用层在写入处统一校验取值。
+    # CHECK 约束由 Alembic 建表时创建；应用层在写入处同样校验取值。
     __table_args__ = (
         CheckConstraint(
             "status IN ('pending', 'approved', 'rejected')",

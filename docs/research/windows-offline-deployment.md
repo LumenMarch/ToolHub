@@ -1,5 +1,7 @@
 # ToolHub Offline Deployment on Windows — Research Report
 
+> **Status (2026-11-20): superseded.** ToolHub now deploys as API + RQ Worker with PostgreSQL and Redis. The Nuitka onefile path and `scripts/build-bundle.py` were removed; this document is kept as historical research only.
+
 > **Date**: 2026-07-31
 > **Scope**: Five strategies for deploying ToolHub (FastAPI + SQLAlchemy + SQLite backend, React/Vite frontend) on an air-gapped Windows machine. Includes verified build-machine and target-machine commands, frontend hosting options, a configuration checklist, and upgrade/rollback guidance. External claims are linked to primary sources (official docs); repo facts are marked "repo-verified"; commands marked "live-tested" were executed during this research session.
 

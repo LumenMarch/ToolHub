@@ -39,6 +39,9 @@ design-demos/
 # Browser automation artifacts
 .playwright-mcp/
 
-# Build artifacts (scripts/build-bundle.py)
+# Redis dump
+dump.rdb
+
+# Build artifacts
 build/
 *.egg-info/

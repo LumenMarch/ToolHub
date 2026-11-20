@@ -1168,10 +1168,31 @@ def _retry_asset_comparison_artifact(
     raise ValueError(f"不支持重试的产物: {artifact_key}")
 
 
+def run_asset_comparison_job_task(job_id: str) -> None:
+    """RQ 任务入口：必须是模块级函数，Worker 才能按路径导入。"""
+    asset_comparison_job_manager.execute(job_id)
+
+
+def run_asset_comparison_finalize_task(
+    job_id: str,
+    revision: int,
+    remarks: dict[str, str],
+    reviews: dict[str, str],
+) -> None:
+    asset_comparison_job_manager.finalize_task(job_id, revision, remarks, reviews)
+
+
+def run_asset_comparison_retry_task(job_id: str, artifact_key: str) -> None:
+    asset_comparison_job_manager.retry_task(job_id, artifact_key)
+
+
 asset_comparison_job_manager = AssetComparisonJobManager(
     execute_job=_execute_asset_comparison_job,
     finalize_job=_finalize_asset_comparison_job,
     retry_artifact=_retry_asset_comparison_artifact,
+    execute_task=run_asset_comparison_job_task,
+    finalize_task=run_asset_comparison_finalize_task,
+    retry_task=run_asset_comparison_retry_task,
 )
 
 
