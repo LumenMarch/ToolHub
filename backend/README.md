@@ -1,6 +1,36 @@
 # 1. ToolHub Backend
 
-## 1.1. Authentication Cookie
+## 1.1. Database and Background Jobs
+
+PostgreSQL is the only database. Apply schema and seed data before starting
+API or Worker processes:
+
+```bash
+uv run alembic upgrade head
+uv run python -m app.bootstrap
+```
+
+API and Worker are separate processes built from the same image:
+
+```bash
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+uv run python -m app.worker --queues analysis,export,maintenance
+```
+
+RQ uses `REDIS_URL`; queues and timeouts are configured in `.env.example`.
+`JOB_QUEUE_BACKEND=local` is reserved for tests and runs jobs in-process.
+
+To migrate an existing SQLite database (one-off, truncates target tables):
+
+```bash
+uv run alembic upgrade head
+PYTHONPATH=. uv run python ../scripts/migrate_sqlite_to_postgres.py \
+  --source /path/to/toolhub.db \
+  --target postgresql+psycopg://toolhub:toolhub@127.0.0.1:5432/toolhub
+uv run python -m app.bootstrap
+```
+
+## 1.2. Authentication Cookie
 
 Browser sessions use the `toolhub_session` HttpOnly cookie with
 `SameSite=Strict`. Local HTTP development keeps `AUTH_COOKIE_SECURE=false`.
@@ -13,7 +43,7 @@ AUTH_COOKIE_SECURE=true
 The OAuth2 Bearer Token endpoint remains available for non-browser API
 clients.
 
-## 1.2. Task Artifacts
+## 1.3. Task Artifacts
 
 Uploads, user-scoped content cache entries, attendance results, and asset
 comparison artifacts share one persistent storage root. VPS deployments should
@@ -38,11 +68,17 @@ startup and on the configured interval, then evicts the least recently used
 entries until the cache is no more than 20% of the space available when the
 cache itself is excluded.
 
-## 1.3. Asset Comparison Jobs
+## 1.4. Asset Comparison Jobs
 
-The initial job runner is designed for one Uvicorn worker. It uses an internal
-bounded executor for comparison work, so a single Uvicorn worker does not
-limit the comparison tasks to one CPU core.
+Asset comparison jobs run in independent RQ workers. The API only persists the
+job and enqueues it; workers claim jobs with an atomic `queued -> validating`
+database update, so multiple API and Worker replicas can run concurrently.
+Job progress is written to PostgreSQL and published through Redis Pub/Sub.
+
+Atlas Merge uses the same PostgreSQL + RQ model (`atlas_merge_jobs`). The API
+returns `202` with a job id; clients poll `/tools/atlas-merge/jobs/{id}`. Job
+rows are retained for 10 minutes after a terminal state, then cleaned lazily
+and by the periodic task-artifact cleanup.
 
 Asset comparison inputs are snapshotted and verified before execution.
 Running jobs use cooperative cancellation at stage boundaries; Python threads

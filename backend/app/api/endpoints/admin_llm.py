@@ -148,6 +148,7 @@ def delete_llm_config(
                 6,
                 60,
                 detail="探活请求过于频繁，请稍后再试",
+                name="admin.llm.probe",
             )
         )
     ],

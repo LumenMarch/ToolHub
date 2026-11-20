@@ -1,33 +1,34 @@
-"""atlas-merge 合并任务的进程内 job 表与执行器。
+"""atlas-merge 合并任务：PostgreSQL 状态 + RQ 执行器。
 
 进度契约（与前端对齐）：
-- ``POST /tools/atlas-merge/analyze`` 立即返回 202 + job_id，合并任务在后台线程执行
+- ``POST /tools/atlas-merge/analyze`` 立即返回 202 + job_id，任务进入 RQ
 - ``GET /tools/atlas-merge/jobs/{job_id}`` 轮询进度（REST 为进度真相源）
-- job 完成/失败后保留 10 分钟（懒清理，仿 attendance cache 的懒清理风格）
-- 完成时向该用户发一个轻量实时提示事件（``atlas_merge.progress``，仅 {job_id, status}，
-  不含进度真相，符合 CONTEXT.md 的 Realtime Notification 模式）
+- 终态后保留 ``JOB_TTL_SECONDS``，由懒清理与周期清理删除行
+- 进度与终态统一发送 ``job.updated`` / ``job.terminal``（tool=atlas-merge）
 
-实现约束：单进程假设（与 DESIGN.md 一致）——进程内 dict + threading.Lock，
-ThreadPoolExecutor（max_workers=2，仿 asset_comparison 先例）执行合并。
+多副本：任务状态在 PostgreSQL，API 只入队；Worker 用条件更新领取
+``queued -> running``，重复投递不会重复执行。
 """
 
 from __future__ import annotations
 
+import json
 import secrets
 import shutil
 import tempfile
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from fastapi import Request
 from loguru import logger
+from sqlalchemy import delete, select, update
 
+from app.core.config import settings
 from app.db.session import SessionLocal
+from app.models.atlas_merge_job import AtlasMergeJob
 from app.models.user import User
 from app.schemas.atlas_merge import AtlasMergeAnalyzeResponse
 from app.services.atlas_merge.archive import extract_archive_zip
@@ -38,7 +39,9 @@ from app.services.atlas_merge.cache import (
 from app.services.atlas_merge.exporter import csv_text, insight_csv_text
 from app.services.atlas_merge.merge_engine import merge
 from app.services.atlas_merge.models import MergedReport, MetaColumn
-from app.services.audit import log_action
+from app.services.audit import get_client_ip, log_action
+from app.services.jobs.queue import JobQueue, get_job_queue
+from app.services.realtime.events import job_terminal_event, job_updated_event
 from app.services.realtime.hub import realtime_hub
 from app.services.upload.store import (
     UploadNotCompleteError,
@@ -63,40 +66,35 @@ JOB_TTL_SECONDS = 600
 PREVIEW_MEASUREMENT_COLUMNS = 20
 PREVIEW_ROWS = 10
 
-# 单进程内最多 2 个合并任务并行（仿 asset_comparison 先例）
-_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="atlas-merge-job")
-
 store = UploadStore()
 
 
-@dataclass
-class JobEntry:
-    """进程内 job 记录。字段更新均需持有 registry 锁。"""
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+@dataclass(frozen=True)
+class _JobSnapshot:
+    """Worker 执行所需的不可变字段；不跨进程持有 ORM 对象。"""
 
     job_id: str
     user_id: int
     upload_id: str
-    # 导出格式（issue #75）：insight（默认）或 pivot_to_wide
-    export_format: str = "insight"
-    status: str = STATUS_QUEUED
-    done: int = 0
-    total: int = 0
-    # 终态 done 时携带完整响应字段（含 status），error 时为 None
-    result: dict[str, Any] | None = None
-    error: str | None = None
-    created_monotonic: float = field(default_factory=time.monotonic)
-    completed_monotonic: float | None = None
-    # 提交时的请求对象，供后台线程审计取客户端 IP（headers 读取线程安全）
-    request: Request | None = None
+    export_format: str
+    ip_address: str | None
 
 
 class AtlasMergeJobRegistry:
-    """进程内 job 表：提交 → 后台执行 → 轮询 → 懒清理。"""
+    """PostgreSQL 持久化 job 表：提交 → RQ 执行 → 轮询 → 清理。"""
 
-    def __init__(self, ttl_seconds: int = JOB_TTL_SECONDS) -> None:
+    def __init__(
+        self,
+        ttl_seconds: int = JOB_TTL_SECONDS,
+        *,
+        job_queue: JobQueue | None = None,
+    ) -> None:
         self.ttl_seconds = ttl_seconds
-        self._jobs: dict[str, JobEntry] = {}
-        self._lock = threading.Lock()
+        self._job_queue = job_queue or get_job_queue()
 
     # ------------------------------------------------------------- 提交
 
@@ -108,96 +106,145 @@ class AtlasMergeJobRegistry:
         export_format: str = "insight",
         request: Request | None = None,
     ) -> str:
-        """创建 queued job 并提交后台执行，返回 job_id。"""
+        """创建 queued job 并入队，返回 job_id。"""
         job_id = secrets.token_hex(16)
-        entry = JobEntry(
-            job_id=job_id,
-            user_id=user_id,
-            upload_id=upload_id,
-            export_format=export_format,
-            request=request,
+        with SessionLocal() as db:
+            db.add(
+                AtlasMergeJob(
+                    id=job_id,
+                    user_id=user_id,
+                    upload_id=upload_id,
+                    export_format=export_format,
+                    status=STATUS_QUEUED,
+                    done=0,
+                    total=0,
+                    ip_address=get_client_ip(request),
+                )
+            )
+            db.commit()
+        self.cleanup_expired()
+        self._job_queue.enqueue(
+            run_atlas_merge_job_task, job_id, queue=settings.JOB_QUEUE_ANALYSIS
         )
-        with self._lock:
-            self._purge_expired(time.monotonic())
-            self._jobs[job_id] = entry
-        _EXECUTOR.submit(self._run, entry)
         return job_id
 
     # ------------------------------------------------------------- 查询
 
-    def get(self, job_id: str, user_id: int) -> JobEntry | None:
-        """返回属于指定用户的 job；不存在、非本人或已过期清理时返回 None。"""
-        with self._lock:
-            self._purge_expired(time.monotonic())
-            entry = self._jobs.get(job_id)
-            if entry is None or entry.user_id != user_id:
-                return None
-            return entry
-
     def get_serialized(self, job_id: str, user_id: int) -> dict | None:
-        """归属校验 + 序列化一次完成（持锁，避免与进度更新竞态）。"""
-        with self._lock:
-            self._purge_expired(time.monotonic())
-            entry = self._jobs.get(job_id)
-            if entry is None or entry.user_id != user_id:
+        """归属校验 + 序列化；不存在、非本人或已过期时返回 None。"""
+        with SessionLocal() as db:
+            job = db.scalars(
+                select(AtlasMergeJob).where(
+                    AtlasMergeJob.id == job_id,
+                    AtlasMergeJob.user_id == user_id,
+                )
+            ).first()
+            if job is None:
                 return None
-            return self.serialize(entry)
+            if self._is_expired(job):
+                db.delete(job)
+                db.commit()
+                return None
+            return self.serialize(job)
 
     @staticmethod
-    def serialize(entry: JobEntry) -> dict:
+    def serialize(job: AtlasMergeJob) -> dict:
         """按状态输出契约要求的载荷。"""
-        if entry.status == STATUS_DONE:
-            return dict(entry.result) if entry.result else {"status": STATUS_DONE}
-        if entry.status == STATUS_ERROR:
-            return {"status": STATUS_ERROR, "error": entry.error or "未知错误"}
-        return {"status": entry.status, "done": entry.done, "total": entry.total}
+        if job.status == STATUS_DONE:
+            if job.result_json:
+                return json.loads(job.result_json)
+            return {"status": STATUS_DONE}
+        if job.status == STATUS_ERROR:
+            return {
+                "status": STATUS_ERROR,
+                "error": job.error_message or "未知错误",
+            }
+        return {"status": job.status, "done": job.done, "total": job.total}
 
     # ------------------------------------------------------------- 执行
 
-    def _run(self, entry: JobEntry) -> None:
-        """后台任务主体：解压 → 合并（进度回调）→ 写缓存 → 清理源上传 → 审计。"""
-        self._set_status(entry, STATUS_RUNNING)
+    def run(self, job_id: str) -> None:
+        """Worker 任务主体：领取 → 解压 → 合并 → 写缓存 → 清理源上传 → 审计。"""
+        snapshot = self._claim(job_id)
+        if snapshot is None:
+            return
+        self._publish_status(snapshot, STATUS_RUNNING)
         tmp_dir = Path(tempfile.mkdtemp(prefix="atlas-merge-"))
         try:
-            content = self._read_upload(entry)
+            content = self._read_upload(snapshot)
             archive_root = extract_archive_zip(content, tmp_dir / "archive")
-            report = merge(archive_root, progress=self._make_progress(entry))
+            report = merge(
+                archive_root,
+                progress=self._make_progress(job_id, snapshot.user_id),
+            )
             timestamp = datetime.now().strftime("%Y%m%d")
-            if entry.export_format == "insight":
+            if snapshot.export_format == "insight":
                 output = insight_csv_text(report).encode("utf-8")
                 filename = f"unit_archive_merged_insight_{timestamp}.csv"
             else:
                 output = csv_text(report).encode("utf-8")
                 filename = f"unit_archive_merged_{timestamp}.csv"
             cached = atlas_merge_result_cache.put(
-                user_id=entry.user_id,
+                user_id=snapshot.user_id,
                 filename=filename,
                 content=output,
             )
             payload = _build_done_payload(report, cached, filename)
-        except Exception as exc:  # noqa: BLE001 - 终态错误统一由 job 携带（含缓存写入失败）
-            logger.exception(f"atlas-merge job 执行失败 job_id={entry.job_id}")
-            self._fail(entry, str(exc) or "合并任务执行失败，请稍后重试")
+        except Exception as exc:  # noqa: BLE001 - 终态错误统一由 job 携带
+            logger.exception(f"atlas-merge job 执行失败 job_id={job_id}")
+            self._fail(job_id, str(exc) or "合并任务执行失败，请稍后重试")
             return
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
-        self._complete(entry, payload)
+        self._complete(snapshot, payload)
 
         # 成功后才清理源上传，失败保留以便用户重试
         try:
-            store.delete_owned(entry.upload_id, entry.user_id)
+            store.delete_owned(snapshot.upload_id, snapshot.user_id)
         except Exception:  # noqa: BLE001 - 清理失败不阻断结果
             logger.warning(
-                f"atlas-merge 源上传清理失败 upload_id={entry.upload_id}",
+                f"atlas-merge 源上传清理失败 upload_id={snapshot.upload_id}",
                 exc_info=True,
             )
-        self._audit_completed(entry)
+        self._audit_completed(snapshot, payload)
 
-    def _read_upload(self, entry: JobEntry) -> bytes:
+    def _claim(self, job_id: str) -> _JobSnapshot | None:
+        """条件更新领取任务；重复投递的第二个 Worker 会直接退出。"""
+        with SessionLocal() as db:
+            claimed = db.execute(
+                update(AtlasMergeJob)
+                .where(
+                    AtlasMergeJob.id == job_id,
+                    AtlasMergeJob.status == STATUS_QUEUED,
+                )
+                .values(
+                    status=STATUS_RUNNING,
+                    started_at=_utcnow(),
+                    updated_at=_utcnow(),
+                )
+            ).rowcount
+            if claimed != 1:
+                db.rollback()
+                return None
+            job = db.get(AtlasMergeJob, job_id)
+            if job is None:
+                db.rollback()
+                return None
+            snapshot = _JobSnapshot(
+                job_id=job.id,
+                user_id=job.user_id,
+                upload_id=job.upload_id,
+                export_format=job.export_format,
+                ip_address=job.ip_address,
+            )
+            db.commit()
+            return snapshot
+
+    def _read_upload(self, snapshot: _JobSnapshot) -> bytes:
         """读取属于该 job 用户的已完成上传；错误转成可展示的失败原因。"""
         try:
-            return store.read_owned_bytes(entry.upload_id, entry.user_id)
+            return store.read_owned_bytes(snapshot.upload_id, snapshot.user_id)
         except UploadOwnershipError as exc:
             raise RuntimeError("无权访问此上传") from exc
         except UploadNotFoundError as exc:
@@ -205,91 +252,137 @@ class AtlasMergeJobRegistry:
         except UploadNotCompleteError as exc:
             raise RuntimeError("上传尚未完成") from exc
 
-    def _make_progress(self, entry: JobEntry):
-        """merge 进度回调：每个 unit 一次，直接写入 job.done/total（unit 级粒度正合适，不节流）。"""
+    def _make_progress(self, job_id: str, user_id: int):
+        """merge 进度回调：限频写库并推送 job.updated，前端据此拉取进度。"""
+        last_update = 0.0
 
         def on_progress(done: int, total: int) -> None:
-            with self._lock:
-                current = self._jobs.get(entry.job_id)
-                if current is None or current.status != STATUS_RUNNING:
-                    return
-                current.done = done
-                current.total = total
-            logger.debug(f"atlas-merge 进度 job={entry.job_id} {done}/{total}")
+            nonlocal last_update
+            now = time.monotonic()
+            if done != total and now - last_update < 0.5:
+                return
+            last_update = now
+            with SessionLocal() as db:
+                updated = db.execute(
+                    update(AtlasMergeJob)
+                    .where(
+                        AtlasMergeJob.id == job_id,
+                        AtlasMergeJob.status == STATUS_RUNNING,
+                    )
+                    .values(done=done, total=total, updated_at=_utcnow())
+                ).rowcount
+                db.commit()
+            if updated:
+                self._publish_status_values(
+                    user_id=user_id,
+                    job_id=job_id,
+                    status=STATUS_RUNNING,
+                )
+            logger.debug(f"atlas-merge 进度 job={job_id} {done}/{total}")
 
         return on_progress
 
-    # ------------------------------------------------------------- 状态转换
+    def _complete(self, snapshot: _JobSnapshot, payload: dict) -> None:
+        now = _utcnow()
+        with SessionLocal() as db:
+            updated = db.execute(
+                update(AtlasMergeJob)
+                .where(
+                    AtlasMergeJob.id == snapshot.job_id,
+                    AtlasMergeJob.status == STATUS_RUNNING,
+                )
+                .values(
+                    status=STATUS_DONE,
+                    result_json=json.dumps(payload, ensure_ascii=False),
+                    completed_at=now,
+                    updated_at=now,
+                    expires_at=now + timedelta(seconds=self.ttl_seconds),
+                )
+            ).rowcount
+            db.commit()
+        if updated:
+            self._notify(snapshot, STATUS_DONE)
 
-    def _set_status(self, entry: JobEntry, status: str) -> None:
-        """非终态转换（queued → running）。"""
-        with self._lock:
-            current = self._jobs.get(entry.job_id)
-            if current is None:
+    def _fail(self, job_id: str, error: str) -> None:
+        now = _utcnow()
+        with SessionLocal() as db:
+            job = db.get(AtlasMergeJob, job_id)
+            if job is None:
                 return
-            current.status = status
+            snapshot = _JobSnapshot(
+                job_id=job.id,
+                user_id=job.user_id,
+                upload_id=job.upload_id,
+                export_format=job.export_format,
+                ip_address=job.ip_address,
+            )
+            updated = db.execute(
+                update(AtlasMergeJob)
+                .where(
+                    AtlasMergeJob.id == job_id,
+                    AtlasMergeJob.status == STATUS_RUNNING,
+                )
+                .values(
+                    status=STATUS_ERROR,
+                    error_message=error,
+                    completed_at=now,
+                    updated_at=now,
+                    expires_at=now + timedelta(seconds=self.ttl_seconds),
+                )
+            ).rowcount
+            db.commit()
+        if updated:
+            self._notify(snapshot, STATUS_ERROR)
 
-    def _complete(self, entry: JobEntry, payload: dict) -> None:
-        """写入终态 done（含完整响应载荷）。"""
-        with self._lock:
-            current = self._jobs.get(entry.job_id)
-            if current is None:
-                return
-            current.status = STATUS_DONE
-            current.result = payload
-            current.completed_monotonic = time.monotonic()
-        self._notify_terminal(entry)
+    def _publish_status(self, snapshot: _JobSnapshot, status: str) -> None:
+        self._publish_status_values(
+            user_id=snapshot.user_id,
+            job_id=snapshot.job_id,
+            status=status,
+        )
 
-    def _fail(self, entry: JobEntry, error: str) -> None:
-        """写入终态 error（含失败原因）。"""
-        with self._lock:
-            current = self._jobs.get(entry.job_id)
-            if current is None:
-                return
-            current.status = STATUS_ERROR
-            current.error = error
-            current.completed_monotonic = time.monotonic()
-        self._notify_terminal(entry)
+    @staticmethod
+    def _publish_status_values(*, user_id: int, job_id: str, status: str) -> None:
+        """推送轻量任务事件；REST 仍是进度真相源。"""
+        if status in _TERMINAL_STATUSES:
+            event = job_terminal_event(
+                tool="atlas-merge",
+                job_id=job_id,
+                user_id=user_id,
+                status=status,
+            )
+        else:
+            event = job_updated_event(
+                tool="atlas-merge",
+                job_id=job_id,
+                user_id=user_id,
+                status=status,
+            )
+        realtime_hub.publish(event, user_id=user_id)
 
-    def _notify_terminal(self, entry: JobEntry) -> None:
-        """终态实时提示（轻量事件，仅 {job_id, status}；REST 才是进度真相源）。
+    def _notify(self, snapshot: _JobSnapshot, status: str) -> None:
+        self._publish_status(snapshot, status)
 
-        发布放在锁外；realtime_hub.publish 内部经 call_soon_threadsafe 切回主事件循环。
-        """
-        event = {
-            "type": "atlas_merge.progress",
-            "job_id": entry.job_id,
-            "user_id": entry.user_id,
-            "status": entry.status,
-            "at": datetime.now(UTC)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z"),
-        }
-        realtime_hub.publish(event, user_id=entry.user_id)
-
-    def _audit_completed(self, entry: JobEntry) -> None:
-        """任务完成审计（后台线程需独立 DB session；失败不阻断）。"""
+    def _audit_completed(self, snapshot: _JobSnapshot, payload: dict) -> None:
+        """任务完成审计（Worker 无 Request，IP 来自提交时快照）。"""
         try:
             with SessionLocal() as db:
-                user = db.get(User, entry.user_id)
+                user = db.get(User, snapshot.user_id)
                 if user is None:
                     return
-                detail: dict[str, Any] = {"job_id": entry.job_id}
-                if entry.result is not None:
-                    detail.update(
-                        {
-                            "result_id": entry.result.get("result_id"),
-                            "unit_count": entry.result.get("unit_count"),
-                            "run_count": entry.result.get("run_count"),
-                            "parse_error_count": len(
-                                entry.result.get("parse_errors") or []
-                            ),
-                        }
-                    )
+                detail: dict[str, Any] = {"job_id": snapshot.job_id}
+                detail.update(
+                    {
+                        "result_id": payload.get("result_id"),
+                        "unit_count": payload.get("unit_count"),
+                        "run_count": payload.get("run_count"),
+                        "parse_error_count": len(payload.get("parse_errors") or []),
+                    }
+                )
                 log_action(
                     db,
-                    request=entry.request,
+                    request=None,
+                    ip_address=snapshot.ip_address,
                     user=user,
                     action="tool.atlas_merge.analyze",
                     target_type="tool",
@@ -298,22 +391,29 @@ class AtlasMergeJobRegistry:
                 )
         except Exception:  # noqa: BLE001 - 审计失败不影响主流程
             logger.warning(
-                f"atlas-merge job 审计失败 job_id={entry.job_id}", exc_info=True
+                f"atlas-merge job 审计失败 job_id={snapshot.job_id}", exc_info=True
             )
 
-    # ------------------------------------------------------------- 懒清理
+    # ------------------------------------------------------------- 清理
 
-    def _purge_expired(self, now: float) -> None:
-        """懒清理：仅清理到达终态且超过 TTL 的 job；活跃 job 永不清理。"""
-        expired = [
-            job_id
-            for job_id, entry in self._jobs.items()
-            if entry.status in _TERMINAL_STATUSES
-            and entry.completed_monotonic is not None
-            and now - entry.completed_monotonic >= self.ttl_seconds
-        ]
-        for job_id in expired:
-            self._jobs.pop(job_id, None)
+    @staticmethod
+    def _is_expired(job: AtlasMergeJob) -> bool:
+        if job.status not in _TERMINAL_STATUSES:
+            return False
+        return job.expires_at is not None and job.expires_at <= _utcnow()
+
+    def cleanup_expired(self) -> int:
+        """删除终态且超过 TTL 的 job 行；活跃 job 不受影响。"""
+        with SessionLocal() as db:
+            removed = db.execute(
+                delete(AtlasMergeJob).where(
+                    AtlasMergeJob.status.in_(_TERMINAL_STATUSES),
+                    AtlasMergeJob.expires_at.is_not(None),
+                    AtlasMergeJob.expires_at <= _utcnow(),
+                )
+            ).rowcount
+            db.commit()
+            return removed
 
 
 def _build_done_payload(
@@ -345,6 +445,11 @@ def _build_done_payload(
         rows_preview=rows_preview,
     )
     return {"status": STATUS_DONE, **response.model_dump()}
+
+
+def run_atlas_merge_job_task(job_id: str) -> None:
+    """RQ 任务入口：必须是模块级函数，Worker 才能按路径导入。"""
+    atlas_merge_jobs.run(job_id)
 
 
 atlas_merge_jobs = AtlasMergeJobRegistry()

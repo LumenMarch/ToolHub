@@ -6,10 +6,13 @@ import re
 import shutil
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 from typing import Any
+
+import portalocker
 
 from app.core.config import settings
 
@@ -94,12 +97,24 @@ class TaskArtifactStore:
         if not 0 < self.blob_max_disk_ratio < 1:
             raise ValueError("缓存磁盘比例必须大于 0 且小于 1")
         self._blob_lock = RLock()
+        # API 与 Worker 进程共享同一产物卷，进程内 RLock 不足以保护
+        # publish/evict 的 check-then-act；用文件锁串行化跨进程操作。
+        self._blob_lock_path = self.root / ".blobs.lock"
         self.root.mkdir(parents=True, exist_ok=True)
         os.chmod(self.root, 0o700)
         self.upload_root.mkdir(parents=True, exist_ok=True)
         os.chmod(self.upload_root, 0o700)
         self.user_root.mkdir(parents=True, exist_ok=True)
         os.chmod(self.user_root, 0o700)
+        self._blob_lock_path.touch(exist_ok=True)
+        os.chmod(self._blob_lock_path, 0o600)
+
+    @contextmanager
+    def _blob_guard(self):
+        """线程锁 + 跨进程文件锁，覆盖 blob 元数据与容量淘汰。"""
+        with self._blob_lock:
+            with portalocker.Lock(self._blob_lock_path, "a+", timeout=30):
+                yield
 
     def task_dir(
         self,
@@ -262,7 +277,7 @@ class TaskArtifactStore:
         )
 
     def find_blob(self, *, user_id: int, digest: ContentDigest) -> CachedBlob | None:
-        with self._blob_lock:
+        with self._blob_guard():
             path = self._blob_path(user_id, digest.sha256)
             metadata_path = self._blob_metadata_path(user_id, digest.sha256)
             if not path.is_file() or not metadata_path.is_file():
@@ -286,7 +301,7 @@ class TaskArtifactStore:
         source_path: Path,
         digest: ContentDigest,
     ) -> CachedBlob:
-        with self._blob_lock:
+        with self._blob_guard():
             path = self._blob_path(user_id, digest.sha256)
             metadata_path = self._blob_metadata_path(user_id, digest.sha256)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -321,7 +336,7 @@ class TaskArtifactStore:
 
     def cleanup(self) -> ArtifactCleanupResult:
         expired_tasks = self._cleanup_expired_tasks()
-        with self._blob_lock:
+        with self._blob_guard():
             expired_blobs, expired_bytes = self._cleanup_expired_blobs(
                 max_age_hours=self.blob_ttl_hours
             )

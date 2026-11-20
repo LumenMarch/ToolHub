@@ -1,5 +1,6 @@
 from app.models.asset_comparison_artifact import AssetComparisonArtifact
 from app.models.asset_comparison_job import AssetComparisonJob
+from app.models.atlas_merge_job import AtlasMergeJob
 from app.models.audit_log import AuditLog
 from app.models.llm_config import LlmConfig
 from app.models.notification import Notification
@@ -12,6 +13,7 @@ from app.models.user_session import UserSession
 __all__ = [
     "AssetComparisonArtifact",
     "AssetComparisonJob",
+    "AtlasMergeJob",
     "AuditLog",
     "LlmConfig",
     "Notification",

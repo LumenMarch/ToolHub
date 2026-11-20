@@ -4,24 +4,19 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import redis as redis_lib
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
+from sqlalchemy import text
 from starlette.formparsers import MultiPartParser
 
 from app.api.api_router import api_router
 from app.core.config import settings
 from app.core.constants import MAX_UPLOAD_BYTES
-from app.db.base_class import Base
-from app.db.session import engine, ensure_schema_compat
-from app.seed import (
-    migrate_admin_permissions,
-    migrate_per_tool_permissions,
-    migrate_retired_roles,
-    migrate_retired_tools,
-    run_seed,
-)
+from app.db.locks import advisory_lock
+from app.db.session import SessionLocal
 
 # 单个 multipart part 与 tus 单文件共用同一上限（当前实现仅用 tus，
 # 这里保持一致，避免未来新增 multipart 端点时出现第二套限制）。
@@ -30,21 +25,7 @@ MultiPartParser.max_part_size = MAX_UPLOAD_BYTES  # 1 GiB
 # 单个 JSON 请求体上限：图片类工具最大允许 80MB base64，再留少量信封余量
 MAX_JSON_BODY_BYTES = 96 * 1024 * 1024
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
-ensure_schema_compat()
-
-
-# 写入默认权限与角色（幂等 — 已有数据时跳过）
-run_seed()
-# 存量库数据迁移：tool:use → tool:<id>:use（幂等，重复执行无副作用）
-migrate_per_tool_permissions()
-# 存量库补齐新增的管理权限（如 llm_config:*）并让内置角色回到声明集（幂等）
-migrate_admin_permissions()
-# 删除已下线的内置角色及其关联（幂等）
-migrate_retired_roles()
-# 清理已下线工具在库中的残留（权限行/角色与用户授权/元数据，幂等）
-migrate_retired_tools()
+# schema 由 Alembic 管理；种子与存量数据迁移由 app.bootstrap 在启动前执行。
 
 
 @asynccontextmanager
@@ -111,30 +92,10 @@ async def limit_json_body(request: Request, call_next):
 # Mount all API routes from the single API aggregator
 app.include_router(api_router, prefix="/api/v1")
 
-# ===== 前端打包产物托管（可选挂载） =====
-# 前端构建产物目录的候选定位方式（按优先级依次尝试）：
-#   1) 仓库布局：backend/app/main.py 的 ../.. = 仓库根，其下 frontend/dist；
-#      开发模式（源码直接运行）时使用。
-#   2) Nuitka frozen 布局：打包时用 --include-data-dir=<dist>=frontend
-#      把构建产物放进 bundle，运行时位于 <bundle>/frontend/。
-#      Nuitka 编译后 app/main.py 的 __file__ 指向 <bundle>/app/main.py（虚拟路径），
-#      因此 parents[1] 即 bundle 目录（实测：parents[2] 是 bundle 的父目录、
-#      parent 是 <bundle>/app，均不对），与 --output-dir/产物重命名无关，
-#      见 docs/research/windows-offline-deployment.md §7）。
-# Nuitka 检测：__compiled__ 是 Nuitka 注入的模块级内置（类似 __file__），
-# 普通 CPython 下不存在（NameError），官方推荐用法即 try/except 属性访问。
-# （注意：import __compiled__ 在 Nuitka 4.1.3 下不可用，实测 ModuleNotFoundError；
-#  必须以模块属性形式访问，且其 containing_dir 是 bundle 的父目录，因此数据路径
-#  用 __file__ 的 parents[1] 定位，而不是 containing_dir。）
-try:
-    __compiled__  # type: ignore # noqa: B018 - Nuitka 注入的伪模块，用于检测 frozen 运行
-    _NUITKA_FROZEN = True
-except NameError:
-    _NUITKA_FROZEN = False
-
+# ===== 前端构建产物托管（可选挂载） =====
+# 源码布局：backend/app/main.py 的 ../.. 是仓库根，其下 frontend/dist；
+# 容器布局：/app/backend/app/main.py 的 ../.. 是 /app，其下 frontend/dist。
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
-if not FRONTEND_DIST_DIR.is_dir() and _NUITKA_FROZEN:
-    FRONTEND_DIST_DIR = Path(__file__).resolve().parents[1] / "frontend"
 HAS_FRONTEND_BUILD = FRONTEND_DIST_DIR.is_dir()
 
 if HAS_FRONTEND_BUILD:
@@ -153,23 +114,27 @@ def cleanup_task_artifacts() -> None:
     """清理过期上传、任务产物，并按 TTL 和容量限制回收缓存。"""
     from app.api.endpoints.asset_comparison import asset_comparison_job_manager
     from app.api.endpoints.cpk_charts import OPP_CACHE_DIR
+    from app.services.atlas_merge.jobs import atlas_merge_jobs
     from app.services.cpk_charts import parser as opp_parser
     from app.services.task_artifacts import task_artifact_store
     from app.services.upload.store import UploadStore
 
     asset_comparison_job_manager.cleanup()
+    removed_atlas_jobs = atlas_merge_jobs.cleanup_expired()
     UploadStore().cleanup_expired(max_age_hours=24)
     opp_parser.cleanup(OPP_CACHE_DIR, max_age_hours=24 * 3)
     result = task_artifact_store.cleanup()
     logger.info(
         "task artifacts cleaned: expired_tasks={} expired_blobs={} "
-        "capacity_blobs={} evicted_bytes={} cache_bytes={} cache_budget_bytes={}",
+        "capacity_blobs={} evicted_bytes={} cache_bytes={} cache_budget_bytes={} "
+        "atlas_jobs={}",
         result.expired_tasks,
         result.expired_blobs,
         result.capacity_blobs,
         result.evicted_bytes,
         result.cache_bytes,
         result.cache_budget_bytes,
+        removed_atlas_jobs,
     )
 
 
@@ -195,7 +160,6 @@ def cleanup_expired_unapproved_users() -> int:
 
     from app.core.config import settings
     from app.crud.crud_user import get_unapproved_users_older_than
-    from app.db.session import SessionLocal
     from app.models.user import (
         USER_STATUS_PENDING,
         USER_STATUS_REJECTED,
@@ -268,7 +232,6 @@ def cleanup_expired_sessions_and_notifications() -> int:
 
     from app.core.config import settings
     from app.crud.crud_notification import delete_expired_notifications
-    from app.db.session import SessionLocal
     from app.models.user_session import UserSession
 
     db = SessionLocal()
@@ -328,12 +291,19 @@ async def start_task_artifact_cleanup() -> None:
 
 
 async def bootstrap_initial_admin() -> None:
-    """用户表为空时引导创建初始管理员；失败则记录 ERROR 并标记健康检查失败。"""
+    """用户表为空时引导创建初始管理员；失败则记录 ERROR 并标记健康检查失败。
+
+    多副本启动时只让持有 advisory lock 的进程执行，避免并发创建同一账号。
+    """
     global initial_admin_bootstrap_error
 
     from app.seed import ensure_initial_admin
 
-    initial_admin_bootstrap_error = await asyncio.to_thread(ensure_initial_admin)
+    with advisory_lock("toolhub:initial-admin") as acquired:
+        if not acquired:
+            logger.info("初始管理员引导由其它实例执行，跳过")
+            return
+        initial_admin_bootstrap_error = await asyncio.to_thread(ensure_initial_admin)
     if initial_admin_bootstrap_error:
         logger.error("初始管理员引导失败：{}", initial_admin_bootstrap_error)
     else:
@@ -360,10 +330,16 @@ async def start_unapproved_user_cleanup() -> None:
 
 
 async def recover_asset_comparison_jobs() -> None:
-    """恢复资产核对任务状态并清理过期产物。"""
+    """恢复资产核对任务状态并清理过期产物。
+
+    多副本启动时只让一个进程执行恢复与重新入队，避免重复堆叠 RQ 任务。
+    """
     from app.api.endpoints.asset_comparison import asset_comparison_job_manager
 
-    asset_comparison_job_manager.recover_interrupted()
+    with advisory_lock("toolhub:job-recovery") as acquired:
+        if not acquired:
+            return
+        asset_comparison_job_manager.recover_interrupted()
 
 
 async def start_llm_gateway() -> None:
@@ -420,7 +396,7 @@ async def shutdown_unapproved_user_cleanup() -> None:
 
 @app.get("/healthz")
 def healthz():
-    """健康检查：初始管理员引导失败（如未配置且用户表为空）时返回 503 并带原因。"""
+    """就绪检查：数据库、Redis 与初始管理员引导任一失败即返回 503。"""
     if initial_admin_bootstrap_error:
         return JSONResponse(
             status_code=503,
@@ -429,6 +405,33 @@ def healthz():
                 "reason": initial_admin_bootstrap_error,
             },
         )
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("healthz: database check failed")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "reason": "database unavailable"},
+        )
+    if settings.REDIS_URL:
+        client = None
+        try:
+            client = redis_lib.Redis.from_url(
+                settings.REDIS_URL,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+            )
+            client.ping()
+        except Exception:
+            logger.exception("healthz: redis check failed")
+            return JSONResponse(
+                status_code=503,
+                content={"status": "degraded", "reason": "redis unavailable"},
+            )
+        finally:
+            if client is not None:
+                client.close()
     return {"status": "ok"}
 
 

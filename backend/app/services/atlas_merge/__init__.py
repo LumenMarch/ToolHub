@@ -34,7 +34,6 @@ from app.services.atlas_merge.jobs import (
     STATUS_QUEUED,
     STATUS_RUNNING,
     AtlasMergeJobRegistry,
-    JobEntry,
     atlas_merge_jobs,
 )
 from app.services.atlas_merge.merge_engine import (
@@ -70,7 +69,6 @@ __all__ = [
     "ColumnDef",
     "DataSourceType",
     "JOB_TTL_SECONDS",
-    "JobEntry",
     "MAX_UNCOMPRESSED_BYTES",
     "MeasurementItem",
     "MergedReport",

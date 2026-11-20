@@ -197,6 +197,7 @@ def _check_registration_domain(username: str) -> None:
             rate_limit(
                 settings.REGISTRATION_RATE_LIMIT_PER_IP,
                 settings.REGISTRATION_RATE_LIMIT_WINDOW,
+                name="auth.register",
             )
         )
     ],

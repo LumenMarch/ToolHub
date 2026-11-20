@@ -12,7 +12,15 @@ from pathlib import Path
 # 必须在导入 app 模块之前设置
 _TEST_ROOT = tempfile.mkdtemp(prefix="toolhub-pytest-")
 os.environ["TASK_ARTIFACT_ROOT"] = str(Path(_TEST_ROOT) / "artifacts")
-os.environ["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{Path(_TEST_ROOT) / 'test.db'}"
+# 测试使用真实 PostgreSQL；本地/CI 通过 TEST_DATABASE_URI 指向专用测试库。
+os.environ.setdefault(
+    "TEST_DATABASE_URI",
+    "postgresql+psycopg://toolhub:toolhub@127.0.0.1:5432/toolhub_test",
+)
+os.environ["SQLALCHEMY_DATABASE_URI"] = os.environ["TEST_DATABASE_URI"]
+# 测试不依赖 Redis：实时 hub 回落进程内，后台任务同步执行。
+os.environ["REDIS_URL"] = ""
+os.environ["JOB_QUEUE_BACKEND"] = "local"
 os.environ["SECRET_KEY"] = "test-only-secret-key-0f7c4a9e2b1d"
 os.environ["AUTH_COOKIE_SECURE"] = "false"
 
@@ -20,6 +28,7 @@ os.environ["AUTH_COOKIE_SECURE"] = "false"
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+import app.models  # noqa: E402, F401 - 确保全部模型注册到 Base.metadata
 from app.core.config import settings  # noqa: E402
 from app.core.rate_limit import reset_rate_limiters  # noqa: E402
 from app.db.base_class import Base  # noqa: E402

@@ -39,6 +39,34 @@ jobs:
     defaults:
       run:
         working-directory: ./backend
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: toolhub
+          POSTGRES_PASSWORD: toolhub
+          POSTGRES_DB: toolhub_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U toolhub -d toolhub_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg://toolhub:toolhub@127.0.0.1:5432/toolhub_test
+      TEST_DATABASE_URI: postgresql+psycopg://toolhub:toolhub@127.0.0.1:5432/toolhub_test
+      REDIS_URL: ""
+      JOB_QUEUE_BACKEND: local
     steps:
       - uses: actions/checkout@v4
 
@@ -54,10 +82,16 @@ jobs:
           python-version: "3.13"
 
       - name: Install the project
-        run: uv sync --all-extras --dev
+        run: uv sync --dev
+
+      - name: Run migrations
+        run: uv run alembic upgrade head
 
       - name: Run Ruff Linter
         run: uv run ruff check .
 
       - name: Run Ruff Formatter Check
         run: uv run ruff format --check .
+
+      - name: Run tests
+        run: uv run pytest -q
