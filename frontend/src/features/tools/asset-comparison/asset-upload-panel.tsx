@@ -35,8 +35,6 @@ import {
 
 const { Text } = Typography
 
-const ACCEPT = '.xlsx,.xls,.csv'
-
 function fileKey(file: File): string {
   return `${file.name}:${file.size}`
 }
@@ -111,13 +109,10 @@ export function AssetUploadPanel({
   const clearScan = () => setScan(null)
 
   const addFiles = (incoming: File[], folder: string | null = null) => {
-    const accepted = incoming.filter((file) =>
-      /\.(xlsx|xls|csv)$/i.test(file.name),
-    )
-    if (accepted.length === 0) {
-      message.warning('请选择 xlsx / xls / csv 文件')
-      return
-    }
+    // 不按扩展名过滤：资产核对的三个配置文件是 .txt，原版目录选择也上传全部文件。
+    // 后端只按文件名匹配，类型判断由解析阶段负责。
+    const accepted = incoming.filter((file) => file.name.length > 0)
+    if (accepted.length === 0) return
     if (folder) setSelectedFolder(folder)
     setFiles((previous) => {
       const existing = new Set(previous.map(fileKey))
@@ -221,7 +216,6 @@ export function AssetUploadPanel({
             ref={filesInputRef}
             type="file"
             multiple
-            accept={ACCEPT}
             style={{ display: 'none' }}
             onChange={handleInputFiles}
           />
