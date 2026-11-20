@@ -30,9 +30,11 @@ import {
 interface CpkHistogramProps {
   analysis: ColumnAnalysis;
   settings: ChartSettings;
+  /** 追加在 Cpk 之后的行（例如累加模式下的 Upper / Lower） */
+  extraStats?: Array<{ label: string; value: string }>;
 }
 
-const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
+const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings, extraStats = [] }) => {
   const { column, stat, bins, domain, hasLimits } = analysis;
   const s = settings;
   const [dlo, dhi] = domain;
@@ -93,6 +95,7 @@ const CpkHistogram: React.FC<CpkHistogramProps> = ({ analysis, settings }) => {
     { label: 'Cpu', value: formatIndex(stat.cpu) },
     { label: 'Cpl', value: formatIndex(stat.cpl) },
     { label: 'Cpk', value: formatIndex(stat.cpk) },
+    ...extraStats,
   ];
 
   return (
