@@ -58,6 +58,7 @@ export function AssetModulePanel({
   const result = job.results.find((item) => item.key === moduleKey)
   const ready = result?.status === 'ready'
   const readOnly = job.status === 'complete' && job.finalizedRevision === job.annotationRevision
+  const savedRemark = (job.remarks[moduleKey] ?? '').trim()
 
   const [type, setType] = useState<AssetDifferenceType>('all')
   const [searchDraft, setSearchDraft] = useState('')
@@ -141,9 +142,18 @@ export function AssetModulePanel({
         title={`模块复核 · ${ASSET_MODULE_LABELS[moduleKey]}`}
         extra={
           result.has_diff ? (
-            <Tag color="gold" bordered={false}>
-              有差异，归档前需填写备注
-            </Tag>
+            savedRemark ? (
+              <Tag
+                color={remark.trim() === savedRemark ? 'success' : 'gold'}
+                bordered={false}
+              >
+                {remark.trim() === savedRemark ? '备注已填写' : '备注未保存'}
+              </Tag>
+            ) : (
+              <Tag color="gold" bordered={false}>
+                有差异，归档前需填写备注
+              </Tag>
+            )
           ) : (
             <Tag color="success" bordered={false}>
               无差异
