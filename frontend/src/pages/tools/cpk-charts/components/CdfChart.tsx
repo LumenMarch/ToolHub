@@ -71,9 +71,11 @@ interface CdfChartProps {
   secondary?: ColumnAnalysis | null;
   secondaryStroke?: string;
   stroke?: string;
+  /** 追加在 Cpk 之后的统计行（累加模式的规格限） */
+  extraStats?: Array<{ label: string; value: string }>;
 }
 
-const CdfChart: React.FC<CdfChartProps> = ({ analysis, settings, secondary, secondaryStroke, stroke }) => {
+const CdfChart: React.FC<CdfChartProps> = ({ analysis, settings, secondary, secondaryStroke, stroke, extraStats }) => {
   const [dlo, dhi] = analysis?.domain ?? [-1, 1];
   const xTicks = ticksFor(dlo, dhi);
   const xMajor = xTicks.length > 1 ? Math.abs(xTicks[1] - xTicks[0]) : dhi - dlo;
@@ -97,7 +99,7 @@ const CdfChart: React.FC<CdfChartProps> = ({ analysis, settings, secondary, seco
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="font-sans text-foreground" role="img" aria-label="CDF 累积分布图" preserveAspectRatio="xMidYMid meet">
       {settings.showTitle && analysis && (<text x={W / 2} y={15} textAnchor="middle" fontSize={11} fontWeight={700} fill="currentColor">{analysis.column.name}{unitSuffix}</text>)}
-      {settings.showStats && analysis && (<StatsLabels stat={analysis.stat} />)}
+      {settings.showStats && analysis && (<StatsLabels stat={analysis.stat} extraStats={extraStats} />)}
       {yTicks.map((t) => { const y = yOf(t); return (<g key={t}><line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={y} y2={y} stroke="currentColor" strokeOpacity={t === 0 ? 0.9 : 0.45} strokeWidth={1} /><text x={PLOT_LEFT - 12} y={y + 3.5} textAnchor="end" fontSize={9} fontWeight={500} fill="currentColor">{yLabel(t)}</text></g>); })}
       {yMinor.map((v) => { const y = yOf(v); return (<line key={'ym-' + v} x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={y} y2={y} stroke="currentColor" strokeOpacity={0.18} strokeWidth={1} />); })}
       <line x1={PLOT_LEFT} x2={PLOT_RIGHT} y1={PLOT_TOP} y2={PLOT_TOP} stroke="currentColor" strokeOpacity={0.6} strokeWidth={1} />

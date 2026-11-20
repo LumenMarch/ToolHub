@@ -196,11 +196,19 @@ def _estimate_text_width(
     return w
 
 
-def _compute_adaptive_layout(items: list[str], header_a: str, header_b: str):
+def _compute_adaptive_layout(
+    items: list[str],
+    header_a: str,
+    header_b: str,
+    extra_headers: list[str] | None = None,
+):
     """计算自适应最优列宽与行高。
 
-    Returns: (col_widths[3], header_row_height, row_heights[list])
+    返回 (col_widths, header_row_height, row_heights)；没有数据 B 时 C 列整列省略，
+    列宽数为 (2 或 3) + len(extra_headers)。
     """
+    extra_headers = extra_headers or []
+    has_b = bool(header_b)
     # --- 列宽 ---
     # Item 列：基于所有 Item 名称 + 表头 "Item" 在 15pt 下的宽度，留 24pt 内边距
     max_item_w = _estimate_text_width("Item", ITEM_FONT_SIZE)
@@ -217,7 +225,8 @@ def _compute_adaptive_layout(items: list[str], header_a: str, header_b: str):
     col1 = 710
     col2 = 710
 
-    col_widths = [col0, col1, col2]
+    # 累加列（New_limitsN）与 A/B 列同宽，保证图表等比填满；无 B 数据时省略 B 列
+    col_widths = [col0, col1, *([col2] if has_b else []), *([710] * len(extra_headers))]
 
     # --- 行高 ---
     # 表头行：仍按文件名换行自适应，但限制在 28-64
@@ -228,11 +237,13 @@ def _compute_adaptive_layout(items: list[str], header_a: str, header_b: str):
         usable = max(col_w - 16, 80)
         return max(1, int((tw + usable - 1) // usable))
 
-    header_lines = max(
+    header_line_counts = [
         _header_lines("Item", col0),
         _header_lines(header_a, col1),
-        _header_lines(header_b, col2) if header_b else 1,
-    )
+        *([_header_lines(header_b, col2)] if has_b else []),
+        *[_header_lines(text, 710) for text in extra_headers],
+    ]
+    header_lines = max(*header_line_counts, 1)
     header_h = header_lines * HEADER_FONT_SIZE * 1.35 + 16
     header_h = max(28, min(header_h, 64))
 
@@ -259,6 +270,15 @@ class ItemCheckReportRequest(BaseModel):
     )
     imagesB: list[ImageB64] | None = Field(
         default=None, description="数据 B 的 PNG 图，base64 编码，与 items 一一对应"
+    )
+    extraHeaders: list[ItemName] = Field(
+        default_factory=list,
+        max_length=20,
+        description="累加模式追加列的表头，如 New_limits1/New_limits2",
+    )
+    imagesExtra: list[list[ImageB64]] | None = Field(
+        default=None,
+        description="累加模式图片矩阵：行与 items 对应，列与 extraHeaders 对应，空字符串表示该格留空",
     )
 
     @model_validator(mode="after")
@@ -308,6 +328,10 @@ def create_item_check_report(
 
     images_a = body.imagesA
     images_b = body.imagesB or []
+    extra_headers = body.extraHeaders or []
+    images_extra = body.imagesExtra or []
+    # 没有数据 B（文件名与图片都为空）时，报告只保留 A 列，不输出空的“数据 B”列
+    has_b = bool((body.fileNameB or "").strip()) or any(cell for cell in images_b)
 
     if len(images_a) != len(items):
         raise HTTPException(
@@ -319,9 +343,28 @@ def create_item_check_report(
             status_code=400,
             detail=f"imagesB 数量({len(images_b)})与 items({len(items)})不一致",
         )
+    if images_extra:
+        if len(images_extra) != len(items):
+            raise HTTPException(
+                status_code=400,
+                detail=f"imagesExtra 行数({len(images_extra)})与 items({len(items)})不一致",
+            )
+        for row_index, row in enumerate(images_extra):
+            if len(row) != len(extra_headers):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"imagesExtra 第 {row_index + 1} 行有 {len(row)} 张图，"
+                        f"与 extraHeaders({len(extra_headers)}) 不一致"
+                    ),
+                )
 
     # 限制总大小，避免超大请求拖垮服务
-    total_b64_len = sum(len(s) for s in images_a) + sum(len(s) for s in images_b)
+    total_b64_len = (
+        sum(len(s) for s in images_a)
+        + sum(len(s) for s in images_b)
+        + sum(len(cell) for row in images_extra for cell in row)
+    )
     if total_b64_len > 80 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="图片总大小超过限制（80MB base64）")
 
@@ -337,8 +380,10 @@ def create_item_check_report(
     header_b = file_name_b[:200] if len(file_name_b) > 200 else file_name_b
 
     # 计算自适应最优列宽与行高（字体：Item 15 / 表头 20，均不加粗、居中）
+    # 无 B 数据时 header_b 置空，布局与表头都按两列处理
+    layout_header_b = header_b if has_b else ""
     col_widths, header_h, row_heights = _compute_adaptive_layout(
-        items, header_a, header_b
+        items, header_a, layout_header_b, extra_headers
     )
 
     doc = Document()
@@ -380,10 +425,14 @@ def create_item_check_report(
         font_name="Helvetica Neue",
     )
 
-    # 表头：A列固定“Item”，B/C 列用文件名
+    # 表头：A 列固定“Item”，B 列文件名（仅有 B 数据时），其后是累加列（New_limitsN）
+    base_cols = 3 if has_b else 2
     table.write(HEADER_ROW, 0, "Item", style=header_style)
     table.write(HEADER_ROW, 1, header_a, style=header_style)
-    table.write(HEADER_ROW, 2, header_b, style=header_style)
+    if has_b:
+        table.write(HEADER_ROW, 2, header_b, style=header_style)
+    for col_index, header in enumerate(extra_headers):
+        table.write(HEADER_ROW, base_cols + col_index, header, style=header_style)
 
     for i, name in enumerate(items):
         r = DATA_START_ROW + i
@@ -399,16 +448,29 @@ def create_item_check_report(
             )
             table.write(r, 1, "", style=bg_a)
 
-        # C 列：数据 B 图
-        png_b = None
-        if images_b and i < len(images_b):
-            png_b = _decode_b64_maybe_empty(images_b[i])
-        if png_b is not None:
-            bg_b = doc.add_style(
-                name=f"img_{r}_2",
-                bg_image=BackgroundImage(png_b, f"B_{i:03d}.png"),
-            )
-            table.write(r, 2, "", style=bg_b)
+        # C 列：数据 B 图（仅存在 B 数据时）
+        if has_b:
+            png_b = None
+            if images_b and i < len(images_b):
+                png_b = _decode_b64_maybe_empty(images_b[i])
+            if png_b is not None:
+                bg_b = doc.add_style(
+                    name=f"img_{r}_2",
+                    bg_image=BackgroundImage(png_b, f"B_{i:03d}.png"),
+                )
+                table.write(r, 2, "", style=bg_b)
+
+        # 累加列：该测试项没有对应组合时保持空白
+        if i < len(images_extra):
+            for col_index, cell in enumerate(images_extra[i]):
+                png_extra = _decode_b64_maybe_empty(cell)
+                if png_extra is None:
+                    continue
+                bg_extra = doc.add_style(
+                    name=f"img_{r}_{base_cols + col_index}",
+                    bg_image=BackgroundImage(png_extra, f"L{col_index}_{i:03d}.png"),
+                )
+                table.write(r, base_cols + col_index, "", style=bg_extra)
 
     tmp = tempfile.NamedTemporaryFile(suffix=".numbers", delete=False)
     tmp_path = Path(tmp.name)
@@ -440,6 +502,7 @@ def create_item_check_report(
         detail={
             "item_count": len(items),
             "has_b": bool(header_b),
+            "extra_columns": len(extra_headers),
         },
     )
 

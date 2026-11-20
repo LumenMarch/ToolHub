@@ -465,6 +465,11 @@ export function analyzeColumn(
   };
 }
 
+/** 规格限格式化：整数/小数统一去尾零，空限制显示为 —。 */
+export function formatSpecLimit(value: number | null): string {
+  return value === null ? '—' : String(Number(value.toFixed(6)));
+}
+
 /**
  * 测量值格式化 — 对齐 OPP 直方图：Max/Min/Mean/Std.Dev 固定 4 位小数（%.4f）。
  * X 轴刻度用 formatTick（整数时省略小数点）。
