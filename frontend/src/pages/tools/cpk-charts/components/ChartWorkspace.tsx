@@ -18,11 +18,12 @@ import CdfChart from './CdfChart';
 import TimeSeriesChart from './TimeSeriesChart';
 import CorrelationChart from './CorrelationChart';
 import CorrelationSettings from './CorrelationSettings';
+import AccumulateLimits from './AccumulateLimits';
+import WorkspaceStats from './WorkspaceStats';
 import ItemSettingsPanel from '../pages/ItemSettingsPanel';
 import {
   correlationPoints,
-  formatIndex,
-  formatValue,
+  formatSpecLimit,
   pearsonCorrelation,
   shortName,
   type ColumnAnalysis,
@@ -68,7 +69,14 @@ function singleStatsCards(st: NonNullable<ReturnType<typeof corrStatsOf>>): Arra
   ];
 }
 
-const STAT_ROWS = ['Cpk', 'Cpu', 'Cpl', 'Mean', 'Std. Dev.', 'Data Count', 'Failure Count'] as const;
+/** 原始图左侧统计块追加的规格限行；两侧都没有限时返回空数组，不占位。 */
+function limitStatsOf(column: ColumnAnalysis['column'] | null | undefined): Array<{ label: string; value: string }> {
+  if (!column || (column.upper === null && column.lower === null)) return [];
+  return [
+    { label: 'Upper', value: formatSpecLimit(column.upper) },
+    { label: 'Lower', value: formatSpecLimit(column.lower) },
+  ];
+}
 
 interface LoadedAnalyses {
   shared: SharedPairAnalysis | null;
@@ -185,11 +193,14 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
     }
   };
 
-  const renderChart = (analysis: ColumnAnalysis | null) => {
+  const renderChart = (
+    analysis: ColumnAnalysis | null,
+    extraStats: Array<{ label: string; value: string }> = [],
+  ) => {
     if (!analysis) return <div className="flex h-40 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">无此测试项</div>;
-    if (view === 'cdf') return <CdfChart analysis={analysis} settings={settings} />;
-    if (view === 'timeseries') return <TimeSeriesChart analysis={analysis} settings={settings} />;
-    return <CpkHistogram analysis={analysis} settings={settings} />;
+    if (view === 'cdf') return <CdfChart analysis={analysis} settings={settings} extraStats={extraStats} />;
+    if (view === 'timeseries') return <TimeSeriesChart analysis={analysis} settings={settings} extraStats={extraStats} />;
+    return <CpkHistogram analysis={analysis} settings={settings} extraStats={extraStats} />;
   };
 
   const renderCorrPanel = (pair: CorrelationPair | null, st: ReturnType<typeof corrStatsOf>, label: string, keyPrefix: string) => (
@@ -272,7 +283,7 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
           <div className="relative">
             <span className="absolute -top-2.5 left-3 z-10 rounded-md border border-primary/40 bg-background px-2 py-0.5 text-[0.625rem] font-medium text-primary">数据 A</span>
             <div className="relative rounded-xl border bg-card p-2 sm:p-3">
-              {renderChart(activeA?.analysis ?? null)}
+              {renderChart(activeA?.analysis ?? null, limitStatsOf(activeA?.analysis.column))}
               {activeA ? (
                 <Button type="button" variant="outline" size="xs" onClick={() => setZoom('A')} className="absolute top-2 right-2">
                   <Maximize2 data-icon="inline-start" />放大
@@ -283,7 +294,7 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
           <div className="relative">
             <span className="absolute -top-2.5 left-3 z-10 rounded-md border border-status-warning-foreground/40 bg-background px-2 py-0.5 text-[0.625rem] font-medium text-status-warning-foreground">数据 B</span>
             <div className="relative rounded-xl border bg-card p-2 sm:p-3">
-              {renderChart(activeB?.analysis ?? null)}
+              {renderChart(activeB?.analysis ?? null, limitStatsOf(activeB?.analysis.column))}
               {activeB ? (
                 <Button type="button" variant="outline" size="xs" onClick={() => setZoom('B')} className="absolute top-2 right-2">
                   <Maximize2 data-icon="inline-start" />放大
@@ -293,69 +304,30 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
           </div>
         </div>
       ) : (
-        <div className="rounded-xl border bg-card p-2 sm:p-3">{renderChart(activeCol)}</div>
+        <div className="rounded-xl border bg-card p-2 sm:p-3">{renderChart(activeCol, limitStatsOf(activeCol?.column))}</div>
       )}
 
-      {/* CPK 统计网格（histogram/cdf/timeseries 单测试项时显示） */}
-      {!isCorr && activeCol && !(compareMode && datasetA && datasetB) && (
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-4">
-          {[
-            { label: 'Data Count', value: String(activeCol.stat.count) },
-            { label: 'NA Count', value: String(activeCol.stat.naCount) },
-            { label: 'Failure Count', value: `${activeCol.stat.failureCount} (${activeCol.stat.failureRate.toFixed(2)}%)` },
-            { label: 'Cpk', value: formatIndex(activeCol.stat.cpk) },
-            { label: 'Mean', value: formatValue(activeCol.stat.mean) },
-            { label: 'Std. Dev.', value: formatValue(activeCol.stat.stdDev) },
-            { label: 'Cpu', value: formatIndex(activeCol.stat.cpu) },
-            { label: 'Cpl', value: formatIndex(activeCol.stat.cpl) },
-          ].map((mm) => (
-            <div key={mm.label} className="bg-background p-3">
-              <p className="text-[0.625rem] text-muted-foreground">{mm.label}</p>
-              <p className="mt-1 text-sm font-medium tabular-nums">{mm.value}</p>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* 累加模式：同一测试项在不同规格限下的 CPK 对比（仅单数据集、非相关视图） */}
+      {view !== 'correlation' && !compareMode && selectedName && (datasetA ?? datasetB) ? (
+        <AccumulateLimits
+          dataset={datasetA ?? datasetB}
+          selectedName={selectedName}
+          view={view}
+          settings={settings}
+          excludeFail={excludeFail}
+          defaultUpper={activeCol?.column.upper ?? null}
+          defaultLower={activeCol?.column.lower ?? null}
+        />
+      ) : null}
 
-      {/* 对比模式：指标对比表 */}
-      {!isCorr && compareMode && activeA && activeB && (
-        <div className="overflow-x-auto rounded-xl border bg-card">
-          <table className="w-full border-collapse text-xs">
-            <thead>
-              <tr className="border-b">
-                <th className="px-3 py-2 text-left text-[0.625rem] text-muted-foreground">指标</th>
-                <th className="px-3 py-2 text-right text-[0.625rem] text-muted-foreground">数据 A</th>
-                <th className="px-3 py-2 text-right text-[0.625rem] text-muted-foreground">数据 B</th>
-              </tr>
-            </thead>
-            <tbody>
-              {STAT_ROWS.map((k) => {
-                const pick = (a: NonNullable<typeof activeA>) =>
-                  k === 'Cpk'
-                    ? formatIndex(a.analysis.stat.cpk)
-                    : k === 'Cpu'
-                      ? formatIndex(a.analysis.stat.cpu)
-                      : k === 'Cpl'
-                        ? formatIndex(a.analysis.stat.cpl)
-                        : k === 'Mean'
-                          ? formatValue(a.analysis.stat.mean)
-                          : k === 'Std. Dev.'
-                            ? formatValue(a.analysis.stat.stdDev)
-                            : k === 'Data Count'
-                              ? String(a.analysis.stat.count)
-                              : `${a.analysis.stat.failureCount} (${a.analysis.stat.failureRate.toFixed(2)}%)`;
-                return (
-                  <tr key={k} className="border-b border-border last:border-b-0">
-                    <td className="px-3 py-1.5 text-muted-foreground">{k}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground">{pick(activeA)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-foreground">{pick(activeB)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <WorkspaceStats
+        activeCol={activeCol}
+        activeA={activeA}
+        activeB={activeB}
+        isCorr={isCorr}
+        compareMode={compareMode}
+        hasBothDatasets={hasBothDatasets}
+      />
 
       <Dialog open={Boolean(zoom)} onOpenChange={(open) => { if (!open) setZoom(null); }}>
         <DialogContent className="w-full max-w-5xl [--dialog-max-height:92vh] sm:max-w-5xl">
@@ -363,7 +335,11 @@ const ChartWorkspace: React.FC<ChartWorkspaceProps> = ({ view }) => {
             <DialogTitle>数据集 {zoom} · 放大视图</DialogTitle>
           </DialogHeader>
           <DialogBody>
-            {zoom === 'A' && activeA ? renderChart(activeA.analysis) : zoom === 'B' && activeB ? renderChart(activeB.analysis) : null}
+            {zoom === 'A' && activeA
+              ? renderChart(activeA.analysis, limitStatsOf(activeA.analysis.column))
+              : zoom === 'B' && activeB
+                ? renderChart(activeB.analysis, limitStatsOf(activeB.analysis.column))
+                : null}
           </DialogBody>
         </DialogContent>
       </Dialog>

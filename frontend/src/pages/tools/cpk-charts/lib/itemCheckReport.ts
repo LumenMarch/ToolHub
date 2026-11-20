@@ -10,6 +10,7 @@ import {
 } from './stats';
 import { renderCdfSvg, renderHistogramSvg, renderTimeSeriesSvg, svgToPng } from './export';
 import { loadColumn, type ParsedDataset } from './dataset';
+import { accumulatedKey, type AccumulatedLimit } from '../store/useOppStore';
 
 const CONCURRENCY = 4;
 
@@ -147,12 +148,73 @@ export async function buildItemCheckImages(
   return { imagesA, imagesB };
 }
 
+/**
+ * 累加模式的附加列图片：每行一个测试项，每列一组规格限。
+ * 测试项没有对应组合（或超出列数）时该格保持空字符串，报告里就是空白。
+ */
+export async function buildItemCheckExtraImages(
+  dataset: ParsedDataset | null,
+  names: string[],
+  limits: Record<string, AccumulatedLimit[]>,
+  columns: number,
+  settings: ChartSettings,
+  view: ReportView,
+  excludeFail: boolean,
+  onProgress?: (done: number, total: number) => void,
+): Promise<string[][]> {
+  const rows: string[][] = names.map(() => new Array<string>(columns).fill(''));
+  if (!dataset || columns === 0) return rows;
+
+  let done = 0;
+  for (let start = 0; start < names.length; start += CONCURRENCY) {
+    const batch = Array.from(
+      { length: Math.min(CONCURRENCY, names.length - start) },
+      (_, offset) => start + offset,
+    );
+    await Promise.all(
+      batch.map(async (rowIndex) => {
+        const name = names[rowIndex];
+        const entries = limits[accumulatedKey(dataset.uploadId, name)] ?? [];
+        const columnIndex = dataset.columns.findIndex((c) => c.name === name);
+        if (columnIndex < 0 || entries.length === 0) return;
+        const data = await loadColumn(dataset, columnIndex);
+        const column = dataset.columns[columnIndex];
+        const mask = excludeFail ? dataset.statusPass : null;
+        const count = Math.min(columns, entries.length);
+        // 同一测试项的累加图并行渲染，避免循环内逐个 await
+        const cells = await Promise.all(
+          Array.from({ length: count }, async (_, entryIndex) => {
+            const entry = entries[entryIndex];
+            const analysis = analyzeColumn(
+              { ...column, upper: entry.upper, lower: entry.lower },
+              data,
+              mask,
+              settings.binCount,
+              settings.lowerRange,
+              settings.upperRange,
+              settings.showLimits,
+            );
+            return blobToBase64(await svgToPng(renderSvgFor(analysis, settings, view)));
+          }),
+        );
+        rows[rowIndex] = [...cells, ...new Array<string>(columns - count).fill('')];
+      }),
+    );
+    done += batch.length;
+    onProgress?.(done, names.length);
+  }
+  return rows;
+}
+
 export type ItemCheckExportParams = {
   items: string[];
   fileNameA: string;
   fileNameB?: string | null;
   imagesA: string[];
   imagesB?: string[] | null;
+  /** 累加模式追加列的表头（New_limits1…）与逐行图片矩阵 */
+  extraHeaders?: string[];
+  imagesExtra?: string[][];
 };
 
 /** 调用后端生成 .numbers 并触发下载 */
@@ -163,6 +225,8 @@ export async function exportItemCheckReport(params: ItemCheckExportParams): Prom
     fileNameB: params.fileNameB || '',
     imagesA: params.imagesA,
     imagesB: params.imagesB || params.items.map(() => ''),
+    extraHeaders: params.extraHeaders || [],
+    imagesExtra: params.imagesExtra || [],
   };
   let resp: AxiosResponse<Blob>;
   try {
