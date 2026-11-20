@@ -91,10 +91,10 @@ class Settings(BaseSettings):
     # X-Forwarded-For 头；直连部署时该头可被客户端伪造。
     TRUST_PROXY_HEADERS: bool = False
 
-    # 可选 Redis：设置后 realtime hub 用 Pub/Sub 跨实例 fan-out；
-    # 未设置或连接失败时自动回落进程内 hub（单实例仍可用）
+    # Redis 是服务器部署的基础设施：RQ 队列、实时推送 fan-out、限流共用。
+    # 设为空字符串可关闭（仅测试或单进程调试）；生产必须配置。
     REDIS_URL: str | None = Field(
-        default=None,
+        default="redis://127.0.0.1:6379/0",
         validation_alias=AliasChoices("REDIS_URL", "TOOLHUB_REDIS_URL"),
     )
     # 部署级频道名：多套 ToolHub 共用同一 Redis 时必须互不相同，
@@ -108,8 +108,22 @@ class Settings(BaseSettings):
         ),
     )
 
-    # Database
-    SQLALCHEMY_DATABASE_URI: str = "sqlite:///./toolhub.db"
+    # Database：PostgreSQL 为唯一生产数据库；schema 由 Alembic 管理。
+    SQLALCHEMY_DATABASE_URI: str = (
+        "postgresql+psycopg://toolhub:toolhub@127.0.0.1:5432/toolhub"
+    )
+    DB_POOL_SIZE: int = Field(default=10, ge=1)
+    DB_MAX_OVERFLOW: int = Field(default=20, ge=0)
+    DB_POOL_RECYCLE_SECONDS: int = Field(default=1800, ge=0)
+
+    # 后台任务：服务器用 RQ，测试用 local（进程内执行，不依赖 Redis）
+    JOB_QUEUE_BACKEND: str = "rq"
+    JOB_QUEUE_ANALYSIS: str = "analysis"
+    JOB_QUEUE_EXPORT: str = "export"
+    JOB_QUEUE_MAINTENANCE: str = "maintenance"
+    JOB_TIMEOUT_SECONDS: int = Field(default=3600, gt=0)
+    JOB_RESULT_TTL_SECONDS: int = Field(default=0, ge=0)
+    JOB_FAILURE_TTL_SECONDS: int = Field(default=86400, ge=0)
 
     # 任务产物与上传内容缓存
     TASK_ARTIFACT_ROOT: str = str(
@@ -185,8 +199,8 @@ class Settings(BaseSettings):
     LLM_HEALTH_CACHE_TTL_SECONDS: float = Field(default=15, ge=0)
 
     # ===== 用户注册审批 =====
-    # 注册接口限流（单实例内存滑动窗口，按 IP）。多实例部署时建议在
-    # 网关层统一限流，本配置仅兜底。
+    # 注册接口限流（Redis 共享滑动窗口，按 IP；Redis 不可用时降级进程内）。
+    # 网关层仍建议再加一道全局限流。
     REGISTRATION_RATE_LIMIT_PER_IP: int = Field(default=10, ge=1)
     REGISTRATION_RATE_LIMIT_WINDOW: int = Field(default=3600, ge=1)  # 秒
 

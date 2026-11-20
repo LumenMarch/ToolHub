@@ -14,6 +14,8 @@ export type RealtimeEventType =
 
 export interface RealtimeEvent {
   type: RealtimeEventType | string;
+  /** 任务事件所属工具，如 asset-comparison / atlas-merge */
+  tool?: string;
   job_id?: string;
   user_id?: number;
   status?: string;

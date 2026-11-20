@@ -1,7 +1,8 @@
 """WebSocket 连接注册表与 publish 抽象。
 
-默认进程内 fan-out；若配置了可用 Redis，则额外经 Pub/Sub 跨进程广播。
-job worker 跑在 ThreadPoolExecutor 中，publish 必须通过
+API 进程内维护连接集合；配置 Redis 后经 Pub/Sub 跨 API 副本广播。
+独立 RQ Worker 没有事件循环与本地连接，直接向 Redis 发布事件信封，
+由各 API 副本订阅后 fan-out。API 内的同步线程仍通过
 call_soon_threadsafe 安全切回主事件循环。
 """
 
@@ -20,8 +21,42 @@ from fastapi import WebSocket
 from loguru import logger
 from starlette.websockets import WebSocketState
 
+from app.core.config import settings
+
 # 默认频道名；start_redis 可用部署级配置覆盖，避免多部署共用 Redis 串台
 DEFAULT_REDIS_CHANNEL = "toolhub:realtime"
+
+# 独立 Worker 进程没有 WebSocket 事件循环；它直接向 Redis 发布事件，
+# 由 API 进程的 hub 订阅后再 fan-out 给浏览器连接。
+_worker_origin = uuid4().hex
+_worker_redis: Any | None = None
+
+
+def publish_external(event: dict[str, Any], *, user_id: int | None = None) -> None:
+    """从不含事件循环的进程（RQ Worker）向 Redis 发布事件信封。"""
+    global _worker_redis
+    if not settings.REDIS_URL:
+        return
+    if _worker_redis is None:
+        import redis as redis_lib
+
+        _worker_redis = redis_lib.Redis.from_url(
+            settings.REDIS_URL,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
+    envelope = {
+        "origin": _worker_origin,
+        "user_id": user_id,
+        "event": event,
+    }
+    try:
+        _worker_redis.publish(
+            settings.REALTIME_REDIS_CHANNEL,
+            json.dumps(envelope, ensure_ascii=False, separators=(",", ":")),
+        )
+    except Exception:
+        logger.warning("realtime hub: Worker 发布事件失败 type={}", event.get("type"))
 
 
 class RealtimeHub:
@@ -187,6 +222,9 @@ class RealtimeHub:
         self._publish_local(payload, user_id=user_id)
         if self._redis_enabled:
             self._publish_redis(payload, user_id=user_id)
+        elif self._loop is None:
+            # Worker 进程：没有本地连接与事件循环，直接走 Redis。
+            publish_external(payload, user_id=user_id)
 
     def _publish_local(
         self,

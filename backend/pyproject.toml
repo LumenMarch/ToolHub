@@ -38,11 +38,10 @@ dependencies = [
     "tenacity>=9.1.4",
     "sse-starlette>=3.4.11",
     "openai>=3.17.0",
-]
-
-[project.optional-dependencies]
-redis = [
-    "redis>=5.0.0",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "redis>=5.0",
+    "rq>=2.1",
 ]
 
 [dependency-groups]

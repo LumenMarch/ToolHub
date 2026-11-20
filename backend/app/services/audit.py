@@ -15,7 +15,7 @@ from app.crud.crud_audit_log import create_log
 from app.models.user import User
 
 
-def _get_client_ip(request: Request | None) -> str | None:
+def get_client_ip(request: Request | None) -> str | None:
     if request is None:
         return None
     # 仅可信反代配置下信任 XFF（TRUST_PROXY_HEADERS=true）；
@@ -42,6 +42,7 @@ def log_action(
     db: Session,
     *,
     request: Request | None = None,
+    ip_address: str | None = None,
     user: User | None = None,
     action: str,
     target_type: str | None = None,
@@ -61,7 +62,9 @@ def log_action(
             target_type=target_type,
             target_id=str(target_id) if target_id is not None else None,
             detail=_normalize_detail(detail),
-            ip_address=_get_client_ip(request),
+            ip_address=(
+                ip_address if ip_address is not None else get_client_ip(request)
+            ),
         )
     except Exception:  # noqa: BLE001
         # 审计日志失败不能阻断业务主流程，但必须可观测。
