@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   App as AntApp,
@@ -7,12 +7,11 @@ import {
   Flex,
   List,
   Progress,
+  Space,
   Tag,
   Typography,
-  Upload,
   theme,
 } from 'antd'
-import type { UploadProps } from 'antd'
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -66,6 +65,22 @@ export function AssetUploadPanel({
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
   const upload = useTusUpload()
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const filesInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const folderInput = folderInputRef.current
+    if (folderInput) {
+      folderInput.setAttribute('webkitdirectory', '')
+      folderInput.setAttribute('directory', '')
+    }
+  }, [])
+
+  const handleInputFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const incoming = Array.from(event.target.files ?? [])
+    addFiles(incoming)
+    event.target.value = ''
+  }
 
   const clearScan = () => setScan(null)
 
@@ -128,6 +143,7 @@ export function AssetUploadPanel({
     }
   }
 
+  const folderName = files.find((file) => file.webkitRelativePath)?.webkitRelativePath.split('/')[0]
   const matchedCount = scan
     ? ASSET_INPUT_FIELDS.filter((field) => scan.data[field.key]).length
     : 0
@@ -148,23 +164,17 @@ export function AssetUploadPanel({
     }
   }
 
-  const uploadProps: UploadProps = {
-    multiple: true,
-    accept: ACCEPT,
-    showUploadList: false,
-    disabled: scanning,
-    beforeUpload: (file) => {
-      addFiles([file])
-      return Upload.LIST_IGNORE
-    },
-  }
-
   return (
     <Flex vertical gap={14}>
       <Card
         variant="outlined"
         title="1. 准备数据源"
-        extra={<Tag bordered={false}>{ASSET_REQUIRED_COUNT} 个必需数据源</Tag>}
+        extra={
+          <Space size={6} wrap>
+            <Tag bordered={false}>{ASSET_REQUIRED_COUNT} 个必需数据源</Tag>
+            {folderName ? <Tag color="blue" bordered={false}>文件夹：{folderName}</Tag> : null}
+          </Space>
+        }
       >
         <Flex vertical gap={14}>
           <Alert
@@ -174,17 +184,36 @@ export function AssetUploadPanel({
             description="文件名需要包含财务、SFC、Notes、客户及对应年月；部门、保管人和 DRI 配置文件按关键词匹配。"
           />
 
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleInputFiles}
+          />
+          <input
+            ref={filesInputRef}
+            type="file"
+            multiple
+            accept={ACCEPT}
+            style={{ display: 'none' }}
+            onChange={handleInputFiles}
+          />
           <Flex gap={10} wrap>
-            <Upload {...uploadProps} directory>
-              <Button icon={<FolderOpenOutlined />} disabled={scanning}>
-                选择文件夹
-              </Button>
-            </Upload>
-            <Upload {...uploadProps}>
-              <Button icon={<PlusOutlined />} disabled={scanning}>
-                选择文件
-              </Button>
-            </Upload>
+            <Button
+              icon={<FolderOpenOutlined />}
+              disabled={scanning}
+              onClick={() => folderInputRef.current?.click()}
+            >
+              选择文件夹
+            </Button>
+            <Button
+              icon={<PlusOutlined />}
+              disabled={scanning}
+              onClick={() => filesInputRef.current?.click()}
+            >
+              选择文件
+            </Button>
             <Button
               type="primary"
               icon={<InboxOutlined />}
