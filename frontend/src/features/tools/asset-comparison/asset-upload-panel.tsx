@@ -26,6 +26,7 @@ import type { AssetComparisonJob, AssetScanResponse } from '../../../api/asset'
 import { createAssetJob, scanAssetFiles } from '../../../api/asset'
 import { readApiErrorMessage } from '../../../api/errors'
 import { useTusUpload } from '../../upload/use-tus-upload'
+import { pickDirectory, supportsDirectoryPicker, supportsWebkitDirectory } from '../../upload/directory-picker'
 import {
   ASSET_INPUT_FIELDS,
   ASSET_INPUT_GROUPS,
@@ -61,6 +62,8 @@ export function AssetUploadPanel({
   const [files, setFiles] = useState<File[]>([])
   const [scan, setScan] = useState<AssetScanResponse | null>(null)
   const [currentFile, setCurrentFile] = useState('')
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
+  const [pickingFolder, setPickingFolder] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
@@ -72,19 +75,42 @@ export function AssetUploadPanel({
     const folderInput = folderInputRef.current
     if (folderInput) {
       folderInput.setAttribute('webkitdirectory', '')
-      folderInput.setAttribute('directory', '')
     }
   }, [])
 
   const handleInputFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
     const incoming = Array.from(event.target.files ?? [])
-    addFiles(incoming)
+    const folder = incoming[0]?.webkitRelativePath?.split('/')[0] ?? null
+    addFiles(incoming, folder)
     event.target.value = ''
+  }
+
+  const handlePickFolder = async () => {
+    if (!supportsDirectoryPicker()) {
+      if (supportsWebkitDirectory()) {
+        folderInputRef.current?.click()
+        return
+      }
+      message.warning('当前浏览器不支持文件夹选择，请拖拽文件夹或使用「选择文件」')
+      return
+    }
+    setPickingFolder(true)
+    setError('')
+    try {
+      const picked = await pickDirectory()
+      if (!picked) return
+      addFiles(picked.files, picked.name)
+    } catch (pickError) {
+      if (pickError instanceof DOMException && pickError.name === 'AbortError') return
+      message.error(pickError instanceof Error ? pickError.message : '选择文件夹失败')
+    } finally {
+      setPickingFolder(false)
+    }
   }
 
   const clearScan = () => setScan(null)
 
-  const addFiles = (incoming: File[]) => {
+  const addFiles = (incoming: File[], folder: string | null = null) => {
     const accepted = incoming.filter((file) =>
       /\.(xlsx|xls|csv)$/i.test(file.name),
     )
@@ -92,6 +118,7 @@ export function AssetUploadPanel({
       message.warning('请选择 xlsx / xls / csv 文件')
       return
     }
+    if (folder) setSelectedFolder(folder)
     setFiles((previous) => {
       const existing = new Set(previous.map(fileKey))
       const fresh: File[] = []
@@ -143,7 +170,6 @@ export function AssetUploadPanel({
     }
   }
 
-  const folderName = files.find((file) => file.webkitRelativePath)?.webkitRelativePath.split('/')[0]
   const matchedCount = scan
     ? ASSET_INPUT_FIELDS.filter((field) => scan.data[field.key]).length
     : 0
@@ -172,7 +198,7 @@ export function AssetUploadPanel({
         extra={
           <Space size={6} wrap>
             <Tag bordered={false}>{ASSET_REQUIRED_COUNT} 个必需数据源</Tag>
-            {folderName ? <Tag color="blue" bordered={false}>文件夹：{folderName}</Tag> : null}
+            {selectedFolder ? <Tag color="blue" bordered={false}>文件夹：{selectedFolder}</Tag> : null}
           </Space>
         }
       >
@@ -202,8 +228,9 @@ export function AssetUploadPanel({
           <Flex gap={10} wrap>
             <Button
               icon={<FolderOpenOutlined />}
+              loading={pickingFolder}
               disabled={scanning}
-              onClick={() => folderInputRef.current?.click()}
+              onClick={() => void handlePickFolder()}
             >
               选择文件夹
             </Button>
@@ -226,6 +253,7 @@ export function AssetUploadPanel({
             <Button
               onClick={() => {
                 setFiles([])
+                setSelectedFolder(null)
                 setScan(null)
                 setError('')
                 upload.reset()
