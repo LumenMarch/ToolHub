@@ -47,7 +47,7 @@ export const TOOL_CATALOG: ToolDefinition[] = [
     category: '质量分析',
     icon: FileSearchOutlined,
     accent: '#4f46e5',
-    status: 'migrating',
+    status: 'ready',
   },
   {
     id: 'attendance-organizer',

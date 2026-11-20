@@ -38,6 +38,11 @@ const ImageToPdfPage = lazy(() =>
     default: module.ImageToPdfPage,
   })),
 )
+const AssetComparisonPage = lazy(() =>
+  import('../features/tools/asset-comparison/asset-comparison-page').then((module) => ({
+    default: module.AssetComparisonPage,
+  })),
+)
 const AdminOverviewPage = lazy(() =>
   import('../features/admin/overview/admin-overview-page').then((module) => ({
     default: module.AdminOverviewPage,
@@ -71,8 +76,12 @@ const AdminLlmPage = lazy(() =>
 
 const qrcodeTool = TOOL_BY_ID.get('qrcode')!
 const imageToPdfTool = TOOL_BY_ID.get('image-to-pdf')!
+const assetTool = TOOL_BY_ID.get('asset-comparison')!
 const migrationTools = TOOL_CATALOG.filter(
-  (tool) => tool.id !== 'qrcode' && tool.id !== 'image-to-pdf',
+  (tool) =>
+    tool.id !== 'qrcode' &&
+    tool.id !== 'image-to-pdf' &&
+    tool.id !== 'asset-comparison',
 )
 
 export default function App() {
@@ -107,6 +116,14 @@ export default function App() {
                           element={
                             <RequireTool tool={imageToPdfTool}>
                               <ImageToPdfPage />
+                            </RequireTool>
+                          }
+                        />
+                        <Route
+                          path="/tools/asset-comparison"
+                          element={
+                            <RequireTool tool={assetTool}>
+                              <AssetComparisonPage />
                             </RequireTool>
                           }
                         />
