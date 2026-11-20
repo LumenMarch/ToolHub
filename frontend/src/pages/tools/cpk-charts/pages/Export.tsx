@@ -11,12 +11,16 @@ import {
 } from '@/components/ui/empty';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import useOppStore, { getMerged } from '../store/useOppStore';
+import useOppStore, { accumulatedKey, getMerged } from '../store/useOppStore';
 import { shortName } from '../lib/stats';
 import type { ParsedDataset } from '../lib/dataset';
 import { useCurrentAnalysis } from '../lib/useCurrentAnalysis';
 import { exportChartPng, exportComparedByName, exportCorrelationPng } from '../lib/export';
-import { buildItemCheckImages, exportItemCheckReport } from '../lib/itemCheckReport';
+import {
+  buildItemCheckExtraImages,
+  buildItemCheckImages,
+  exportItemCheckReport,
+} from '../lib/itemCheckReport';
 type ExportState = { kind: 'single' } | { kind: 'all'; done: number; total: number } | { kind: 'itemCheck'; done: number; total: number } | null;
 
 const Export: React.FC = () => {
@@ -32,6 +36,7 @@ const Export: React.FC = () => {
   const excludeFail = useOppStore((s) => s.excludeFail);
   const setError = useOppStore((s) => s.setError);
   const merged = useOppStore(useShallow((s) => getMerged(s)));
+  const accumulatedLimits = useOppStore((s) => s.accumulatedLimits);
   const [exporting, setExporting] = useState<ExportState>(null);
   const [exportQuery, setExportQuery] = useState('');
   // null = 用户尚未手动调整勾选：此时默认全选当前 merged，避免 dataset 在刷新后
@@ -130,12 +135,48 @@ const Export: React.FC = () => {
     try {
       const view = chartType === 'cdf' || chartType === 'timeseries' ? chartType : 'histogram';
       const onProgress = (done: number) => setExporting({ kind: 'itemCheck', done, total: names.length });
+
+      // 累加模式的列：取本次导出主数据集的累加组合，按测试项最多的一组决定列数
+      const countExtras = (dataset: ParsedDataset | null): number => {
+        if (!dataset) return 0;
+        return names.reduce(
+          (max, name) => Math.max(max, accumulatedLimits[accumulatedKey(dataset.uploadId, name)]?.length ?? 0),
+          0,
+        );
+      };
+      const extrasDataset =
+        scope === 'B'
+          ? datasetB
+          : countExtras(datasetA) > 0
+            ? datasetA
+            : countExtras(datasetB) > 0
+              ? datasetB
+              : (datasetA ?? datasetB);
+      // 两个文件对比时报告只保留 数据A / 数据B，不追加累加列
+      const comparingBoth = scope === 'merged' && Boolean(datasetA && datasetB);
+      const extraColumns = comparingBoth ? 0 : countExtras(extrasDataset);
+      const extraHeaders = Array.from({ length: extraColumns }, (_, i) => `New_limits${i + 1}`);
+      const imagesExtra =
+        extraColumns > 0 && extrasDataset
+          ? await buildItemCheckExtraImages(
+              extrasDataset,
+              names,
+              accumulatedLimits,
+              extraColumns,
+              settings,
+              view,
+              excludeFail,
+            )
+          : [];
+
       if (scope === 'B') {
         const { imagesB } = await buildItemCheckImages(null, datasetB, names, settings, onProgress, view, excludeFail);
         await exportItemCheckReport({
           items: names,
           fileNameA: fileNameB || datasetB?.title || '数据 B',
           imagesA: imagesB,
+          extraHeaders,
+          imagesExtra,
         });
         return;
       }
@@ -153,15 +194,20 @@ const Export: React.FC = () => {
           items: names,
           fileNameA: fileNameA || datasetA?.title || '数据 A',
           imagesA,
+          extraHeaders,
+          imagesExtra,
         });
         return;
       }
       await exportItemCheckReport({
         items: names,
         fileNameA: fileNameA || datasetA?.title || '数据 A',
-        fileNameB: fileNameB || datasetB?.title || '数据 B',
+        // 没有 B 数据时不要传占位名，后端会整列省略
+        fileNameB: datasetB ? fileNameB || datasetB.title || '数据 B' : undefined,
         imagesA,
         imagesB,
+        extraHeaders,
+        imagesExtra,
       });
     } catch (err) {
       const detail = (err as unknown as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -260,20 +306,22 @@ const Export: React.FC = () => {
                 <Button type="button" variant="outline" size="sm" onClick={() => void handleExportImages('B')} disabled={exporting !== null || checkedNames.size === 0}>
                   {exporting?.kind === 'all' ? '打包中…' : '导出 B_图片'}
                 </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => void handleExportReport('A')} disabled={exporting !== null || checkedNames.size === 0}>
-                  {exporting?.kind === 'itemCheck' ? '生成中…' : '导出 A_报告'}
-                </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => void handleExportReport('B')} disabled={exporting !== null || checkedNames.size === 0}>
-                  {exporting?.kind === 'itemCheck' ? '生成中…' : '导出 B_报告'}
-                </Button>
                 <Button
                   type="button"
-                  onClick={() => void handleExportReport('merged')}
+                  onClick={() => void handleExportReport(compareMode ? 'merged' : 'A')}
                   disabled={exporting !== null || checkedNames.size === 0}
-                  title="按 Item_Check_For_Aquila1 格式生成 .numbers：A列Item，B/C列为数据A/B图表，表头为文件名"
+                  title={
+                    compareMode
+                      ? '按对比模式生成 .numbers：A列Item，B/C列为数据A/数据B图表'
+                      : '按单文件模式生成 .numbers：A列Item，B列为数据A图表，累加模式追加列'
+                  }
                 >
                   <Images data-icon="inline-start" />
-                  {exporting?.kind === 'itemCheck' ? '报告生成中…' : '导出合并报告'}
+                  {exporting?.kind === 'itemCheck'
+                    ? '报告生成中…'
+                    : compareMode
+                      ? '导出对比报告'
+                      : '导出单文件报告'}
                 </Button>
               </>
             ) : (
@@ -283,9 +331,9 @@ const Export: React.FC = () => {
                 </Button>
                 <Button
                   type="button"
-                  onClick={() => void handleExportReport('merged')}
+                  onClick={() => void handleExportReport(datasetA ? 'A' : 'B')}
                   disabled={exporting !== null || checkedNames.size === 0}
-                  title="按 Item_Check_For_Aquila1 格式生成 .numbers：A列Item，B列为图表，表头为文件名"
+                  title="生成 .numbers：A列Item，B列为图表（表头为文件名），累加模式追加列"
                 >
                   <Images data-icon="inline-start" />
                   {exporting?.kind === 'itemCheck' ? '报告生成中…' : '导出报告 (.numbers)'}
