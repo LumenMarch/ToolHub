@@ -13,13 +13,15 @@ def _at() -> str:
 
 def job_updated_event(
     *,
+    tool: str,
     job_id: str,
     user_id: int,
     status: str | None = None,
 ) -> dict[str, Any]:
-    """资产核对任务状态/阶段变更通知。"""
+    """任务状态/阶段变更通知；tool 标识业务工具。"""
     event: dict[str, Any] = {
         "type": "job.updated",
+        "tool": tool,
         "job_id": job_id,
         "user_id": user_id,
         "at": _at(),
@@ -31,13 +33,15 @@ def job_updated_event(
 
 def job_terminal_event(
     *,
+    tool: str,
     job_id: str,
     user_id: int,
     status: str,
 ) -> dict[str, Any]:
-    """资产核对任务到达终态。"""
+    """任务到达终态。"""
     return {
         "type": "job.terminal",
+        "tool": tool,
         "job_id": job_id,
         "user_id": user_id,
         "status": status,

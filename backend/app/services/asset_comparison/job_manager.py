@@ -175,7 +175,12 @@ class AssetComparisonJobManager:
         异常会被 worker 宽 except 捕获，导致已完成任务被错误标记失败。
         """
         if status in JOB_TERMINAL_STATUSES:
-            event = job_terminal_event(job_id=job_id, user_id=user_id, status=status)
+            event = job_terminal_event(
+                tool="asset-comparison",
+                job_id=job_id,
+                user_id=user_id,
+                status=status,
+            )
             try:
                 self._create_terminal_notification(
                     job_id=job_id, user_id=user_id, status=status
@@ -186,7 +191,12 @@ class AssetComparisonJobManager:
                     job_id,
                 )
         else:
-            event = job_updated_event(job_id=job_id, user_id=user_id, status=status)
+            event = job_updated_event(
+                tool="asset-comparison",
+                job_id=job_id,
+                user_id=user_id,
+                status=status,
+            )
         realtime_hub.publish(event, user_id=user_id)
 
     @staticmethod

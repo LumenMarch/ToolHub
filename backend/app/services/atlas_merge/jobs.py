@@ -4,7 +4,7 @@
 - ``POST /tools/atlas-merge/analyze`` 立即返回 202 + job_id，任务进入 RQ
 - ``GET /tools/atlas-merge/jobs/{job_id}`` 轮询进度（REST 为进度真相源）
 - 终态后保留 ``JOB_TTL_SECONDS``，由懒清理与周期清理删除行
-- 完成/失败时向该用户发轻量实时提示事件（``atlas_merge.progress``）
+- 进度与终态统一发送 ``job.updated`` / ``job.terminal``（tool=atlas-merge）
 
 多副本：任务状态在 PostgreSQL，API 只入队；Worker 用条件更新领取
 ``queued -> running``，重复投递不会重复执行。
@@ -41,6 +41,7 @@ from app.services.atlas_merge.merge_engine import merge
 from app.services.atlas_merge.models import MergedReport, MetaColumn
 from app.services.audit import get_client_ip, log_action
 from app.services.jobs.queue import JobQueue, get_job_queue
+from app.services.realtime.events import job_terminal_event, job_updated_event
 from app.services.realtime.hub import realtime_hub
 from app.services.upload.store import (
     UploadNotCompleteError,
@@ -167,13 +168,14 @@ class AtlasMergeJobRegistry:
         snapshot = self._claim(job_id)
         if snapshot is None:
             return
+        self._publish_status(snapshot, STATUS_RUNNING)
         tmp_dir = Path(tempfile.mkdtemp(prefix="atlas-merge-"))
         try:
             content = self._read_upload(snapshot)
             archive_root = extract_archive_zip(content, tmp_dir / "archive")
             report = merge(
                 archive_root,
-                progress=self._make_progress(job_id),
+                progress=self._make_progress(job_id, snapshot.user_id),
             )
             timestamp = datetime.now().strftime("%Y%m%d")
             if snapshot.export_format == "insight":
@@ -250,8 +252,8 @@ class AtlasMergeJobRegistry:
         except UploadNotCompleteError as exc:
             raise RuntimeError("上传尚未完成") from exc
 
-    def _make_progress(self, job_id: str):
-        """merge 进度回调：限频写库，避免每个 unit 一次数据库往返。"""
+    def _make_progress(self, job_id: str, user_id: int):
+        """merge 进度回调：限频写库并推送 job.updated，前端据此拉取进度。"""
         last_update = 0.0
 
         def on_progress(done: int, total: int) -> None:
@@ -261,15 +263,21 @@ class AtlasMergeJobRegistry:
                 return
             last_update = now
             with SessionLocal() as db:
-                db.execute(
+                updated = db.execute(
                     update(AtlasMergeJob)
                     .where(
                         AtlasMergeJob.id == job_id,
                         AtlasMergeJob.status == STATUS_RUNNING,
                     )
                     .values(done=done, total=total, updated_at=_utcnow())
-                )
+                ).rowcount
                 db.commit()
+            if updated:
+                self._publish_status_values(
+                    user_id=user_id,
+                    job_id=job_id,
+                    status=STATUS_RUNNING,
+                )
             logger.debug(f"atlas-merge 进度 job={job_id} {done}/{total}")
 
         return on_progress
@@ -326,19 +334,34 @@ class AtlasMergeJobRegistry:
         if updated:
             self._notify(snapshot, STATUS_ERROR)
 
+    def _publish_status(self, snapshot: _JobSnapshot, status: str) -> None:
+        self._publish_status_values(
+            user_id=snapshot.user_id,
+            job_id=snapshot.job_id,
+            status=status,
+        )
+
+    @staticmethod
+    def _publish_status_values(*, user_id: int, job_id: str, status: str) -> None:
+        """推送轻量任务事件；REST 仍是进度真相源。"""
+        if status in _TERMINAL_STATUSES:
+            event = job_terminal_event(
+                tool="atlas-merge",
+                job_id=job_id,
+                user_id=user_id,
+                status=status,
+            )
+        else:
+            event = job_updated_event(
+                tool="atlas-merge",
+                job_id=job_id,
+                user_id=user_id,
+                status=status,
+            )
+        realtime_hub.publish(event, user_id=user_id)
+
     def _notify(self, snapshot: _JobSnapshot, status: str) -> None:
-        """终态实时提示（轻量事件，仅 {job_id, status}；REST 才是进度真相源）。"""
-        event = {
-            "type": "atlas_merge.progress",
-            "job_id": snapshot.job_id,
-            "user_id": snapshot.user_id,
-            "status": status,
-            "at": datetime.now(UTC)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z"),
-        }
-        realtime_hub.publish(event, user_id=snapshot.user_id)
+        self._publish_status(snapshot, status)
 
     def _audit_completed(self, snapshot: _JobSnapshot, payload: dict) -> None:
         """任务完成审计（Worker 无 Request，IP 来自提交时快照）。"""

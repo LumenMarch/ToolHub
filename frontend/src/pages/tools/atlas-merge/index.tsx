@@ -10,7 +10,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AsyncZipDeflate, Zip } from 'fflate';
 import React, {
   useCallback,
@@ -18,6 +18,13 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { toast } from 'sonner';
+
+import {
+  jobQueryKey,
+  useJobRealtime,
+  useRealtimeConnection,
+} from '@/hooks/use-job-realtime';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { MAX_UPLOAD_BYTES } from '@/config/limits';
@@ -627,6 +634,15 @@ const AtlasMerge: React.FC = () => {
   const [isExpired, setIsExpired] = useState(false);
 
   const archiveUpload = useTusUpload();
+  const queryClient = useQueryClient();
+  const wsConnected = useRealtimeConnection();
+  const terminalNotifiedRef = useRef<string | null>(null);
+
+  useJobRealtime('atlas-merge', jobId, () => {
+    void queryClient.invalidateQueries({
+      queryKey: jobQueryKey('atlas-merge', jobId),
+    });
+  });
 
   useEffect(() => {
     if (!analysis?.expires_at) {
@@ -666,7 +682,7 @@ const AtlasMerge: React.FC = () => {
   }, []);
 
   const jobQuery = useQuery({
-    queryKey: ['atlas-merge-job', jobId],
+    queryKey: jobQueryKey('atlas-merge', jobId),
     queryFn: async ({ queryKey }) => {
       const [, id] = queryKey;
       const response = await api.get<AtlasMergeJobResponse>(
@@ -677,6 +693,11 @@ const AtlasMerge: React.FC = () => {
     enabled: pollingEnabled,
     refetchInterval: (query) => {
       if (!pollingEnabled) {
+        return false;
+      }
+      // WS 健康时由 job.updated / job.terminal 驱动失效，不再定时轮询；
+      // 断线后自动恢复下面的轮询节奏。
+      if (wsConnected) {
         return false;
       }
       const data = query.state.data;
@@ -698,6 +719,14 @@ const AtlasMerge: React.FC = () => {
     retry: false,
   });
 
+  // WS 断开时补一次拉取，确保 refetchInterval 重新进入轮询节奏；
+  // 否则从「WS 健康 → 断开」切换后没有新请求，定时器不会被重新安排。
+  const refetchJob = jobQuery.refetch;
+  useEffect(() => {
+    if (wsConnected || !pollingEnabled) return;
+    void refetchJob();
+  }, [wsConnected, pollingEnabled, refetchJob]);
+
   // 成功轮询的分发：queued/running 更新进度，done/error 迁移阶段。
   useEffect(() => {
     if (!pollingEnabled || !jobQuery.data) {
@@ -715,15 +744,28 @@ const AtlasMerge: React.FC = () => {
         });
         return;
       case 'done':
+        if (terminalNotifiedRef.current !== `done:${jobId}`) {
+          terminalNotifiedRef.current = `done:${jobId}`;
+          toast.success('合并完成', {
+            description: `${jobQuery.data.unit_count} 个 unit，${jobQuery.data.run_count} 行`,
+          });
+        }
         setAnalysis(jobQuery.data);
         setPhase('ready');
         return;
       case 'error':
+        if (terminalNotifiedRef.current !== `error:${jobId}`) {
+          terminalNotifiedRef.current = `error:${jobId}`;
+          toast.error('合并失败', {
+            description:
+              jobQuery.data.error || '合并任务失败，请重新分析',
+          });
+        }
         setError(jobQuery.data.error || '合并任务失败，请重新分析');
         setPhase('upload');
         return;
     }
-  }, [pollingEnabled, jobQuery.data]);
+  }, [pollingEnabled, jobQuery.data, jobId]);
 
   // 轮询失败的分发。连续失败次数用上面的自有计数（react-query 的计数不跨轮累加）：
   // - 404/410：任务确已丢失/过期，退回上传阶段；
@@ -735,6 +777,10 @@ const AtlasMerge: React.FC = () => {
     }
     const queryError = jobQuery.error;
     if (isJobGoneError(queryError)) {
+      if (terminalNotifiedRef.current !== `gone:${jobId}`) {
+        terminalNotifiedRef.current = `gone:${jobId}`;
+        toast.error('合并任务已丢失或过期，请重新分析');
+      }
       setError('合并任务已丢失或过期，请重新分析');
       setPhase('upload');
       resetPollFailures();
@@ -757,6 +803,7 @@ const AtlasMerge: React.FC = () => {
     jobQuery.isError,
     jobQuery.error,
     jobQuery.errorUpdatedAt,
+    jobId,
     resetPollFailures,
   ]);
 
@@ -792,6 +839,7 @@ const AtlasMerge: React.FC = () => {
     // 开新任务前把上一任务的轮询失败计数清零，否则新任务第一次瞬时抖动就会被
     // 判成"已达失败上限"，直接停掉自动轮询
     resetPollFailures();
+    terminalNotifiedRef.current = null;
     setAnalysis(null);
     setDownloadError('');
     setJobId(null);

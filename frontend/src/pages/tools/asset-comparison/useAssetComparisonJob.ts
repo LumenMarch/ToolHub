@@ -1,9 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
+
+import {
+  useJobRealtime,
+  useRealtimeConnection,
+} from '../../../hooks/use-job-realtime';
 import api from '../../../api/axios';
-import { realtimeClient } from '../../../lib/realtime';
 import type { AssetComparisonJob } from './types';
 
 const STORAGE_KEY = 'asset-comparison-active-job';
+const TERMINAL_STATUSES: Record<string, true> = {
+  complete: true,
+  partial_failed: true,
+  failed: true,
+  cancelled: true,
+  expired: true,
+};
 const POLLING_STATUSES = new Set([
   'queued',
   'validating',
@@ -78,6 +90,7 @@ export function useAssetComparisonJob() {
   const [annotationSaveStatus, setAnnotationSaveStatus] =
     useState<AnnotationSaveStatus>('idle');
   const jobRef = useRef<AssetComparisonJob | null>(null);
+  const terminalNotifiedRef = useRef<string | null>(null);
   const detachedJobIdsRef = useRef(new Set<string>());
   const mountedRef = useRef(true);
   const refreshControllerRef = useRef<AbortController | null>(null);
@@ -185,27 +198,17 @@ export function useAssetComparisonJob() {
   }, [refresh]);
 
   // WS 健康时靠 job.updated/terminal 触发 refresh；断开则恢复 1s 轮询
-  const [wsConnected, setWsConnected] = useState(() =>
-    realtimeClient.isConnected(),
-  );
+  const wsConnected = useRealtimeConnection();
 
-  useEffect(() => {
-    return realtimeClient.subscribeConnection(setWsConnected);
-  }, []);
-
-  useEffect(() => {
-    return realtimeClient.subscribe((event) => {
-      if (event.type !== 'job.updated' && event.type !== 'job.terminal') {
-        return;
+  useJobRealtime(
+    'asset-comparison',
+    [job?.jobId, sessionStorage.getItem(STORAGE_KEY)],
+    (event) => {
+      if (typeof event.job_id === 'string') {
+        void refresh(event.job_id);
       }
-      const jobId = typeof event.job_id === 'string' ? event.job_id : '';
-      if (!jobId) return;
-      const activeId = jobRef.current?.jobId;
-      const storedId = sessionStorage.getItem(STORAGE_KEY);
-      if (jobId !== activeId && jobId !== storedId) return;
-      void refresh(jobId);
-    });
-  }, [refresh]);
+    },
+  );
 
   useEffect(() => {
     if (!job || !POLLING_STATUSES.has(job.status)) return;
@@ -216,10 +219,29 @@ export function useAssetComparisonJob() {
     return () => window.clearTimeout(timer);
   }, [job, refresh, wsConnected]);
 
+  useEffect(() => {
+    if (!job || !TERMINAL_STATUSES[job.status]) return;
+    const key = `${job.jobId}:${job.status}`;
+    if (terminalNotifiedRef.current === key) return;
+    terminalNotifiedRef.current = key;
+    if (job.status === 'complete') {
+      toast.success('资产核对完成');
+    } else if (job.status === 'partial_failed') {
+      toast.warning('资产核对部分失败');
+    } else if (job.status === 'failed') {
+      toast.error('资产核对失败');
+    } else if (job.status === 'cancelled') {
+      toast.info('资产核对已取消');
+    } else if (job.status === 'expired') {
+      toast.warning('资产核对已过期');
+    }
+  }, [job]);
+
   const start = useCallback(async (scanId: string) => {
     const controller = createRequestController();
     setError('');
     setExpiredJobId('');
+    terminalNotifiedRef.current = null;
     setIsStarting(true);
     try {
       const response = await api.post<AssetComparisonJob>(
