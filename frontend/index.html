@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN" data-density="compact">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#141518" media="(prefers-color-scheme: dark)" />
-    <meta name="description" content="ToolHub：面向高级用户的极简工具聚合平台，提供出勤整理、资产核对、CPK 分析、日历与图片转 PDF 等效率工具。" />
+    <meta name="description" content="ToolHub：面向高级用户的工具聚合平台，提供资产核对、出勤整理、质量分析与文件处理工具。" />
     <script>
       (() => {
         const storageKey = 'toolhub-theme';
@@ -28,12 +28,13 @@
           : theme;
         const root = document.documentElement;
 
+        root.dataset.theme = resolvedTheme;
         root.classList.toggle('light', resolvedTheme === 'light');
         root.classList.toggle('dark', resolvedTheme === 'dark');
         root.style.colorScheme = resolvedTheme;
       })();
     </script>
-    <title>工具</title>
+    <title>ToolHub · 工具台</title>
   </head>
   <body>
     <div id="root"></div>

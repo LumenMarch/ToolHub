@@ -44,6 +44,7 @@ class RoleOut(BaseModel):
     name: str
     description: str
     permissions: list[PermissionOut]
+    is_builtin: bool = False
     model_config = {"from_attributes": True}
 
 
@@ -52,6 +53,7 @@ class RoleListItem(BaseModel):
     name: str
     description: str
     permission_count: int
+    is_builtin: bool = False
     model_config = {"from_attributes": True}
 
 
@@ -92,6 +94,7 @@ def list_roles(
             "name": r.name,
             "description": r.description,
             "permission_count": len(r.permissions),
+            "is_builtin": r.name in BUILTIN_ROLE_NAMES,
         }
         for r in roles
     ]
@@ -130,7 +133,17 @@ def update_role_endpoint(
     role = get_role_by_id(db, role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="角色不存在")
+    if (
+        role.name in BUILTIN_ROLE_NAMES
+        and role_in.name is not None
+        and role_in.name != role.name
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="内置角色名称由代码定义，不能修改",
+        )
     updated = update_role(db, role, name=role_in.name, description=role_in.description)
+    updated.is_builtin = updated.name in BUILTIN_ROLE_NAMES
     log_action(
         db,
         request=request,
@@ -154,6 +167,11 @@ def delete_role_endpoint(
     role = get_role_by_id(db, role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="角色不存在")
+    if role.name in BUILTIN_ROLE_NAMES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="内置角色不能删除",
+        )
     if role in admin.roles:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -239,6 +257,7 @@ def update_role_permissions(
     )
     # 持有该角色的用户权限集已变，推送刷新 /users/me
     notify_role_permissions_updated(db, int(updated.id))
+    updated.is_builtin = updated.name in BUILTIN_ROLE_NAMES
     return updated
 
 
@@ -273,6 +292,7 @@ def get_user_roles(
             "name": r.name,
             "description": r.description,
             "permission_count": len(r.permissions),
+            "is_builtin": r.name in BUILTIN_ROLE_NAMES,
         }
         for r in user.roles
     ]
@@ -325,6 +345,7 @@ def update_user_roles(
             "name": r.name,
             "description": r.description,
             "permission_count": len(r.permissions),
+            "is_builtin": r.name in BUILTIN_ROLE_NAMES,
         }
         for r in user.roles
     ]

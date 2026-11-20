@@ -1,0 +1,103 @@
+:root {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f4f5f7;
+}
+
+html[data-theme='dark'] body {
+  background: #0d0f14;
+}
+
+.ant-app {
+  min-height: 100vh;
+}
+
+.page-container {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+.app-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+}
+
+.sider-menu {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.sider-menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sider-menu::-webkit-scrollbar-thumb {
+  background: rgba(127, 127, 127, 0.22);
+  border-radius: 4px;
+}
+
+.tool-card {
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease;
+}
+
+.tool-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(20, 24, 40, 0.08);
+}
+
+html[data-theme='dark'] .tool-card:hover {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+.tool-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  flex: 0 0 auto;
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    monospace;
+}
+
+@media (max-width: 991px) {
+  .header-username {
+    display: none;
+  }
+}
+
+::selection {
+  background: rgba(79, 70, 229, 0.2);
+}

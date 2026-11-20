@@ -167,6 +167,7 @@ def _user_to_response(user, db: Session) -> dict:
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
         "roles": [role.name for role in user.roles],
+        "role_ids": sorted(int(role.id) for role in user.roles),
         "permissions": sorted(get_user_permissions(db, user)),
         "direct_tool_permissions": get_user_direct_tool_permissions(db, user),
     }
