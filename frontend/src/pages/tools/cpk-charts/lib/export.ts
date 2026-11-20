@@ -25,6 +25,7 @@ import {
   DEFAULT_CHART_SETTINGS,
   formatHistogramTopLabel,
   formatIndex,
+  formatSpecLimit,
   formatTick,
   formatValue,
   correlationPoints,
@@ -50,8 +51,44 @@ const escapeXml = (s: string): string =>
     .replace(/"/g, '&quot;');
 
 /** 生成与页面组件一致的独立 SVG 字符串（白底黑字）。 */
+/** 导出图的左侧统计块：与页面一致，末尾在存在规格限时追加 Upper/Lower。 */
+function renderStatsBlock(
+  analysis: ColumnAnalysis,
+  showStats: boolean,
+  extraStats: Array<{ label: string; value: string }> = [],
+): string[] {
+  if (!showStats) return [];
+  const { column, stat } = analysis;
+  const rows: Array<{ label: string; value: string }> = [
+    { label: 'Data Count', value: String(stat.count) },
+    { label: 'NA Count', value: String(stat.naCount) },
+    { label: 'Failure Count', value: `${stat.failureCount} (${stat.failureRate.toFixed(2)}%)` },
+    { label: 'Max', value: formatValue(stat.max) },
+    { label: 'Min', value: formatValue(stat.min) },
+    { label: 'Mean', value: formatValue(stat.mean) },
+    { label: 'Std. Dev.', value: formatValue(stat.stdDev) },
+    { label: 'Cpu', value: formatIndex(stat.cpu) },
+    { label: 'Cpl', value: formatIndex(stat.cpl) },
+    { label: 'Cpk', value: formatIndex(stat.cpk) },
+    ...(column.upper === null && column.lower === null
+      ? []
+      : [
+          { label: 'Upper', value: formatSpecLimit(column.upper) },
+          { label: 'Lower', value: formatSpecLimit(column.lower) },
+        ]),
+    ...extraStats,
+  ];
+  return rows.map((item, i) => {
+    const y = 29 + i * 20;
+    const w = item.label === 'Cpk' ? 700 : 500;
+    const isFailure = item.label === 'Failure Count' && stat.failureCount > 0;
+    const fill = isFailure ? SPEC_COLOR : TEXT_COLOR;
+    return `<text x="14" y="${y}" font-size="10" font-weight="${w}" fill="${fill}">${escapeXml(item.label)}: ${escapeXml(item.value)}</text>`;
+  });
+}
+
 export function renderHistogramSvg(analysis: ColumnAnalysis, settings: ChartSettings = DEFAULT_CHART_SETTINGS): string {
-  const { column, stat, bins, domain, hasLimits } = analysis;
+  const { column, bins, domain, hasLimits } = analysis;
   const s = settings;
   const [dlo, dhi] = domain;
   // 对齐 OPP：plotSpace X range = bin 域 × expandRangeByFactor(1.05)，两端各留 2.5% 边距
@@ -94,19 +131,6 @@ export function renderHistogramSvg(analysis: ColumnAnalysis, settings: ChartSett
   const yMinorFracs = s.showPercentage ? [0.25, 0.5, 0.75] : [0.2, 0.4, 0.6, 0.8];
   const barY = (val: number): number => PLOT_BOTTOM - (val / yMax) * PLOT_H;
 
-  const stats: Array<{ label: string; value: string }> = [
-    { label: 'Data Count', value: String(stat.count) },
-    { label: 'NA Count', value: String(stat.naCount) },
-    { label: 'Failure Count', value: `${stat.failureCount} (${stat.failureRate.toFixed(2)}%)` },
-    { label: 'Max', value: formatValue(stat.max) },
-    { label: 'Min', value: formatValue(stat.min) },
-    { label: 'Mean', value: formatValue(stat.mean) },
-    { label: 'Std. Dev.', value: formatValue(stat.stdDev) },
-    { label: 'Cpu', value: formatIndex(stat.cpu) },
-    { label: 'Cpl', value: formatIndex(stat.cpl) },
-    { label: 'Cpk', value: formatIndex(stat.cpk) },
-  ];
-
   const parts: string[] = [];
   parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${FONT_FAMILY}">`);
   parts.push(`<rect width="${W}" height="${H}" fill="#ffffff" />`);
@@ -114,15 +138,7 @@ export function renderHistogramSvg(analysis: ColumnAnalysis, settings: ChartSett
   if (s.showTitle) {
     parts.push(`<text x="${W / 2}" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="${TEXT_COLOR}">${escapeXml(column.name + unitSuffix)}</text>`);
   }
-  if (s.showStats) {
-    stats.forEach((item, i) => {
-      const y = 29 + i * 20;
-      const w = item.label === 'Cpk' ? 700 : 500;
-      const isF = item.label === 'Failure Count' && stat.failureCount > 0;
-      const fill = isF ? SPEC_COLOR : TEXT_COLOR;
-      parts.push(`<text x="14" y="${y}" font-size="10" font-weight="${w}" fill="${fill}">${escapeXml(item.label)}: ${escapeXml(item.value)}</text>`);
-    });
-  }
+  parts.push(...renderStatsBlock(analysis, s.showStats));
   // Y 轴标签：垂直旋转，Percentage / Count
   parts.push(`<text x="${PLOT_LEFT - 32}" y="${PLOT_TOP + PLOT_H / 2}" text-anchor="middle" font-size="8" font-weight="600" fill="${TEXT_COLOR}" transform="rotate(-90 ${PLOT_LEFT - 32} ${PLOT_TOP + PLOT_H / 2})">${s.showPercentage ? 'Percentage' : 'Count'}</text>`);
   // Y 网格 + 刻度：实线在刻度处，虚线在每两刻度间均匀加3条浅灰虚线
@@ -207,6 +223,7 @@ export function renderCdfSvg(analysis: ColumnAnalysis, settings: ChartSettings =
   parts.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" font-family="' + FONT_FAMILY + '">');
   parts.push('<rect width="' + W + '" height="' + H + '" fill="#ffffff" />');
   if (s.showTitle) parts.push('<text x="' + (W / 2) + '" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="' + TEXT_COLOR + '">' + escapeXml(analysis.column.name + unitSuffix) + '</text>');
+  parts.push(...renderStatsBlock(analysis, s.showStats));
   yTicks.forEach((t) => {
     const y = yPx(t);
     parts.push('<line x1="' + PLOT_LEFT + '" x2="' + PLOT_RIGHT + '" y1="' + y + '" y2="' + y + '" stroke="' + TEXT_COLOR + '" stroke-opacity="' + (t === 0 ? 0.9 : 0.45) + '" stroke-width="1" />');
@@ -283,6 +300,7 @@ export function renderTimeSeriesSvg(analysis: ColumnAnalysis, settings: ChartSet
   // 填充多边形裁剪到绘图区（与组件一致，避免手动 Range 时填充覆盖统计区）
   parts.push('<defs><clipPath id="ts-plot-clip"><rect x="' + PLOT_LEFT + '" y="' + PLOT_TOP + '" width="' + PLOT_W + '" height="' + PLOT_H + '" /></clipPath></defs>');
   if (s.showTitle) parts.push('<text x="' + (W / 2) + '" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="' + TEXT_COLOR + '">' + escapeXml(analysis.column.name + unitSuffix) + '</text>');
+  parts.push(...renderStatsBlock(analysis, s.showStats));
   yTicks.forEach((t) => {
     const y = mrange(t, yLo, yHi, PLOT_BOTTOM, PLOT_TOP);
     parts.push('<line x1="' + PLOT_LEFT + '" x2="' + PLOT_RIGHT + '" y1="' + y + '" y2="' + y + '" stroke="' + TEXT_COLOR + '" stroke-opacity="0.45" stroke-width="1" />');

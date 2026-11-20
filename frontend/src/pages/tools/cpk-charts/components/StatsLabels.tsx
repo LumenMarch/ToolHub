@@ -6,9 +6,11 @@ import { SPEC_COLOR } from '../lib/layout';
 
 interface StatsLabelsProps {
   stat: ColumnStat;
+  /** 追加在 Cpk 之后的行（例如累加模式下的 Upper / Lower） */
+  extraStats?: Array<{ label: string; value: string }>;
 }
 
-const StatsLabels: React.FC<StatsLabelsProps> = ({ stat }) => {
+const StatsLabels: React.FC<StatsLabelsProps> = ({ stat, extraStats = [] }) => {
   const items: Array<{ label: string; value: string; w: number }> = [
     { label: 'Data Count', value: String(stat.count), w: 500 },
     { label: 'NA Count', value: String(stat.naCount), w: 500 },
@@ -20,6 +22,7 @@ const StatsLabels: React.FC<StatsLabelsProps> = ({ stat }) => {
     { label: 'Cpu', value: formatIndex(stat.cpu), w: 500 },
     { label: 'Cpl', value: formatIndex(stat.cpl), w: 500 },
     { label: 'Cpk', value: formatIndex(stat.cpk), w: 700 },
+    ...extraStats.map((item) => ({ ...item, w: 500 })),
   ];
   return (
     <>

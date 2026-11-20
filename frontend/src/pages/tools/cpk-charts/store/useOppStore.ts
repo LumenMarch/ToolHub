@@ -20,6 +20,17 @@ export interface MergeItem {
 
 type ChartType = 'histogram' | 'cdf' | 'timeseries' | 'correlation';
 
+/** 累加模式的一组规格限；按 `uploadId:测试项` 分组存放，导出报告时也会读取。 */
+export interface AccumulatedLimit {
+  id: string;
+  upper: number | null;
+  lower: number | null;
+}
+
+export const accumulatedKey = (uploadId: string, name: string): string => `${uploadId}:${name}`;
+
+const MAX_ACCUMULATED_LIMITS = 20;
+
 interface OppState {
   fileA: File | null;
   fileB: File | null;
@@ -39,6 +50,8 @@ interface OppState {
   chartType: ChartType;
   settings: ChartSettings;
   excludeFail: boolean;
+  /** 累加模式的规格限组合，键为 `accumulatedKey(uploadId, 测试项)` */
+  accumulatedLimits: Record<string, AccumulatedLimit[]>;
 }
 
 interface OppActions {
@@ -60,6 +73,9 @@ interface OppActions {
   updateSetting: <K extends keyof ChartSettings>(key: K, value: ChartSettings[K]) => void;
   setSettings: (s: ChartSettings) => void;
   setExcludeFail: (v: boolean) => void;
+  addAccumulatedLimit: (key: string, limit: { upper: number | null; lower: number | null }) => void;
+  removeAccumulatedLimit: (key: string, id: string) => void;
+  clearAccumulatedLimits: (key: string) => void;
   /** 迁移自 index.tsx 的 handleFileA/B */
   loadFileA: (file: File) => Promise<void>;
   loadFileB: (file: File) => Promise<void>;
@@ -154,6 +170,7 @@ const initialState: OppState = {
   chartType: 'histogram',
   settings: { ...DEFAULT_CHART_SETTINGS },
   excludeFail: true,
+  accumulatedLimits: {},
 };
 
 export const useOppStore = create<OppStore>()(
@@ -198,6 +215,33 @@ export const useOppStore = create<OppStore>()(
       updateSetting: (key, value) => set((s) => ({ settings: { ...s.settings, [key]: value } })),
       setSettings: (s) => set({ settings: s }),
       setExcludeFail: (v) => set({ excludeFail: v }),
+      addAccumulatedLimit: (key, limit) =>
+        set((s) => {
+          const current = s.accumulatedLimits[key] ?? [];
+          if (current.length >= MAX_ACCUMULATED_LIMITS) return s;
+          if (current.some((e) => e.upper === limit.upper && e.lower === limit.lower)) return s;
+          return {
+            accumulatedLimits: {
+              ...s.accumulatedLimits,
+              [key]: [...current, { ...limit, id: `${Date.now()}-${current.length}` }],
+            },
+          };
+        }),
+      removeAccumulatedLimit: (key, id) =>
+        set((s) => {
+          const current = s.accumulatedLimits[key];
+          if (!current) return s;
+          return {
+            accumulatedLimits: { ...s.accumulatedLimits, [key]: current.filter((e) => e.id !== id) },
+          };
+        }),
+      clearAccumulatedLimits: (key) =>
+        set((s) => {
+          if (!s.accumulatedLimits[key]) return s;
+          const next = { ...s.accumulatedLimits };
+          delete next[key];
+          return { accumulatedLimits: next };
+        }),
       loadFileA: async (file: File) => {
         uploadAbortA?.();
         set({ error: '', fileA: file, loading: true, progress: 0, fileNameA: file.name });
@@ -244,14 +288,28 @@ export const useOppStore = create<OppStore>()(
         uploadAbortA?.();
         uploadAbortA = null;
         const current = get().datasetA;
-        if (current?.uploadId) clearColumnCache(current.uploadId);
+        if (current?.uploadId) {
+          clearColumnCache(current.uploadId);
+          set((s) => ({
+            accumulatedLimits: Object.fromEntries(
+              Object.entries(s.accumulatedLimits).filter(([k]) => !k.startsWith(`${current.uploadId}:`)),
+            ),
+          }));
+        }
         set({ fileA: null, datasetA: null, fileNameA: '', progress: 0 });
       },
       clearFileB: () => {
         uploadAbortB?.();
         uploadAbortB = null;
         const current = get().datasetB;
-        if (current?.uploadId) clearColumnCache(current.uploadId);
+        if (current?.uploadId) {
+          clearColumnCache(current.uploadId);
+          set((s) => ({
+            accumulatedLimits: Object.fromEntries(
+              Object.entries(s.accumulatedLimits).filter(([k]) => !k.startsWith(`${current.uploadId}:`)),
+            ),
+          }));
+        }
         set({ fileB: null, datasetB: null, fileNameB: '', progress: 0 });
       },
       reset: () => {
@@ -262,7 +320,7 @@ export const useOppStore = create<OppStore>()(
         const { datasetA, datasetB } = get();
         if (datasetA?.uploadId) clearColumnCache(datasetA.uploadId);
         if (datasetB?.uploadId) clearColumnCache(datasetB.uploadId);
-        set({ ...initialState, settings: { ...DEFAULT_CHART_SETTINGS } });
+        set({ ...initialState, settings: { ...DEFAULT_CHART_SETTINGS }, accumulatedLimits: {} });
       },
     }),
     {
