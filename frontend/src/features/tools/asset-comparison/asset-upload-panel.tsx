@@ -1,0 +1,388 @@
+import { useEffect, useRef, useState } from 'react'
+import {
+  Alert,
+  App as AntApp,
+  Button,
+  Card,
+  Flex,
+  List,
+  Progress,
+  Space,
+  Tag,
+  Typography,
+  theme,
+} from 'antd'
+import {
+  CheckCircleFilled,
+  CloseCircleFilled,
+  DeleteOutlined,
+  FileExcelOutlined,
+  FolderOpenOutlined,
+  InboxOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+} from '@ant-design/icons'
+import type { AssetComparisonJob, AssetScanResponse } from '../../../api/asset'
+import { createAssetJob, scanAssetFiles } from '../../../api/asset'
+import { readApiErrorMessage } from '../../../api/errors'
+import { useTusUpload } from '../../upload/use-tus-upload'
+import { pickDirectory, supportsDirectoryPicker, supportsWebkitDirectory } from '../../upload/directory-picker'
+import {
+  ASSET_INPUT_FIELDS,
+  ASSET_INPUT_GROUPS,
+  ASSET_REQUIRED_COUNT,
+} from './constants'
+
+const { Text } = Typography
+
+function fileKey(file: File): string {
+  return `${file.name}:${file.size}`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function createClientRequestId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return `asset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+export function AssetUploadPanel({
+  onJobStarted,
+}: {
+  onJobStarted: (job: AssetComparisonJob) => void
+}) {
+  const { token } = theme.useToken()
+  const { message } = AntApp.useApp()
+  const [files, setFiles] = useState<File[]>([])
+  const [scan, setScan] = useState<AssetScanResponse | null>(null)
+  const [currentFile, setCurrentFile] = useState('')
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
+  const [pickingFolder, setPickingFolder] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [error, setError] = useState('')
+  const upload = useTusUpload()
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const filesInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const folderInput = folderInputRef.current
+    if (folderInput) {
+      folderInput.setAttribute('webkitdirectory', '')
+    }
+  }, [])
+
+  const handleInputFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const incoming = Array.from(event.target.files ?? [])
+    const folder = incoming[0]?.webkitRelativePath?.split('/')[0] ?? null
+    addFiles(incoming, folder)
+    event.target.value = ''
+  }
+
+  const handlePickFolder = async () => {
+    if (!supportsDirectoryPicker()) {
+      if (supportsWebkitDirectory()) {
+        folderInputRef.current?.click()
+        return
+      }
+      message.warning('当前浏览器不支持文件夹选择，请拖拽文件夹或使用「选择文件」')
+      return
+    }
+    setPickingFolder(true)
+    setError('')
+    try {
+      const picked = await pickDirectory()
+      if (!picked) return
+      addFiles(picked.files, picked.name)
+    } catch (pickError) {
+      if (pickError instanceof DOMException && pickError.name === 'AbortError') return
+      message.error(pickError instanceof Error ? pickError.message : '选择文件夹失败')
+    } finally {
+      setPickingFolder(false)
+    }
+  }
+
+  const clearScan = () => setScan(null)
+
+  const addFiles = (incoming: File[], folder: string | null = null) => {
+    // 不按扩展名过滤：资产核对的三个配置文件是 .txt，原版目录选择也上传全部文件。
+    // 后端只按文件名匹配，类型判断由解析阶段负责。
+    const accepted = incoming.filter((file) => file.name.length > 0)
+    if (accepted.length === 0) return
+    if (folder) setSelectedFolder(folder)
+    setFiles((previous) => {
+      const existing = new Set(previous.map(fileKey))
+      const fresh: File[] = []
+      for (const file of accepted) {
+        const key = fileKey(file)
+        if (existing.has(key)) continue
+        existing.add(key)
+        fresh.push(file)
+      }
+      return [...previous, ...fresh]
+    })
+    clearScan()
+  }
+
+  const removeFile = (key: string) => {
+    setFiles((previous) => previous.filter((file) => fileKey(file) !== key))
+    clearScan()
+  }
+
+  const handleUploadAndScan = async () => {
+    if (files.length === 0 || scanning) return
+    setScanning(true)
+    setError('')
+    setScan(null)
+    upload.reset()
+    try {
+      const uploadIds: string[] = []
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index]
+        setCurrentFile(`${index + 1}/${files.length} · ${file.name}`)
+        uploadIds.push(await upload.upload(file))
+      }
+      const scanResponse = await scanAssetFiles(uploadIds)
+      setScan(scanResponse)
+      const matched = ASSET_INPUT_FIELDS.filter((field) => scanResponse.data[field.key]).length
+      if (matched === ASSET_REQUIRED_COUNT) {
+        message.success(`已匹配全部 ${ASSET_REQUIRED_COUNT} 个数据源`)
+      } else {
+        message.warning(`已匹配 ${matched}/${ASSET_REQUIRED_COUNT} 个数据源，请补齐缺失文件后重新上传`)
+      }
+    } catch (uploadError) {
+      setError(
+        readApiErrorMessage(uploadError) ??
+          (uploadError instanceof Error ? uploadError.message : '上传或扫描失败'),
+      )
+    } finally {
+      setScanning(false)
+      setCurrentFile('')
+    }
+  }
+
+  const matchedCount = scan
+    ? ASSET_INPUT_FIELDS.filter((field) => scan.data[field.key]).length
+    : 0
+  const allMatched = matchedCount === ASSET_REQUIRED_COUNT
+
+  const handleStart = async () => {
+    if (!scan || !allMatched || starting) return
+    setStarting(true)
+    setError('')
+    try {
+      const job = await createAssetJob(scan.scan_id, createClientRequestId())
+      message.success(job.reused ? '已恢复相同的核对任务' : '核对任务已创建')
+      onJobStarted(job)
+    } catch (startError) {
+      setError(readApiErrorMessage(startError) ?? '创建核对任务失败')
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  return (
+    <Flex vertical gap={14}>
+      <Card
+        variant="outlined"
+        title="1. 准备数据源"
+        extra={
+          <Space size={6} wrap>
+            <Tag bordered={false}>{ASSET_REQUIRED_COUNT} 个必需数据源</Tag>
+            {selectedFolder ? <Tag color="blue" bordered={false}>文件夹：{selectedFolder}</Tag> : null}
+          </Space>
+        }
+      >
+        <Flex vertical gap={14}>
+          <Alert
+            type="info"
+            showIcon
+            message="选择一个包含全部数据源的文件夹"
+            description="文件名需要包含财务、SFC、Notes、客户及对应年月；部门、保管人和 DRI 配置文件按关键词匹配。"
+          />
+
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleInputFiles}
+          />
+          <input
+            ref={filesInputRef}
+            type="file"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleInputFiles}
+          />
+          <Flex gap={10} wrap>
+            <Button
+              icon={<FolderOpenOutlined />}
+              loading={pickingFolder}
+              disabled={scanning}
+              onClick={() => void handlePickFolder()}
+            >
+              选择文件夹
+            </Button>
+            <Button
+              icon={<PlusOutlined />}
+              disabled={scanning}
+              onClick={() => filesInputRef.current?.click()}
+            >
+              选择文件
+            </Button>
+            <Button
+              type="primary"
+              icon={<InboxOutlined />}
+              loading={scanning}
+              disabled={files.length === 0}
+              onClick={() => void handleUploadAndScan()}
+            >
+              上传并扫描
+            </Button>
+            <Button
+              onClick={() => {
+                setFiles([])
+                setSelectedFolder(null)
+                setScan(null)
+                setError('')
+                upload.reset()
+              }}
+              disabled={scanning || files.length === 0}
+            >
+              清空
+            </Button>
+          </Flex>
+
+          {error ? (
+            <Alert type="error" showIcon closable message={error} onClose={() => setError('')} />
+          ) : null}
+
+          {scanning ? (
+            <div>
+              <Flex justify="space-between" align="center" style={{ marginBottom: 4 }}>
+                <Text type="secondary">{currentFile || '准备上传…'}</Text>
+                <Text type="secondary">
+                  {upload.phase === 'hashing'
+                    ? '计算摘要'
+                    : upload.phase === 'cache-checking'
+                      ? '检查缓存'
+                      : upload.phase === 'completed'
+                        ? '已上传'
+                        : upload.phase === 'uploading' || upload.phase === 'confirming'
+                          ? `${upload.progress}%`
+                          : ''}
+                </Text>
+              </Flex>
+              <Progress
+                percent={upload.progress}
+                status={upload.phase === 'error' ? 'exception' : 'active'}
+                strokeColor={token.colorPrimary}
+              />
+            </div>
+          ) : null}
+
+          {files.length > 0 ? (
+            <List
+              size="small"
+              dataSource={files}
+              style={{ maxHeight: 260, overflowY: 'auto' }}
+              renderItem={(file) => (
+                <List.Item
+                  style={{ paddingInline: 0 }}
+                  actions={[
+                    <Button
+                      key="remove"
+                      type="text"
+                      size="small"
+                      danger
+                      aria-label="移除文件"
+                      icon={<DeleteOutlined />}
+                      disabled={scanning}
+                      onClick={() => removeFile(fileKey(file))}
+                    />,
+                  ]}
+                >
+                  <List.Item.Meta
+                    avatar={<FileExcelOutlined style={{ color: token.colorSuccess }} />}
+                    title={<Text style={{ fontSize: 12 }} ellipsis>{file.name}</Text>}
+                    description={<Text type="secondary" style={{ fontSize: 11 }}>{formatBytes(file.size)}</Text>}
+                  />
+                </List.Item>
+              )}
+            />
+          ) : null}
+
+          {scan ? (
+            <Flex vertical gap={12}>
+              <Alert
+                type={allMatched ? 'success' : 'warning'}
+                showIcon
+                message={`已匹配 ${matchedCount} / ${ASSET_REQUIRED_COUNT} 个数据源`}
+                description={
+                  allMatched
+                    ? '全部数据源已就绪，可以创建核对任务。'
+                    : '缺失项已在下方标红。请补齐文件后重新选择完整文件夹并上传扫描。'
+                }
+              />
+              <Flex gap={12} wrap>
+                {ASSET_INPUT_GROUPS.map((group) => (
+                  <Card
+                    key={group.key}
+                    size="small"
+                    variant="outlined"
+                    title={group.label}
+                    extra={<Text type="secondary" style={{ fontSize: 10 }}>{group.hint}</Text>}
+                    style={{ flex: '1 1 220px', minWidth: 220 }}
+                    styles={{ body: { padding: '8px 12px' } }}
+                  >
+                    <Flex vertical gap={6}>
+                      {group.fields.map((field) => {
+                        const filename = scan.data[field.key]
+                        return (
+                          <Flex key={field.key} align="center" gap={6}>
+                            {filename ? (
+                              <CheckCircleFilled style={{ color: token.colorSuccess, fontSize: 12 }} />
+                            ) : (
+                              <CloseCircleFilled style={{ color: token.colorError, fontSize: 12 }} />
+                            )}
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <Text style={{ fontSize: 11, display: 'block' }}>{field.label}</Text>
+                              <Text
+                                type={filename ? 'secondary' : 'danger'}
+                                ellipsis
+                                style={{ fontSize: 10 }}
+                              >
+                                {filename || '缺失'}
+                              </Text>
+                            </div>
+                          </Flex>
+                        )
+                      })}
+                    </Flex>
+                  </Card>
+                ))}
+              </Flex>
+              <Flex justify="flex-end">
+                <Button
+                  type="primary"
+                  size="large"
+                  icon={<PlayCircleOutlined />}
+                  disabled={!allMatched}
+                  loading={starting}
+                  onClick={() => void handleStart()}
+                >
+                  开始核对
+                </Button>
+              </Flex>
+            </Flex>
+          ) : null}
+        </Flex>
+      </Card>
+    </Flex>
+  )
+}

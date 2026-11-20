@@ -173,6 +173,10 @@ class LlmStatusResponse(BaseModel):
     lastError: str | None
     model: str
     provider: str
+    baseUrl: str = ""
+    source: Literal["env", "db"] = "env"
+    apiKeySet: bool = False
+    apiKeyMask: str = ""
     lastProbe: dict[str, object] | None
     modelListed: bool | None
     supportedProviders: list[str]

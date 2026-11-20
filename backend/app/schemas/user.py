@@ -99,6 +99,8 @@ class UserResponse(UserBase):
     created_at: datetime
     last_login_at: datetime | None
     roles: list[str] = []
+    # 角色 ID；管理台编辑角色时直接使用，避免按名称反查
+    role_ids: list[int] = []
     permissions: list[str] = []
     # 用户直接持有的工具权限 codename（不含角色授予的），按 codename 排序；
     # 前端据此初始化"自定义工具权限"勾选区

@@ -14,6 +14,7 @@ from app.crud.crud_audit_log import (
 )
 from app.crud.crud_user import count_users
 from app.models.user import User
+from app.seed import TOOL_IDS
 
 router = APIRouter()
 
@@ -51,9 +52,9 @@ def get_overview(
         .select_from(User)
         .where(User.last_login_at.isnot(None), User.last_login_at >= seven_days_ago)
     )
-    from app.models.tool_meta import ToolMeta
-
-    total_tools = db.scalar(select(func.count()).select_from(ToolMeta))
+    # 工具目录的代码源是静态 TOOL_IDS；ToolMeta 只是覆盖层，
+    # 全新库还没有覆盖行时也应显示真实工具数量。
+    total_tools = len(TOOL_IDS)
     audit_logs_today = count_logs_since(db, today_start)
 
     return OverviewStats(

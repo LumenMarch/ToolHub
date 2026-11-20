@@ -12,3 +12,5 @@ backend/toolhub.db-*
 **/__pycache__
 **/*.pyc
 .env
+
+design-demos
